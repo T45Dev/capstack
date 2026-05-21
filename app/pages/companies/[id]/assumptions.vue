@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Save, RefreshCw, RotateCcw } from 'lucide-vue-next'
+import { Save, RefreshCw, RotateCcw, ChevronUp, ChevronDown } from 'lucide-vue-next'
 import { fmtUSD, fmtPct, fmtShares, fmtPricePerShare } from '~/utils/format'
 
 const route = useRoute()
@@ -77,6 +77,29 @@ const seriesShortcuts = [
   'Series Seed', 'Series A', 'Series A-1', 'Series A-2', 'Series A-3', 'Series A-4',
   'Series B', 'Series C', 'Bridge',
 ]
+
+// ---------- Sortable + resizable per-stakeholder dilution table ----------
+const dilutionTable = useSortableTable({
+  key: 'capstack:dilution',
+  defaultSort: { key: 'postShares', dir: 'desc' },
+  columns: [
+    { key: 'name', label: 'Stakeholder', width: 240, sortable: true, align: 'left' },
+    { key: 'preShares', label: 'Pre shares', width: 110, sortable: true, align: 'right' },
+    { key: 'cnShares', label: 'CN conv.', width: 100, sortable: true, align: 'right' },
+    { key: 'postShares', label: 'Post shares', width: 120, sortable: true, align: 'right' },
+    { key: 'prePct', label: 'Pre %', width: 80, sortable: true, align: 'right' },
+    { key: 'postPct', label: 'Post %', width: 80, sortable: true, align: 'right' },
+    { key: 'delta', label: 'Δ', width: 80, sortable: true, align: 'right' },
+  ],
+})
+
+const sortedDilution = computed(() => {
+  const rows = (compute.value?.dilution || []).map((r: any) => ({
+    ...r,
+    delta: r.postPct - r.prePct,
+  }))
+  return dilutionTable.applySort(rows)
+})
 </script>
 
 <template>
@@ -166,7 +189,7 @@ const seriesShortcuts = [
           </div>
         </UiCard>
 
-        <UiCard v-if="compute?.round.cnDetails?.length" title="Convertible-note conversion detail">
+        <UiCard v-if="compute?.round.cnDetails?.length" title="Convertible-note conversion detail" subtitle="Notes that convert at this round">
           <div class="overflow-x-auto -mx-4">
             <table class="w-full text-sm">
               <thead class="text-left text-ink-400 text-xs uppercase tracking-wide">
@@ -195,6 +218,38 @@ const seriesShortcuts = [
           </div>
         </UiCard>
 
+        <UiCard v-if="compute?.round.deferred?.details?.length" title="Deferred CN obligations"
+                :subtitle="`Bought now, convert later — projected at the round PPS (${fmtPricePerShare(compute.round.pricePerShare)})`">
+          <div class="overflow-x-auto -mx-4">
+            <table class="w-full text-sm">
+              <thead class="text-left text-ink-400 text-xs uppercase tracking-wide">
+                <tr class="border-b border-ink-700">
+                  <th class="px-4 py-2">Holder</th>
+                  <th class="px-3 py-2 text-right">Dollars</th>
+                  <th class="px-3 py-2 text-right">Projected shares</th>
+                </tr>
+              </thead>
+              <tbody class="num">
+                <tr v-for="d in compute.round.deferred.details" :key="d.id" class="border-b border-ink-800/80">
+                  <td class="px-4 py-2 text-ink-100">{{ d.stakeholderName }}</td>
+                  <td class="px-3 py-2 text-right">{{ fmtUSD(d.dollars) }}</td>
+                  <td class="px-3 py-2 text-right">{{ fmtShares(d.shares) }}</td>
+                </tr>
+                <tr class="border-t border-ink-700 font-semibold text-ink-200">
+                  <td class="px-4 py-2">Total deferred</td>
+                  <td class="px-3 py-2 text-right">{{ fmtUSD(compute.round.deferred.totalDollars) }}</td>
+                  <td class="px-3 py-2 text-right">{{ fmtShares(compute.round.deferred.projectedSharesAtRoundPPS) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="mt-3 text-xs text-ink-500">
+            These notes do NOT add to post-round FDS or post-money — they remain outstanding obligations.
+            To include them as Series-B conversions instead, flip "Converts at round?" to yes on the
+            <NuxtLink :to="`/companies/${id}/cap-table`" class="text-accent-400 hover:text-accent-300">Cap table</NuxtLink> page.
+          </p>
+        </UiCard>
+
         <UiCard v-if="compute?.round.warnings?.length" title="Warnings">
           <ul class="space-y-1 text-xs text-amber-200 list-disc pl-5">
             <li v-for="(w, i) in compute.round.warnings" :key="i">{{ w }}</li>
@@ -203,30 +258,47 @@ const seriesShortcuts = [
       </div>
     </div>
 
-    <UiCard v-if="compute?.dilution?.length" class="mt-4" title="Per-stakeholder dilution" :subtitle="`${compute.dilution.length} stakeholders`">
+    <UiCard v-if="compute?.dilution?.length" class="mt-4" title="Per-stakeholder dilution" :subtitle="`${compute.dilution.length} stakeholders — click headers to sort, drag edges to resize`">
       <div class="overflow-x-auto -mx-4">
-        <table class="w-full text-sm">
+        <table class="text-sm border-separate" style="border-spacing: 0; table-layout: fixed;">
+          <colgroup>
+            <col v-for="col in dilutionTable.cols" :key="col.key" :style="{ width: col.width + 'px' }" />
+          </colgroup>
           <thead class="text-left text-ink-400 text-xs uppercase tracking-wide">
             <tr class="border-b border-ink-700">
-              <th class="px-4 py-2">Stakeholder</th>
-              <th class="px-3 py-2 text-right">Pre shares</th>
-              <th class="px-3 py-2 text-right">CN conv.</th>
-              <th class="px-3 py-2 text-right">Post shares</th>
-              <th class="px-3 py-2 text-right">Pre %</th>
-              <th class="px-3 py-2 text-right">Post %</th>
-              <th class="px-3 py-2 text-right">Δ</th>
+              <th
+                v-for="col in dilutionTable.cols"
+                :key="col.key"
+                class="relative px-3 py-2 border-b border-ink-700 select-none"
+                :class="[
+                  col.align === 'right' ? 'text-right' : (col.align === 'center' ? 'text-center' : 'text-left'),
+                  col.sortable ? 'cursor-pointer hover:text-ink-200' : '',
+                ]"
+                @click="col.sortable ? dilutionTable.toggleSort(col.key) : null"
+              >
+                <span class="inline-flex items-center gap-1" :class="col.align === 'right' ? 'flex-row-reverse' : ''">
+                  {{ col.label }}
+                  <ChevronUp v-if="dilutionTable.sort.key === col.key && dilutionTable.sort.dir === 'asc'" :size="11" />
+                  <ChevronDown v-if="dilutionTable.sort.key === col.key && dilutionTable.sort.dir === 'desc'" :size="11" />
+                </span>
+                <span
+                  class="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-accent-500/50"
+                  @mousedown.prevent.stop="dilutionTable.startResize($event, col.key)"
+                  @click.stop
+                />
+              </th>
             </tr>
           </thead>
           <tbody class="num">
-            <tr v-for="r in compute.dilution" :key="r.stakeholderId" class="border-b border-ink-800/80 hover:bg-ink-800/40">
-              <td class="px-4 py-2 font-medium text-ink-100">{{ r.name }}</td>
-              <td class="px-3 py-2 text-right">{{ fmtShares(r.preShares) }}</td>
-              <td class="px-3 py-2 text-right">{{ r.cnShares ? fmtShares(r.cnShares) : '—' }}</td>
-              <td class="px-3 py-2 text-right font-medium">{{ fmtShares(r.postShares) }}</td>
-              <td class="px-3 py-2 text-right text-ink-400">{{ fmtPct(r.prePct, 2) }}</td>
-              <td class="px-3 py-2 text-right">{{ fmtPct(r.postPct, 2) }}</td>
-              <td class="px-3 py-2 text-right" :class="r.postPct - r.prePct < 0 ? 'text-red-400' : 'text-emerald-400'">
-                {{ (r.postPct - r.prePct >= 0 ? '+' : '') + fmtPct(r.postPct - r.prePct, 2) }}
+            <tr v-for="r in sortedDilution" :key="r.stakeholderId" class="hover:bg-ink-800/40">
+              <td class="px-3 py-2 font-medium text-ink-100 truncate border-b border-ink-800/80" :title="r.name">{{ r.name }}</td>
+              <td class="px-3 py-2 text-right border-b border-ink-800/80">{{ fmtShares(r.preShares) }}</td>
+              <td class="px-3 py-2 text-right border-b border-ink-800/80">{{ r.cnShares ? fmtShares(r.cnShares) : '—' }}</td>
+              <td class="px-3 py-2 text-right font-medium border-b border-ink-800/80">{{ fmtShares(r.postShares) }}</td>
+              <td class="px-3 py-2 text-right text-ink-400 border-b border-ink-800/80">{{ fmtPct(r.prePct, 2) }}</td>
+              <td class="px-3 py-2 text-right border-b border-ink-800/80">{{ fmtPct(r.postPct, 2) }}</td>
+              <td class="px-3 py-2 text-right border-b border-ink-800/80" :class="r.delta < 0 ? 'text-red-400' : 'text-emerald-400'">
+                {{ (r.delta >= 0 ? '+' : '') + fmtPct(r.delta, 2) }}
               </td>
             </tr>
           </tbody>

@@ -16,6 +16,7 @@ export interface ConvertibleNote {
   interestAccrued: number
   conversionDiscount: number
   valuationCap?: number | null
+  convertsAtRound?: boolean   // default true; false = deferred to a later event
 }
 
 export type CNBasis = 'best' | 'discount' | 'cap' | 'round_price'
@@ -34,7 +35,13 @@ export interface CNDetail {
   dollars: number          // principal + accrued interest
   convPrice: number        // price actually used to convert
   shares: number           // resulting shares
-  basisApplied: 'round' | 'discount' | 'cap'
+  basisApplied: 'round' | 'discount' | 'cap' | 'deferred'
+}
+
+export interface DeferredCNSummary {
+  totalDollars: number
+  projectedSharesAtRoundPPS: number
+  details: CNDetail[]
 }
 
 export interface RoundResult {
@@ -46,7 +53,8 @@ export interface RoundResult {
   newPreferredShares: number
   cnConvertedShares: number
   cnConvertedDollars: number
-  cnDetails: CNDetail[]
+  cnDetails: CNDetail[]          // notes that convert at this round
+  deferred: DeferredCNSummary    // notes that do NOT convert at this round
   postRoundFDS: number
   impliedPostFDSValuation: number  // PPS × postRoundFDS (informational)
   warnings: string[]
@@ -64,11 +72,31 @@ export function computeRound(a: RoundInputs): RoundResult {
   let cnConvertedShares = 0
   let cnConvertedDollars = 0
   const cnDetails: CNDetail[] = []
+  const deferred: DeferredCNSummary = { totalDollars: 0, projectedSharesAtRoundPPS: 0, details: [] }
 
   for (const cn of a.convertibles) {
     const total = (cn.principal || 0) + (cn.interestAccrued || 0)
+    if (total <= 0) continue
+
+    // Deferred notes: don't add to post-round FDS or post-money. Project shares
+    // at the round PPS for reference (matches the user-side worksheet convention).
+    if (cn.convertsAtRound === false) {
+      deferred.totalDollars += total
+      const projected = pricePerShare > 0 ? total / pricePerShare : 0
+      deferred.projectedSharesAtRoundPPS += projected
+      deferred.details.push({
+        id: cn.id,
+        stakeholderName: cn.stakeholderName,
+        dollars: total,
+        convPrice: pricePerShare,
+        shares: projected,
+        basisApplied: 'deferred',
+      })
+      continue
+    }
+
     cnConvertedDollars += total
-    if (pricePerShare <= 0 || total <= 0) continue
+    if (pricePerShare <= 0) continue
 
     const candidates: Array<{ label: 'round' | 'discount' | 'cap'; price: number }> = []
     candidates.push({ label: 'round', price: pricePerShare })
@@ -81,14 +109,12 @@ export function computeRound(a: RoundInputs): RoundResult {
 
     let chosen = candidates[0]
     if (basis === 'best') {
-      // Lowest price = most shares for the holder.
       chosen = candidates.reduce((acc, c) => (c.price < acc.price ? c : acc), candidates[0])
     } else if (basis === 'discount') {
       const d = candidates.find(c => c.label === 'discount')
       chosen = d ?? candidates[0]
     } else if (basis === 'cap') {
       const cap = candidates.find(c => c.label === 'cap')
-      // Capped notes still benefit from the round price if it's lower
       if (cap) chosen = cap.price < pricePerShare ? cap : { label: 'round', price: pricePerShare }
     }
 
@@ -118,6 +144,7 @@ export function computeRound(a: RoundInputs): RoundResult {
     cnConvertedShares,
     cnConvertedDollars,
     cnDetails,
+    deferred,
     postRoundFDS,
     impliedPostFDSValuation,
     warnings,

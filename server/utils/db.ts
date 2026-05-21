@@ -101,6 +101,7 @@ function migrate(d: Database.Database): void {
       maturity_date TEXT,
       valuation_cap REAL,
       conversion_discount REAL DEFAULT 0,
+      converts_at_round INTEGER NOT NULL DEFAULT 1,
       status TEXT NOT NULL DEFAULT 'outstanding'
     );
     CREATE INDEX IF NOT EXISTS idx_convertibles_company ON convertibles(company_id);
@@ -152,6 +153,7 @@ function migrate(d: Database.Database): void {
   }
 
   ensureColumn('assumptions', 'pre_round_fds', 'INTEGER')
+  ensureColumn('convertibles', 'converts_at_round', 'INTEGER NOT NULL DEFAULT 1')
 }
 
 export function reset(): void {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Upload, Filter } from 'lucide-vue-next'
+import { Upload, Filter, Plus, Edit3, Trash2 } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtUSD, fmtDate, fmtPricePerShare } from '~/utils/format'
 
 const route = useRoute()
@@ -9,9 +9,9 @@ interface ShareClassRow { id: string; code: string; name: string; kind: string; 
 interface Stakeholder { id: string; name: string; type: string | null }
 interface Holding { stakeholder_id: string; share_class_id: string; shares: number }
 interface Grant { id: string; stakeholder_id: string | null; recipient_name: string; quantity: number; status: string }
-interface Convertible { id: string; stakeholder_name: string; principal: number; interest_accrued: number; interest_rate: number; issue_date: string | null; maturity_date: string | null; valuation_cap: number | null; conversion_discount: number }
+interface Convertible { id: string; stakeholder_name: string; principal: number; interest_accrued: number; interest_rate: number; issue_date: string | null; maturity_date: string | null; valuation_cap: number | null; conversion_discount: number; converts_at_round: number }
 
-const { data } = await useFetch<{ share_classes: ShareClassRow[]; stakeholders: Stakeholder[]; holdings: Holding[]; grants: Grant[]; convertibles: Convertible[]; pools: any[] }>(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => ({ share_classes: [], stakeholders: [], holdings: [], grants: [], convertibles: [], pools: [] } as any) })
+const { data, refresh } = await useFetch<{ share_classes: ShareClassRow[]; stakeholders: Stakeholder[]; holdings: Holding[]; grants: Grant[]; convertibles: Convertible[]; pools: any[] }>(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => ({ share_classes: [], stakeholders: [], holdings: [], grants: [], convertibles: [], pools: [] } as any) })
 
 const query = ref('')
 
@@ -67,6 +67,81 @@ const totals = computed(() => {
 const poolAuthorized = computed(() => data.value!.pools.reduce((a: number, p: any) => a + (p.authorized || 0), 0))
 const poolAvailable = computed(() => Math.max(0, poolAuthorized.value - totals.value.totalOptions - data.value!.grants.filter((g: any) => g.status === 'proposed').reduce((a: number, g: any) => a + g.quantity, 0)))
 const fdsIncludingPool = computed(() => totals.value.fds + poolAvailable.value)
+
+// ---------- Convertible-note CRUD ----------
+const cnModalOpen = ref(false)
+const cnEditing = ref<Convertible | null>(null)
+const cnSaving = ref(false)
+const cnForm = reactive({
+  stakeholder_name: '',
+  principal: 0,
+  interest_accrued: 0,
+  interest_rate: 0.08,
+  valuation_cap: null as number | null,
+  conversion_discount: 0,
+  issue_date: '',
+  maturity_date: '',
+  converts_at_round: true,
+})
+
+function resetCnForm() {
+  cnForm.stakeholder_name = ''
+  cnForm.principal = 0
+  cnForm.interest_accrued = 0
+  cnForm.interest_rate = 0.08
+  cnForm.valuation_cap = null
+  cnForm.conversion_discount = 0
+  cnForm.issue_date = ''
+  cnForm.maturity_date = ''
+  cnForm.converts_at_round = true
+  cnEditing.value = null
+}
+
+function openCnModal(cn?: Convertible) {
+  if (cn) {
+    cnEditing.value = cn
+    cnForm.stakeholder_name = cn.stakeholder_name
+    cnForm.principal = cn.principal
+    cnForm.interest_accrued = cn.interest_accrued
+    cnForm.interest_rate = cn.interest_rate
+    cnForm.valuation_cap = cn.valuation_cap
+    cnForm.conversion_discount = cn.conversion_discount
+    cnForm.issue_date = cn.issue_date || ''
+    cnForm.maturity_date = cn.maturity_date || ''
+    cnForm.converts_at_round = !!cn.converts_at_round
+  } else {
+    resetCnForm()
+  }
+  cnModalOpen.value = true
+}
+
+async function saveCn() {
+  if (cnSaving.value) return
+  cnSaving.value = true
+  try {
+    if (cnEditing.value) {
+      await $fetch(`/api/convertibles/${cnEditing.value.id}`, { method: 'PATCH', body: cnForm })
+    } else {
+      await $fetch(`/api/companies/${id.value}/convertibles`, { method: 'POST', body: cnForm })
+    }
+    cnModalOpen.value = false
+    await refresh()
+  } finally {
+    cnSaving.value = false
+  }
+}
+
+async function toggleConvertsAtRound(cn: Convertible) {
+  const next = !cn.converts_at_round
+  await $fetch(`/api/convertibles/${cn.id}`, { method: 'PATCH', body: { converts_at_round: next } })
+  await refresh()
+}
+
+async function deleteCn(cn: Convertible) {
+  if (!confirm(`Delete the ${cn.stakeholder_name} convertible (${fmtUSD(cn.principal)})?`)) return
+  await $fetch(`/api/convertibles/${cn.id}`, { method: 'DELETE' })
+  await refresh()
+}
 </script>
 
 <template>
@@ -177,8 +252,14 @@ const fdsIncludingPool = computed(() => totals.value.fds + poolAvailable.value)
         </div>
       </UiCard>
 
-      <UiCard v-if="data.convertibles.length" padded class="mt-4" title="Convertible notes" :subtitle="`${data.convertibles.length} outstanding`">
-        <div class="overflow-x-auto -mx-4">
+      <UiCard padded class="mt-4" title="Convertible notes" :subtitle="`${data.convertibles.length} outstanding`">
+        <template #header>
+          <UiButton size="sm" variant="primary" @click="openCnModal()"><Plus :size="12" /> Add convertible</UiButton>
+        </template>
+        <div v-if="!data.convertibles.length" class="text-sm text-ink-500 px-1 py-2">
+          No convertibles. Click "Add convertible" to enter a note manually (e.g. a bridge note bought between rounds).
+        </div>
+        <div v-else class="overflow-x-auto -mx-4">
           <table class="w-full text-sm">
             <thead class="text-left text-ink-400 text-xs uppercase tracking-wide">
               <tr class="border-b border-ink-700">
@@ -191,6 +272,8 @@ const fdsIncludingPool = computed(() => totals.value.fds + poolAvailable.value)
                 <th class="px-3 py-2 text-right">Discount</th>
                 <th class="px-3 py-2">Issue</th>
                 <th class="px-3 py-2">Maturity</th>
+                <th class="px-3 py-2">Converts at round?</th>
+                <th class="px-3 py-2"></th>
               </tr>
             </thead>
             <tbody class="num">
@@ -204,11 +287,52 @@ const fdsIncludingPool = computed(() => totals.value.fds + poolAvailable.value)
                 <td class="px-3 py-2 text-right text-ink-300">{{ cn.conversion_discount ? fmtPct(cn.conversion_discount, 0) : '—' }}</td>
                 <td class="px-3 py-2 text-ink-400">{{ fmtDate(cn.issue_date) }}</td>
                 <td class="px-3 py-2 text-ink-400">{{ fmtDate(cn.maturity_date) }}</td>
+                <td class="px-3 py-2">
+                  <button
+                    class="text-xs px-2 py-1 rounded-md border transition-colors"
+                    :class="cn.converts_at_round ? 'border-emerald-700 bg-emerald-900/30 text-emerald-300 hover:bg-emerald-900/50' : 'border-amber-700 bg-amber-900/30 text-amber-300 hover:bg-amber-900/50'"
+                    @click="toggleConvertsAtRound(cn)"
+                  >
+                    {{ cn.converts_at_round ? 'Yes — converts now' : 'No — deferred' }}
+                  </button>
+                </td>
+                <td class="px-3 py-2 text-right whitespace-nowrap">
+                  <button class="text-ink-500 hover:text-ink-100 px-1.5 py-1" @click="openCnModal(cn)"><Edit3 :size="14" /></button>
+                  <button class="text-ink-500 hover:text-red-400 px-1.5 py-1" @click="deleteCn(cn)"><Trash2 :size="14" /></button>
+                </td>
               </tr>
             </tbody>
           </table>
         </div>
       </UiCard>
+
+      <!-- Convertible create/edit modal -->
+      <div v-if="cnModalOpen" class="fixed inset-0 z-40 bg-ink-900/80 backdrop-blur-sm grid place-items-center p-4" @click.self="cnModalOpen = false">
+        <div class="w-full max-w-lg rounded-lg border border-ink-700 bg-ink-800 p-5">
+          <h2 class="text-base font-semibold text-ink-100">{{ cnEditing ? 'Edit convertible' : 'Add convertible' }}</h2>
+          <p class="text-xs text-ink-400 mt-1">For bridge notes purchased outside of a Carta export, or notes that convert at a different time than the modelled round.</p>
+          <div class="mt-4 grid grid-cols-2 gap-3">
+            <UiInput v-model="cnForm.stakeholder_name" label="Holder name" placeholder="VCT Investments, Inc." class="col-span-2" />
+            <UiInput v-model="cnForm.principal" type="number" label="Principal" prefix="$" step="1000" />
+            <UiInput v-model="cnForm.interest_accrued" type="number" label="Interest accrued" prefix="$" step="1000" />
+            <UiInput v-model="cnForm.interest_rate" type="number" label="Interest rate" suffix="%" step="0.5" hint="As decimal: 0.08 = 8%" />
+            <UiInput v-model="cnForm.valuation_cap" type="number" label="Valuation cap" prefix="$" step="1000000" />
+            <UiInput v-model="cnForm.conversion_discount" type="number" label="Conversion discount" suffix="%" step="0.05" hint="As decimal: 0.15 = 15%" />
+            <UiInput v-model="cnForm.issue_date" type="date" label="Issue date" />
+            <UiInput v-model="cnForm.maturity_date" type="date" label="Maturity date" />
+            <label class="col-span-2 flex items-center gap-2 text-sm text-ink-200 mt-1">
+              <input type="checkbox" v-model="cnForm.converts_at_round" class="rounded bg-ink-800 border-ink-600 text-accent-500" />
+              <span><b>Converts at the modelled round.</b> Uncheck for a deferred note — won't add to post-round FDS; we'll still project its shares at the round PPS for reference.</span>
+            </label>
+          </div>
+          <div class="mt-5 flex justify-end gap-2">
+            <UiButton variant="ghost" @click="cnModalOpen = false">Cancel</UiButton>
+            <UiButton variant="primary" :disabled="!cnForm.stakeholder_name?.trim() || !cnForm.principal || cnSaving" @click="saveCn">
+              {{ cnSaving ? 'Saving…' : (cnEditing ? 'Update' : 'Add convertible') }}
+            </UiButton>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>

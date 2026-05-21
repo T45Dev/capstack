@@ -24,7 +24,8 @@ export default defineEventHandler((event) => {
     : fdsFromCapTable
 
   const cnRows = db().prepare(`
-    SELECT id, stakeholder_id, stakeholder_name, principal, interest_accrued, conversion_discount, valuation_cap
+    SELECT id, stakeholder_id, stakeholder_name, principal, interest_accrued,
+           conversion_discount, valuation_cap, converts_at_round
     FROM convertibles WHERE company_id = ? AND status = 'outstanding'
   `).all(companyId) as any[]
   const convertibles: ConvertibleNote[] = cnRows.map(c => ({
@@ -34,6 +35,7 @@ export default defineEventHandler((event) => {
     interestAccrued: c.interest_accrued || 0,
     conversionDiscount: c.conversion_discount || 0,
     valuationCap: c.valuation_cap,
+    convertsAtRound: c.converts_at_round !== 0,
   }))
 
   const inputs: RoundInputs = {
