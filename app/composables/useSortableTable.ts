@@ -1,7 +1,7 @@
 // Lightweight client-side sort + resize state for a table.
 //
 //   const cols = useSortableTable({
-//     key: 'capstack:dilution',           // localStorage namespace for resize widths
+//     key: 'capstack:dilution',           // localStorage namespace for widths + sort
 //     defaultSort: { key: 'postShares', dir: 'desc' },
 //     columns: [
 //       { key: 'name', label: 'Stakeholder', width: 200, sortable: true, align: 'left' },
@@ -23,7 +23,7 @@ export interface SortableCol {
 }
 
 export interface SortableTableOpts {
-  key: string                                       // localStorage namespace
+  key: string
   defaultSort?: { key: string; dir: 'asc' | 'desc' }
   columns: SortableCol[]
 }
@@ -33,16 +33,21 @@ export function useSortableTable(opts: SortableTableOpts) {
   const sort = reactive({
     key: opts.defaultSort?.key || cols[0].key,
     dir: opts.defaultSort?.dir || 'asc',
-  })
+  }) as { key: string; dir: 'asc' | 'desc' }
 
-  // Restore widths from localStorage
+  // Restore widths + sort from localStorage
   if (typeof window !== 'undefined') {
     try {
-      const saved = JSON.parse(localStorage.getItem(`${opts.key}:widths`) || 'null') as Record<string, number> | null
-      if (saved) {
+      const savedW = JSON.parse(localStorage.getItem(`${opts.key}:widths`) || 'null') as Record<string, number> | null
+      if (savedW) {
         for (const c of cols) {
-          if (saved[c.key]) c.width = saved[c.key]
+          if (savedW[c.key]) c.width = savedW[c.key]
         }
+      }
+      const savedS = JSON.parse(localStorage.getItem(`${opts.key}:sort`) || 'null') as { key: string; dir: 'asc' | 'desc' } | null
+      if (savedS && cols.find(c => c.key === savedS.key)) {
+        sort.key = savedS.key
+        sort.dir = savedS.dir
       }
     } catch { /* ignore */ }
   }
@@ -52,6 +57,10 @@ export function useSortableTable(opts: SortableTableOpts) {
     const obj: Record<string, number> = {}
     for (const c of cols) obj[c.key] = c.width
     localStorage.setItem(`${opts.key}:widths`, JSON.stringify(obj))
+  }
+  function persistSort() {
+    if (typeof window === 'undefined') return
+    localStorage.setItem(`${opts.key}:sort`, JSON.stringify({ key: sort.key, dir: sort.dir }))
   }
 
   function toggleSort(key: string) {
@@ -63,6 +72,7 @@ export function useSortableTable(opts: SortableTableOpts) {
       sort.key = key
       sort.dir = 'desc'
     }
+    persistSort()
   }
 
   function applySort<T extends Record<string, any>>(rows: T[]): T[] {
@@ -87,6 +97,8 @@ export function useSortableTable(opts: SortableTableOpts) {
     resizing = { key, startX: e.clientX, startWidth: col.width }
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
+    const target = e.currentTarget as HTMLElement | null
+    target?.classList.add('is-active')
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
   }
@@ -104,6 +116,7 @@ export function useSortableTable(opts: SortableTableOpts) {
     resizing = null
     document.body.style.cursor = ''
     document.body.style.userSelect = ''
+    document.querySelectorAll('.resize-handle.is-active').forEach(el => el.classList.remove('is-active'))
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', onUp)
     persistWidths()

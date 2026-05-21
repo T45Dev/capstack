@@ -24,6 +24,8 @@ function migrate(d: Database.Database): void {
       slug TEXT NOT NULL UNIQUE,
       ticker TEXT,
       formation_date TEXT,
+      starting_round TEXT,
+      starting_round_date TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -111,13 +113,30 @@ function migrate(d: Database.Database): void {
       round_name TEXT NOT NULL DEFAULT 'Series B',
       new_money REAL NOT NULL DEFAULT 0,
       pre_money REAL NOT NULL DEFAULT 0,
-      pre_round_fds INTEGER,                              -- override; null = use computed-from-cap-table
+      pre_round_fds INTEGER,
       target_pool_pct REAL,
       pool_top_up_shares INTEGER DEFAULT 0,
-      cn_conversion_basis TEXT DEFAULT 'best',  -- 'best' | 'round_price' | 'cap' | 'discount'
+      cn_conversion_basis TEXT DEFAULT 'best',
       notes TEXT,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS assumption_versions (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      label TEXT,
+      is_auto INTEGER NOT NULL DEFAULT 0,
+      round_name TEXT NOT NULL,
+      new_money REAL NOT NULL,
+      pre_money REAL NOT NULL,
+      pre_round_fds INTEGER,
+      target_pool_pct REAL,
+      pool_top_up_shares INTEGER DEFAULT 0,
+      cn_conversion_basis TEXT DEFAULT 'best',
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_assumption_versions_company ON assumption_versions(company_id, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS scenarios (
       id TEXT PRIMARY KEY,
@@ -139,7 +158,7 @@ function migrate(d: Database.Database): void {
       id TEXT PRIMARY KEY,
       company_id TEXT REFERENCES companies(id) ON DELETE CASCADE,
       filename TEXT,
-      source TEXT NOT NULL,   -- 'carta_proforma' | 'manual' | etc.
+      source TEXT NOT NULL,
       raw_meta TEXT,
       imported_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -154,6 +173,8 @@ function migrate(d: Database.Database): void {
 
   ensureColumn('assumptions', 'pre_round_fds', 'INTEGER')
   ensureColumn('convertibles', 'converts_at_round', 'INTEGER NOT NULL DEFAULT 1')
+  ensureColumn('companies', 'starting_round', 'TEXT')
+  ensureColumn('companies', 'starting_round_date', 'TEXT')
 }
 
 export function reset(): void {

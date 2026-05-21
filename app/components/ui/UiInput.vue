@@ -22,9 +22,9 @@ function onInput(e: Event) {
 
 <template>
   <label class="block">
-    <span v-if="label" class="block text-xs font-medium text-ink-300 mb-1">{{ label }}</span>
+    <span v-if="label" class="block text-xs font-medium text-ink-700 mb-1">{{ label }}</span>
     <div class="relative">
-      <span v-if="prefix" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-400 text-sm">{{ prefix }}</span>
+      <span v-if="prefix" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-500 text-sm pointer-events-none">{{ prefix }}</span>
       <input
         :type="type"
         :value="modelValue ?? ''"
@@ -32,12 +32,12 @@ function onInput(e: Event) {
         :step="step"
         :min="min"
         :disabled="disabled"
-        class="w-full rounded-md border border-ink-600 bg-ink-800 px-3 py-2 text-sm text-ink-100 placeholder:text-ink-500 focus:outline-none focus:ring-1 focus:ring-accent-500 focus:border-accent-500 disabled:opacity-50 num"
+        class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500 disabled:opacity-50 disabled:bg-ink-100 num shadow-sm"
         :class="{ 'pl-7': prefix, 'pr-12': suffix }"
         @input="onInput"
         @change="emit('change', ($event.target as HTMLInputElement).value)"
       />
-      <span v-if="suffix" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-400 text-xs">{{ suffix }}</span>
+      <span v-if="suffix" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-500 text-xs pointer-events-none">{{ suffix }}</span>
     </div>
     <p v-if="hint" class="mt-1 text-xs text-ink-500">{{ hint }}</p>
   </label>
