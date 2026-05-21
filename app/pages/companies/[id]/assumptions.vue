@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Save, RefreshCw, Info } from 'lucide-vue-next'
+import { Save, RefreshCw, RotateCcw } from 'lucide-vue-next'
 import { fmtUSD, fmtPct, fmtShares, fmtPricePerShare } from '~/utils/format'
 
 const route = useRoute()
@@ -10,20 +10,21 @@ interface AssumptionsRow {
   round_name: string
   new_money: number
   pre_money: number
+  pre_round_fds: number | null
   target_pool_pct: number | null
   pool_top_up_shares: number
-  cn_conversion_basis: 'round_price' | 'cap' | 'discount'
+  cn_conversion_basis: 'best' | 'round_price' | 'cap' | 'discount'
   notes: string | null
 }
 
-const { data: assumptions, refresh: refreshAssumptions } = await useFetch<AssumptionsRow>(() => `/api/companies/${id.value}/assumptions`, { watch: [id] })
+const { data: assumptions } = await useFetch<AssumptionsRow>(() => `/api/companies/${id.value}/assumptions`, { watch: [id] })
 
 const form = reactive({
   round_name: 'Series B',
   new_money: 0,
   pre_money: 0,
-  pool_top_up_shares: 0,
-  cn_conversion_basis: 'round_price' as 'round_price' | 'cap' | 'discount',
+  pre_round_fds: null as number | null,
+  cn_conversion_basis: 'best' as 'best' | 'round_price' | 'cap' | 'discount',
   notes: '',
 })
 
@@ -32,7 +33,7 @@ watch(assumptions, (a) => {
   form.round_name = a.round_name
   form.new_money = a.new_money
   form.pre_money = a.pre_money
-  form.pool_top_up_shares = a.pool_top_up_shares
+  form.pre_round_fds = a.pre_round_fds
   form.cn_conversion_basis = a.cn_conversion_basis
   form.notes = a.notes || ''
 }, { immediate: true })
@@ -40,7 +41,7 @@ watch(assumptions, (a) => {
 const computeBody = computed(() => ({
   newMoney: form.new_money,
   preMoney: form.pre_money,
-  poolTopUpShares: form.pool_top_up_shares,
+  preRoundFDS: form.pre_round_fds,
   cnBasis: form.cn_conversion_basis,
 }))
 
@@ -49,6 +50,16 @@ const { data: compute, refresh: refreshCompute, pending } = await useFetch(() =>
   body: computeBody,
   watch: [computeBody, id],
 })
+
+const fdsFromCapTable = computed(() => (compute.value?.capTableBaseline?.fdsFromCapTable || 0) as number)
+const usingOverride = computed(() => form.pre_round_fds != null && form.pre_round_fds !== fdsFromCapTable.value)
+
+function useComputedFDS() {
+  form.pre_round_fds = fdsFromCapTable.value
+}
+function clearOverride() {
+  form.pre_round_fds = null
+}
 
 const saving = ref(false)
 const savedAt = ref<string | null>(null)
@@ -62,37 +73,9 @@ async function save() {
   }
 }
 
-// Convenience: target pool pct → top-up shares
-const targetPoolPct = ref<number | null>(null)
-watch(targetPoolPct, (pct) => {
-  if (pct == null || !compute.value) return
-  // pct of post-round FDS = (pool_available + new_pool_shares) / postFDS
-  // Solve for top-up: top-up needs to be sized so that available + top-up = pct * postFDS_after_top_up
-  // postFDS_after_top_up = preRoundFDS + topUp + newPreferred + cnShares
-  // We iterate once for stability.
-  const pre = compute.value.round.preRoundFDS
-  const newPref = compute.value.round.newPreferredShares
-  const cn = compute.value.round.cnConvertedShares
-  const available = compute.value.state.optionsAvailable
-  // post = pre + top + newPref + cn ; pool_post = available + top ; pool_post = pct * post
-  // => available + top = pct * (pre + top + newPref + cn)
-  // => available + top = pct*(pre+newPref+cn) + pct*top
-  // => top*(1 - pct) = pct*(pre+newPref+cn) - available
-  // => top = [pct*(pre+newPref+cn) - available] / (1 - pct)
-  const top = (pct * (pre + newPref + cn) - available) / (1 - pct)
-  form.pool_top_up_shares = Math.max(0, Math.round(top))
-})
-
 const seriesShortcuts = [
-  { label: 'Series Seed', value: 'Series Seed' },
-  { label: 'Series A', value: 'Series A' },
-  { label: 'Series A-1', value: 'Series A-1' },
-  { label: 'Series A-2', value: 'Series A-2' },
-  { label: 'Series A-3', value: 'Series A-3' },
-  { label: 'Series A-4', value: 'Series A-4' },
-  { label: 'Series B', value: 'Series B' },
-  { label: 'Series C', value: 'Series C' },
-  { label: 'Bridge', value: 'Bridge' },
+  'Series Seed', 'Series A', 'Series A-1', 'Series A-2', 'Series A-3', 'Series A-4',
+  'Series B', 'Series C', 'Bridge',
 ]
 </script>
 
@@ -101,7 +84,11 @@ const seriesShortcuts = [
     <div class="flex items-end justify-between mb-4 gap-3">
       <div>
         <h1 class="text-2xl font-semibold tracking-tight text-ink-100">Key assumptions</h1>
-        <p class="text-sm text-ink-400 mt-1">Drives the live round math. Every change recomputes price/share, dilution, and post-money FDS.</p>
+        <p class="text-sm text-ink-400 mt-1">
+          Three primary inputs: <span class="text-ink-200 font-medium">pre-round FDS</span>,
+          <span class="text-ink-200 font-medium">pre-money valuation</span>,
+          <span class="text-ink-200 font-medium">amount raised</span>. Everything else is derived live.
+        </p>
       </div>
       <UiButton variant="primary" :disabled="saving" @click="save">
         <Save :size="14" /> {{ saving ? 'Saving…' : 'Save' }}
@@ -109,29 +96,48 @@ const seriesShortcuts = [
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <UiCard title="Inputs" subtitle="Blue cells in the spreadsheet.">
+      <UiCard title="Inputs">
         <div class="space-y-3">
           <label class="block">
             <span class="block text-xs font-medium text-ink-300 mb-1">Round name</span>
             <select v-model="form.round_name" class="w-full rounded-md border border-ink-600 bg-ink-800 px-3 py-2 text-sm text-ink-100">
-              <option v-for="s in seriesShortcuts" :key="s.value" :value="s.value">{{ s.label }}</option>
+              <option v-for="s in seriesShortcuts" :key="s" :value="s">{{ s }}</option>
             </select>
           </label>
 
           <UiInput v-model="form.pre_money" type="number" label="Pre-money valuation" prefix="$" step="100000" />
           <UiInput v-model="form.new_money" type="number" label="New money (raise)" prefix="$" step="100000" />
 
-          <div class="grid grid-cols-2 gap-3">
-            <UiInput v-model="form.pool_top_up_shares" type="number" label="Pool top-up (shares)" hint="Pre-money pool expansion" />
-            <UiInput v-model="targetPoolPct" type="number" label="…or target pool % post-round" suffix="%" step="0.1" min="0" hint="Auto-sizes top-up" />
+          <div>
+            <UiInput
+              v-model="form.pre_round_fds"
+              type="number"
+              label="Pre-round fully-diluted shares"
+              step="1"
+              hint="Holdings + outstanding options + available pool. Override if you're modelling a planned adjustment."
+            />
+            <div class="mt-1.5 flex items-center justify-between text-xs">
+              <span class="text-ink-500">
+                From cap table:
+                <button type="button" class="text-accent-400 hover:text-accent-300 num" @click="useComputedFDS">
+                  {{ fmtShares(fdsFromCapTable) }}
+                </button>
+              </span>
+              <button v-if="form.pre_round_fds != null" type="button"
+                class="text-ink-500 hover:text-ink-200 inline-flex items-center gap-1"
+                @click="clearOverride">
+                <RotateCcw :size="11" /> use computed
+              </button>
+            </div>
           </div>
 
           <label class="block">
             <span class="block text-xs font-medium text-ink-300 mb-1">Convertible-note conversion basis</span>
             <select v-model="form.cn_conversion_basis" class="w-full rounded-md border border-ink-600 bg-ink-800 px-3 py-2 text-sm text-ink-100">
-              <option value="round_price">Round price (no discount applied)</option>
-              <option value="discount">Discount to round price</option>
-              <option value="cap">Min(round price, cap-implied price)</option>
+              <option value="best">Best for holder — min of discount, cap, round price (recommended)</option>
+              <option value="discount">Discount to round price only</option>
+              <option value="cap">Valuation cap only</option>
+              <option value="round_price">Round price (ignore discount + cap)</option>
             </select>
           </label>
 
@@ -151,13 +157,41 @@ const seriesShortcuts = [
           </template>
           <div v-if="compute" class="grid grid-cols-2 gap-3">
             <UiStat label="Price per share" :value="fmtPricePerShare(compute.round.pricePerShare)" emphasis />
-            <UiStat label="Post-money" :value="fmtUSD(compute.round.postMoney)" emphasis />
-            <UiStat label="Pre-round FDS" :value="fmtShares(compute.round.preRoundFDS)" />
-            <UiStat label="Pool top-up" :value="fmtShares(compute.round.newPoolShares)" />
-            <UiStat label="Effective FDS (PPS denom)" :value="fmtShares(compute.round.effectiveFDS)" />
+            <UiStat label="Post-money (pre + new)" :value="fmtUSD(compute.round.postMoney)" emphasis />
+            <UiStat label="Pre-round FDS" :value="fmtShares(compute.round.preRoundFDS)" :hint="usingOverride ? 'override' : 'from cap table'" />
             <UiStat label="New preferred shares" :value="fmtShares(compute.round.newPreferredShares)" />
-            <UiStat label="CN conv. shares" :value="fmtShares(compute.round.cnConvertedShares)" hint="From outstanding notes" />
+            <UiStat label="CN conversion shares" :value="fmtShares(compute.round.cnConvertedShares)" :hint="`from $${(compute.round.cnConvertedDollars).toLocaleString()}`" />
             <UiStat label="Post-round FDS" :value="fmtShares(compute.round.postRoundFDS)" emphasis />
+            <UiStat label="Valuation at post-FDS" :value="fmtUSD(compute.round.impliedPostFDSValuation)" hint="PPS × post-FDS (incl. CN dilution)" />
+          </div>
+        </UiCard>
+
+        <UiCard v-if="compute?.round.cnDetails?.length" title="Convertible-note conversion detail">
+          <div class="overflow-x-auto -mx-4">
+            <table class="w-full text-sm">
+              <thead class="text-left text-ink-400 text-xs uppercase tracking-wide">
+                <tr class="border-b border-ink-700">
+                  <th class="px-4 py-2">Holder</th>
+                  <th class="px-3 py-2 text-right">Dollars</th>
+                  <th class="px-3 py-2 text-right">Conv. price</th>
+                  <th class="px-3 py-2 text-right">Shares</th>
+                  <th class="px-3 py-2">Basis</th>
+                </tr>
+              </thead>
+              <tbody class="num">
+                <tr v-for="d in compute.round.cnDetails" :key="d.id" class="border-b border-ink-800/80">
+                  <td class="px-4 py-2 text-ink-100">{{ d.stakeholderName }}</td>
+                  <td class="px-3 py-2 text-right">{{ fmtUSD(d.dollars) }}</td>
+                  <td class="px-3 py-2 text-right">{{ fmtPricePerShare(d.convPrice) }}</td>
+                  <td class="px-3 py-2 text-right">{{ fmtShares(d.shares) }}</td>
+                  <td class="px-3 py-2 text-[11px] uppercase tracking-wide" :class="{
+                    'text-emerald-400': d.basisApplied === 'discount',
+                    'text-amber-400': d.basisApplied === 'cap',
+                    'text-ink-400': d.basisApplied === 'round',
+                  }">{{ d.basisApplied }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </UiCard>
 

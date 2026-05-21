@@ -7,21 +7,23 @@ export default defineEventHandler(async (event) => {
     round_name?: string
     new_money?: number
     pre_money?: number
+    pre_round_fds?: number | null
     target_pool_pct?: number | null
     pool_top_up_shares?: number
-    cn_conversion_basis?: 'round_price' | 'cap' | 'discount'
+    cn_conversion_basis?: 'best' | 'round_price' | 'cap' | 'discount'
     notes?: string | null
   }>(event)
 
   db().prepare(`
     INSERT INTO assumptions (
-      company_id, round_name, new_money, pre_money,
+      company_id, round_name, new_money, pre_money, pre_round_fds,
       target_pool_pct, pool_top_up_shares, cn_conversion_basis, notes, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(company_id) DO UPDATE SET
       round_name = excluded.round_name,
       new_money = excluded.new_money,
       pre_money = excluded.pre_money,
+      pre_round_fds = excluded.pre_round_fds,
       target_pool_pct = excluded.target_pool_pct,
       pool_top_up_shares = excluded.pool_top_up_shares,
       cn_conversion_basis = excluded.cn_conversion_basis,
@@ -32,9 +34,10 @@ export default defineEventHandler(async (event) => {
     body.round_name || 'Series B',
     body.new_money ?? 0,
     body.pre_money ?? 0,
+    body.pre_round_fds ?? null,
     body.target_pool_pct ?? null,
     body.pool_top_up_shares ?? 0,
-    body.cn_conversion_basis || 'round_price',
+    body.cn_conversion_basis || 'best',
     body.notes ?? null,
   )
 

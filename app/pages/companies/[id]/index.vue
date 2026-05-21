@@ -57,13 +57,13 @@ const cnPrincipalTotal = computed(() => {
         <UiStat label="CN principal+int." :value="fmtUSD(cnPrincipalTotal)" />
       </div>
 
-      <UiCard v-if="compute?.round" title="Live round math" :subtitle="`${compute.assumptions.preMoney ? 'Based on current assumptions' : 'Set pre-money and new money in Assumptions tab'}`">
+      <UiCard v-if="compute?.round" title="Live round math" :subtitle="`${compute.inputs.preMoney ? 'Based on current assumptions' : 'Set pre-money and new money in Assumptions tab'}`">
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
           <UiStat label="Pre-money" :value="fmtUSD(compute.round.preMoney)" />
           <UiStat label="New money" :value="fmtUSD(compute.round.newMoney)" />
           <UiStat label="Post-money" :value="fmtUSD(compute.round.postMoney)" emphasis />
           <UiStat label="Price per share" :value="fmtPricePerShare(compute.round.pricePerShare)" />
-          <UiStat label="Pre-round FDS" :value="fmtShares(compute.round.effectiveFDS)" />
+          <UiStat label="Pre-round FDS" :value="fmtShares(compute.round.preRoundFDS)" />
           <UiStat label="New preferred" :value="fmtShares(compute.round.newPreferredShares)" />
           <UiStat label="CN conversion shares" :value="fmtShares(compute.round.cnConvertedShares)" />
           <UiStat label="Post-round FDS" :value="fmtShares(compute.round.postRoundFDS)" emphasis />
