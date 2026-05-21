@@ -25,6 +25,7 @@ interface PivotRow {
   name: string
   totalShares: number
   optionShares: number
+  cnDollars: number
   fds: number
   byClass: Record<string, number>
 }
@@ -32,7 +33,7 @@ interface PivotRow {
 const pivot = computed<PivotRow[]>(() => {
   const map = new Map<string, PivotRow>()
   for (const s of data.value!.stakeholders) {
-    map.set(s.id, { id: s.id, stakeholderId: s.id, name: s.name, totalShares: 0, optionShares: 0, fds: 0, byClass: {} })
+    map.set(s.id, { id: s.id, stakeholderId: s.id, name: s.name, totalShares: 0, optionShares: 0, cnDollars: 0, fds: 0, byClass: {} })
   }
   for (const h of data.value!.holdings) {
     const row = map.get(h.stakeholder_id)
@@ -47,8 +48,29 @@ const pivot = computed<PivotRow[]>(() => {
     if (!row) continue
     row.optionShares += g.quantity
   }
+  // Attribute convertibles to stakeholders. Holders who only have CNs (no shares
+  // or options yet) still need to appear in the pivot — synthesize a row for them.
+  for (const cn of (data.value!.cn_by_stakeholder || [])) {
+    const row = map.get(cn.stakeholder_id)
+    if (row) row.cnDollars += cn.dollars
+  }
+  // Sometimes a convertible is attached to a stakeholder we didn't seed above
+  // (e.g. a CN-only holder). Walk the raw ledger as a safety net.
+  for (const c of data.value!.convertibles) {
+    if (c.status !== 'outstanding' || !c.stakeholder_id) continue
+    if (map.has(c.stakeholder_id)) continue
+    // Look up the name from the stakeholders list, fall back to the CN's name.
+    const sh = data.value!.stakeholders.find((s: any) => s.id === c.stakeholder_id)
+    const name = sh?.name || c.stakeholder_name
+    const total = (c.principal || 0) + (c.interest_accrued || 0)
+    map.set(c.stakeholder_id, {
+      id: c.stakeholder_id, stakeholderId: c.stakeholder_id, name,
+      totalShares: 0, optionShares: 0, cnDollars: total, fds: 0, byClass: {},
+    })
+  }
   for (const row of map.values()) row.fds = row.totalShares + row.optionShares
-  const arr = Array.from(map.values()).filter(r => r.fds > 0)
+  // Show holders who own shares, options, OR convertibles.
+  const arr = Array.from(map.values()).filter(r => r.fds > 0 || r.cnDollars > 0)
   if (query.value.trim()) {
     const q = query.value.toLowerCase()
     return arr.filter(r => r.name.toLowerCase().includes(q))
@@ -60,12 +82,14 @@ const totals = computed(() => {
   const byClass: Record<string, number> = {}
   let totalShares = 0
   let totalOptions = 0
+  let totalCNDollars = 0
   for (const r of pivot.value) {
     for (const [k, v] of Object.entries(r.byClass)) byClass[k] = (byClass[k] || 0) + v
     totalShares += r.totalShares
     totalOptions += r.optionShares
+    totalCNDollars += r.cnDollars
   }
-  return { byClass, totalShares, totalOptions, fds: totalShares + totalOptions }
+  return { byClass, totalShares, totalOptions, totalCNDollars, fds: totalShares + totalOptions }
 })
 
 const poolAuthorized = computed(() => data.value!.pools.reduce((a: number, p: any) => a + (p.authorized || 0), 0))
@@ -107,7 +131,7 @@ const sortedShareClasses = computed(() => {
 })
 
 // ----- Holdings pivot table (sortable + resizable) -----
-// Columns are dynamic — one per share class + options + fds.
+// Columns are dynamic — one per share class + options + cn $ + fds.
 const holdingsCols = computed(() => {
   const cols: Array<{ key: string; label: string; width: number; sortable: boolean; align: 'left' | 'right' }> = [
     { key: 'name', label: 'Stakeholder', width: 220, sortable: true, align: 'left' },
@@ -116,6 +140,7 @@ const holdingsCols = computed(() => {
     cols.push({ key: `class_${sc.id}`, label: sc.code, width: 110, sortable: true, align: 'right' })
   }
   cols.push({ key: 'optionShares', label: 'Options', width: 110, sortable: true, align: 'right' })
+  cols.push({ key: 'cnDollars', label: 'CN ($)', width: 110, sortable: true, align: 'right' })
   cols.push({ key: 'fds', label: 'FDS', width: 130, sortable: true, align: 'right' })
   return cols
 })
@@ -146,6 +171,7 @@ const sortedPivot = computed(() => {
     let av: number | string, bv: number | string
     if (k === 'name') { av = a.name; bv = b.name }
     else if (k === 'optionShares') { av = compareValue(a.optionShares, denom, pps); bv = compareValue(b.optionShares, denom, pps) }
+    else if (k === 'cnDollars') { av = a.cnDollars; bv = b.cnDollars }
     else if (k === 'fds') { av = compareValue(a.fds, denom, pps); bv = compareValue(b.fds, denom, pps) }
     else if (k.startsWith('class_')) {
       const scId = k.slice(6)
@@ -327,7 +353,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                 <td class="px-3 py-2 border-b border-ink-200 text-ink-900 truncate" :title="sc.name">{{ sc.name }}</td>
                 <td class="px-3 py-2 text-[11px] uppercase tracking-wide text-ink-500 border-b border-ink-200">{{ sc.kind }}</td>
                 <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtShare(sc.issued, fdsIncludingPool, sc.issue_price || currentPPS) }}</td>
-                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ sc.authorized ? fmtShares(sc.authorized) : '—' }}</td>
+                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ sc.authorized ? fmtShare(sc.authorized, fdsIncludingPool, sc.issue_price || currentPPS) : '—' }}</td>
                 <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtPricePerShare(sc.issue_price) }}</td>
                 <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtPct(sc.pct, 2) }}</td>
               </tr>
@@ -336,7 +362,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                 <td class="px-3 py-2 border-b border-ink-200 text-ink-700">Option pool authorized</td>
                 <td class="px-3 py-2 border-b border-ink-200"></td>
                 <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtShare(totals.totalOptions, fdsIncludingPool, currentPPS) }}<span class="text-[10px] text-ink-500 ml-1">attributed</span></td>
-                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtShares(poolAuthorized) }}</td>
+                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtShare(poolAuthorized, fdsIncludingPool, currentPPS) }}</td>
                 <td class="px-3 py-2 border-b border-ink-200"></td>
                 <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fdsIncludingPool ? fmtPct((totals.totalOptions + poolAvailable) / fdsIncludingPool, 2) : '—' }}</td>
               </tr>
@@ -388,12 +414,17 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                   <span v-if="r.optionShares">{{ fmtShare(r.optionShares, fdsIncludingPool, currentPPS) }}</span>
                   <span v-else class="text-ink-400">—</span>
                 </td>
+                <td class="px-3 py-2 text-right border-b border-ink-200">
+                  <span v-if="r.cnDollars" class="text-ink-800">{{ fmtUSD(r.cnDollars) }}</span>
+                  <span v-else class="text-ink-400">—</span>
+                </td>
                 <td class="px-3 py-2 text-right font-medium border-b border-ink-200 text-ink-900">{{ fmtShare(r.fds, fdsIncludingPool, currentPPS) }}</td>
               </tr>
               <tr class="text-ink-900 font-semibold num bg-ink-100">
                 <td class="px-3 py-2 border-t-2 border-ink-300">Total</td>
                 <td v-for="sc in data.share_classes" :key="sc.id" class="px-3 py-2 text-right border-t-2 border-ink-300">{{ fmtShare(totals.byClass[sc.id] || 0, fdsIncludingPool, currentPPS) }}</td>
                 <td class="px-3 py-2 text-right border-t-2 border-ink-300">{{ fmtShare(totals.totalOptions, fdsIncludingPool, currentPPS) }}</td>
+                <td class="px-3 py-2 text-right border-t-2 border-ink-300">{{ fmtUSD(totals.totalCNDollars) }}</td>
                 <td class="px-3 py-2 text-right border-t-2 border-ink-300">{{ fmtShare(totals.fds, fdsIncludingPool, currentPPS) }}</td>
               </tr>
             </tbody>
