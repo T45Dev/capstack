@@ -1,7 +1,6 @@
 services:
   capstack:
-    build: .
-    image: capstack:local
+    image: ghcr.io/t45dev/capstack:latest
     container_name: capstack
     restart: unless-stopped
     ports:
