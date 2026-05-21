@@ -1,0 +1,12 @@
+node_modules
+.nuxt
+.output
+.nitro
+.cache
+data
+*.log
+.git
+.gitignore
+Dockerfile
+docker-compose.yml
+.dockerignore

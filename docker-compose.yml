@@ -1,0 +1,13 @@
+services:
+  capstack:
+    build: .
+    image: capstack:local
+    container_name: capstack
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - capstack-data:/app/data
+
+volumes:
+  capstack-data:
