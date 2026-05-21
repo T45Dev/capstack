@@ -18,10 +18,10 @@ const cls = computed(() => {
     lg: 'text-sm px-4 py-2.5',
   }
   const variants = {
-    primary: 'bg-accent-500 hover:bg-accent-400 text-white',
-    secondary: 'bg-ink-700 hover:bg-ink-600 text-ink-100 border border-ink-600',
-    ghost: 'hover:bg-ink-700 text-ink-200',
-    danger: 'bg-red-600 hover:bg-red-500 text-white',
+    primary: 'bg-accent-500 hover:bg-accent-600 text-white shadow-sm',
+    secondary: 'bg-white hover:bg-ink-100 text-ink-800 border border-ink-300 shadow-sm',
+    ghost: 'hover:bg-ink-200 text-ink-700',
+    danger: 'bg-red-600 hover:bg-red-700 text-white shadow-sm',
   }
   return `${base} ${sizes[props.size]} ${variants[props.variant]}`
 })

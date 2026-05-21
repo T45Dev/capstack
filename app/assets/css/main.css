@@ -4,8 +4,8 @@
 
 html,
 body {
-  background: #0e0e10;
-  color: #ebebed;
+  background: #f8fafc;
+  color: #0f172a;
   font-feature-settings: 'cv02', 'cv03', 'cv04';
 }
 
@@ -26,8 +26,34 @@ input[type='number'] {
   -moz-appearance: textfield;
 }
 
-/* Custom scrollbar */
+/* Scrollbars. Slim, visible-enough handle, no track. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #27272a; border-radius: 6px; }
-::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* Hide the scrollbar but keep the element scrollable. Used by the header nav. */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar { display: none; }
+
+/* Table column resize handle. Always faintly visible, brighter on hover/drag. */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 6px;
+  cursor: col-resize;
+  background: linear-gradient(to right, transparent 0%, transparent 40%, #cbd5e1 40%, #cbd5e1 60%, transparent 60%, transparent 100%);
+  background-size: 100% 60%;
+  background-repeat: no-repeat;
+  background-position: center;
+  transition: background-color 0.12s;
+}
+.resize-handle:hover,
+.resize-handle.is-active {
+  background: #2563eb;
+}

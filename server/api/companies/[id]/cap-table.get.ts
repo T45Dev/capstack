@@ -11,7 +11,7 @@ export default defineEventHandler((event) => {
     SELECT id, code, name, kind, seniority, authorized, issue_price
     FROM share_classes WHERE company_id = ?
     ORDER BY seniority ASC, kind DESC, code ASC
-  `).all(id)
+  `).all(id) as Array<{ id: string; issue_price: number | null; kind: string }>
 
   const stakeholders = db().prepare(`
     SELECT id, name, email, type, external_id FROM stakeholders WHERE company_id = ? ORDER BY name COLLATE NOCASE
@@ -36,5 +36,12 @@ export default defineEventHandler((event) => {
     SELECT id, name, authorized, adopted_date FROM option_pools WHERE company_id = ?
   `).all(id)
 
-  return { company, share_classes, stakeholders, holdings, grants, convertibles, pools }
+  // Current PPS = highest issue_price across preferred share classes (the most recent priced round).
+  // Falls back to highest issue_price overall, then 0.
+  let currentPPS = 0
+  for (const sc of share_classes) {
+    if (sc.issue_price && sc.issue_price > currentPPS) currentPPS = sc.issue_price
+  }
+
+  return { company, share_classes, stakeholders, holdings, grants, convertibles, pools, current_pps: currentPPS }
 })

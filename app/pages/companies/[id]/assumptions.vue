@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Save, RefreshCw, RotateCcw, ChevronUp, ChevronDown } from 'lucide-vue-next'
-import { fmtUSD, fmtPct, fmtShares, fmtPricePerShare } from '~/utils/format'
+import { Save, RefreshCw, RotateCcw, ChevronUp, ChevronDown, BookmarkPlus, History, Trash2, Upload, X } from 'lucide-vue-next'
+import { fmtUSD, fmtPct, fmtShares, fmtPricePerShare, fmtDate } from '~/utils/format'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -17,7 +17,22 @@ interface AssumptionsRow {
   notes: string | null
 }
 
+interface AssumptionVersion {
+  id: string
+  label: string | null
+  is_auto: number
+  round_name: string
+  new_money: number
+  pre_money: number
+  pre_round_fds: number | null
+  pool_top_up_shares: number
+  cn_conversion_basis: string
+  notes: string | null
+  created_at: string
+}
+
 const { data: assumptions } = await useFetch<AssumptionsRow>(() => `/api/companies/${id.value}/assumptions`, { watch: [id] })
+const { data: versions, refresh: refreshVersions } = await useFetch<AssumptionVersion[]>(() => `/api/companies/${id.value}/assumption-versions`, { watch: [id], default: () => [] })
 
 const form = reactive({
   round_name: 'Series B',
@@ -45,7 +60,7 @@ const computeBody = computed(() => ({
   cnBasis: form.cn_conversion_basis,
 }))
 
-const { data: compute, refresh: refreshCompute, pending } = await useFetch(() => `/api/companies/${id.value}/compute`, {
+const { data: compute, pending } = await useFetch(() => `/api/companies/${id.value}/compute`, {
   method: 'POST',
   body: computeBody,
   watch: [computeBody, id],
@@ -68,242 +83,422 @@ async function save() {
   try {
     await $fetch(`/api/companies/${id.value}/assumptions`, { method: 'POST', body: form })
     savedAt.value = new Date().toLocaleTimeString()
+    await refreshVersions()
   } finally {
     saving.value = false
   }
 }
 
+// --- Versions ---
+const showVersions = ref(false)
+const namingSnapshot = ref(false)
+const snapshotLabel = ref('')
+async function snapshotNow() {
+  if (!snapshotLabel.value.trim()) return
+  await $fetch(`/api/companies/${id.value}/assumption-versions`, { method: 'POST', body: { label: snapshotLabel.value.trim() } })
+  snapshotLabel.value = ''
+  namingSnapshot.value = false
+  await refreshVersions()
+}
+async function loadVersion(v: AssumptionVersion) {
+  if (!confirm(`Load "${v.label || 'Auto-snapshot ' + fmtDate(v.created_at)}" into working assumptions? Your current values will be auto-snapshotted before replacement.`)) return
+  await $fetch(`/api/assumption-versions/${v.id}/load`, { method: 'POST' })
+  // Reload to pick up the new working assumptions everywhere on the page.
+  location.reload()
+}
+async function deleteVersion(v: AssumptionVersion) {
+  if (!confirm(`Delete this version? This is permanent.`)) return
+  await $fetch(`/api/assumption-versions/${v.id}`, { method: 'DELETE' })
+  await refreshVersions()
+}
+
 const seriesShortcuts = [
-  'Series Seed', 'Series A', 'Series A-1', 'Series A-2', 'Series A-3', 'Series A-4',
-  'Series B', 'Series C', 'Bridge',
+  'Pre-seed', 'Seed', 'Series Seed', 'Series A', 'Series A-1', 'Series A-2', 'Series A-3', 'Series A-4',
+  'Series B', 'Series B-1', 'Series B-2', 'Series C', 'Series D', 'Bridge',
 ]
 
-// ---------- Sortable + resizable per-stakeholder dilution table ----------
+// ---------- Per-stakeholder dilution table ----------
+const { format: fmtShare, compareValue, unit } = useShareUnit()
+
 const dilutionTable = useSortableTable({
   key: 'capstack:dilution',
   defaultSort: { key: 'postShares', dir: 'desc' },
   columns: [
-    { key: 'name', label: 'Stakeholder', width: 240, sortable: true, align: 'left' },
-    { key: 'preShares', label: 'Pre shares', width: 110, sortable: true, align: 'right' },
-    { key: 'cnShares', label: 'CN conv.', width: 100, sortable: true, align: 'right' },
-    { key: 'postShares', label: 'Post shares', width: 120, sortable: true, align: 'right' },
-    { key: 'prePct', label: 'Pre %', width: 80, sortable: true, align: 'right' },
-    { key: 'postPct', label: 'Post %', width: 80, sortable: true, align: 'right' },
-    { key: 'delta', label: 'Δ', width: 80, sortable: true, align: 'right' },
+    { key: 'name', label: 'Stakeholder', width: 260, sortable: true, align: 'left' },
+    { key: 'preShares', label: 'Pre shares', width: 140, sortable: true, align: 'right' },
+    { key: 'cnShares', label: 'CN conv.', width: 130, sortable: true, align: 'right' },
+    { key: 'postShares', label: 'Post shares', width: 150, sortable: true, align: 'right' },
+    { key: 'prePct', label: 'Pre %', width: 100, sortable: true, align: 'right' },
+    { key: 'postPct', label: 'Post %', width: 100, sortable: true, align: 'right' },
+    { key: 'delta', label: 'Δ', width: 100, sortable: true, align: 'right' },
   ],
 })
 
 const sortedDilution = computed(() => {
+  const denom = compute.value?.round?.postRoundFDS || 0
+  const preDenom = compute.value?.round?.preRoundFDS || 0
+  const pps = compute.value?.round?.pricePerShare || 0
   const rows = (compute.value?.dilution || []).map((r: any) => ({
     ...r,
     delta: r.postPct - r.prePct,
   }))
-  return dilutionTable.applySort(rows)
+  const k = dilutionTable.sort.key
+  const sign = dilutionTable.sort.dir === 'asc' ? 1 : -1
+  return [...rows].sort((a, b) => {
+    let av: number | string, bv: number | string
+    if (k === 'name') { av = a.name; bv = b.name }
+    else if (k === 'preShares') { av = compareValue(a.preShares, preDenom, pps); bv = compareValue(b.preShares, preDenom, pps) }
+    else if (k === 'cnShares') { av = compareValue(a.cnShares, denom, pps); bv = compareValue(b.cnShares, denom, pps) }
+    else if (k === 'postShares') { av = compareValue(a.postShares, denom, pps); bv = compareValue(b.postShares, denom, pps) }
+    else { av = (a as any)[k] ?? 0; bv = (b as any)[k] ?? 0 }
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sign
+    return String(av).localeCompare(String(bv), 'en', { numeric: true }) * sign
+  })
 })
+
+const dilutionWidth = computed(() => dilutionTable.cols.reduce((s, c) => s + c.width, 0))
+
+// ---------- CN detail table ----------
+const cnDetailTable = useSortableTable({
+  key: 'capstack:cn-detail',
+  defaultSort: { key: 'shares', dir: 'desc' },
+  columns: [
+    { key: 'stakeholderName', label: 'Holder', width: 200, sortable: true, align: 'left' },
+    { key: 'dollars', label: 'Dollars', width: 130, sortable: true, align: 'right' },
+    { key: 'convPrice', label: 'Conv. price', width: 130, sortable: true, align: 'right' },
+    { key: 'shares', label: 'Shares', width: 130, sortable: true, align: 'right' },
+    { key: 'basisApplied', label: 'Basis', width: 100, sortable: true, align: 'left' },
+  ],
+})
+const sortedCnDetails = computed(() => cnDetailTable.applySort(compute.value?.round?.cnDetails || []))
+
+function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
+  if (table.sort.key !== key) return null
+  return table.sort.dir
+}
 </script>
 
 <template>
   <div v-if="assumptions">
-    <div class="flex items-end justify-between mb-4 gap-3">
+    <div class="flex items-end justify-between mb-5 gap-3 flex-wrap">
       <div>
-        <h1 class="text-2xl font-semibold tracking-tight text-ink-100">Key assumptions</h1>
-        <p class="text-sm text-ink-400 mt-1">
-          Three primary inputs: <span class="text-ink-200 font-medium">pre-round FDS</span>,
-          <span class="text-ink-200 font-medium">pre-money valuation</span>,
-          <span class="text-ink-200 font-medium">amount raised</span>. Everything else is derived live.
+        <h1 class="text-2xl font-semibold tracking-tight text-ink-900">Key assumptions</h1>
+        <p class="text-sm text-ink-600 mt-1">
+          Three primary inputs:
+          <span class="text-ink-900 font-medium">pre-round FDS</span>,
+          <span class="text-ink-900 font-medium">pre-money valuation</span>,
+          <span class="text-ink-900 font-medium">amount raised</span>. Everything else is derived live.
         </p>
       </div>
-      <UiButton variant="primary" :disabled="saving" @click="save">
-        <Save :size="14" /> {{ saving ? 'Saving…' : 'Save' }}
-      </UiButton>
+      <div class="flex items-center gap-2">
+        <UiButton variant="ghost" @click="showVersions = true">
+          <History :size="14" /> Versions
+          <span v-if="versions?.length" class="ml-1 text-[10px] bg-ink-200 text-ink-700 px-1.5 py-0.5 rounded">{{ versions.length }}</span>
+        </UiButton>
+        <UiButton @click="namingSnapshot = true">
+          <BookmarkPlus :size="14" /> Snapshot
+        </UiButton>
+        <UiButton variant="primary" :disabled="saving" @click="save">
+          <Save :size="14" /> {{ saving ? 'Saving…' : 'Save' }}
+        </UiButton>
+      </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <UiCard title="Inputs">
-        <div class="space-y-3">
-          <label class="block">
-            <span class="block text-xs font-medium text-ink-300 mb-1">Round name</span>
-            <select v-model="form.round_name" class="w-full rounded-md border border-ink-600 bg-ink-800 px-3 py-2 text-sm text-ink-100">
-              <option v-for="s in seriesShortcuts" :key="s" :value="s">{{ s }}</option>
-            </select>
-          </label>
-
-          <UiInput v-model="form.pre_money" type="number" label="Pre-money valuation" prefix="$" step="100000" />
-          <UiInput v-model="form.new_money" type="number" label="New money (raise)" prefix="$" step="100000" />
-
-          <div>
-            <UiInput
-              v-model="form.pre_round_fds"
-              type="number"
-              label="Pre-round fully-diluted shares"
-              step="1"
-              hint="Holdings + outstanding options + available pool. Override if you're modelling a planned adjustment."
-            />
-            <div class="mt-1.5 flex items-center justify-between text-xs">
-              <span class="text-ink-500">
-                From cap table:
-                <button type="button" class="text-accent-400 hover:text-accent-300 num" @click="useComputedFDS">
-                  {{ fmtShares(fdsFromCapTable) }}
-                </button>
-              </span>
-              <button v-if="form.pre_round_fds != null" type="button"
-                class="text-ink-500 hover:text-ink-200 inline-flex items-center gap-1"
-                @click="clearOverride">
-                <RotateCcw :size="11" /> use computed
-              </button>
-            </div>
+    <!-- Inputs + Derived round math, side-by-side at wide widths -->
+    <div class="grid grid-cols-1 xl:grid-cols-12 gap-5">
+      <!-- Inputs column -->
+      <section class="xl:col-span-5">
+        <div class="rounded-lg border border-ink-300 bg-white shadow-card p-5">
+          <div class="flex items-baseline justify-between mb-4">
+            <h2 class="text-sm font-semibold text-ink-900">Inputs</h2>
+            <p v-if="savedAt" class="text-xs text-emerald-600">Saved at {{ savedAt }}</p>
           </div>
 
-          <label class="block">
-            <span class="block text-xs font-medium text-ink-300 mb-1">Convertible-note conversion basis</span>
-            <select v-model="form.cn_conversion_basis" class="w-full rounded-md border border-ink-600 bg-ink-800 px-3 py-2 text-sm text-ink-100">
-              <option value="best">Best for holder — min of discount, cap, round price (recommended)</option>
-              <option value="discount">Discount to round price only</option>
-              <option value="cap">Valuation cap only</option>
-              <option value="round_price">Round price (ignore discount + cap)</option>
-            </select>
-          </label>
+          <div class="space-y-4">
+            <div class="grid grid-cols-2 gap-3">
+              <label class="block">
+                <span class="block text-xs font-medium text-ink-700 mb-1">Round name</span>
+                <select v-model="form.round_name" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500">
+                  <option v-for="s in seriesShortcuts" :key="s" :value="s">{{ s }}</option>
+                </select>
+              </label>
+              <label class="block">
+                <span class="block text-xs font-medium text-ink-700 mb-1">CN conversion basis</span>
+                <select v-model="form.cn_conversion_basis" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500">
+                  <option value="best">Best for holder</option>
+                  <option value="discount">Discount only</option>
+                  <option value="cap">Cap only</option>
+                  <option value="round_price">Round price</option>
+                </select>
+              </label>
+            </div>
 
-          <label class="block">
-            <span class="block text-xs font-medium text-ink-300 mb-1">Notes</span>
-            <textarea v-model="form.notes" rows="3" class="w-full rounded-md border border-ink-600 bg-ink-800 px-3 py-2 text-sm text-ink-100" />
-          </label>
+            <div class="grid grid-cols-2 gap-3">
+              <UiInput v-model="form.pre_money" type="number" label="Pre-money valuation" prefix="$" step="100000" />
+              <UiInput v-model="form.new_money" type="number" label="New money (raise)" prefix="$" step="100000" />
+            </div>
 
-          <p v-if="savedAt" class="text-xs text-emerald-400">Saved at {{ savedAt }}</p>
+            <div>
+              <UiInput
+                v-model="form.pre_round_fds"
+                type="number"
+                label="Pre-round fully-diluted shares"
+                step="1"
+                hint="Holdings + outstanding options + available pool. Override if you're modelling a planned adjustment."
+              />
+              <div class="mt-1.5 flex items-center justify-between text-xs">
+                <span class="text-ink-500">
+                  From cap table:
+                  <button type="button" class="text-accent-600 hover:text-accent-700 font-medium num" @click="useComputedFDS">
+                    {{ fmtShares(fdsFromCapTable) }}
+                  </button>
+                </span>
+                <button v-if="form.pre_round_fds != null" type="button"
+                  class="text-ink-500 hover:text-ink-900 inline-flex items-center gap-1"
+                  @click="clearOverride">
+                  <RotateCcw :size="11" /> use computed
+                </button>
+              </div>
+            </div>
+
+            <label class="block">
+              <span class="block text-xs font-medium text-ink-700 mb-1">Notes</span>
+              <textarea v-model="form.notes" rows="3" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500" />
+            </label>
+          </div>
         </div>
-      </UiCard>
+      </section>
 
-      <div class="space-y-4">
-        <UiCard title="Derived round math" :subtitle="pending ? 'Recomputing…' : 'Live'">
-          <template #header>
-            <RefreshCw v-if="pending" :size="14" class="animate-spin text-ink-400" />
-          </template>
-          <div v-if="compute" class="grid grid-cols-2 gap-3">
+      <!-- Derived metrics + CN math column -->
+      <section class="xl:col-span-7 space-y-5">
+        <!-- Round math, flat stat strip — no card to make it feel like an output -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="text-[11px] font-semibold uppercase tracking-wider text-ink-500">
+              Derived round math
+              <RefreshCw v-if="pending" :size="11" class="inline animate-spin text-ink-400 ml-1" />
+            </h2>
+          </div>
+          <div v-if="compute" class="grid grid-cols-2 md:grid-cols-3 gap-3">
             <UiStat label="Price per share" :value="fmtPricePerShare(compute.round.pricePerShare)" emphasis />
-            <UiStat label="Post-money (pre + new)" :value="fmtUSD(compute.round.postMoney)" emphasis />
+            <UiStat label="Post-money" :value="fmtUSD(compute.round.postMoney)" emphasis />
+            <UiStat label="Post-round FDS" :value="fmtShares(compute.round.postRoundFDS)" emphasis />
             <UiStat label="Pre-round FDS" :value="fmtShares(compute.round.preRoundFDS)" :hint="usingOverride ? 'override' : 'from cap table'" />
             <UiStat label="New preferred shares" :value="fmtShares(compute.round.newPreferredShares)" />
-            <UiStat label="CN conversion shares" :value="fmtShares(compute.round.cnConvertedShares)" :hint="`from $${(compute.round.cnConvertedDollars).toLocaleString()}`" />
-            <UiStat label="Post-round FDS" :value="fmtShares(compute.round.postRoundFDS)" emphasis />
-            <UiStat label="Valuation at post-FDS" :value="fmtUSD(compute.round.impliedPostFDSValuation)" hint="PPS × post-FDS (incl. CN dilution)" />
+            <UiStat label="CN conversion shares" :value="fmtShares(compute.round.cnConvertedShares)" :hint="compute.round.cnConvertedDollars ? `from ${fmtUSD(compute.round.cnConvertedDollars)}` : ''" />
+            <UiStat label="Valuation at post-FDS" :value="fmtUSD(compute.round.impliedPostFDSValuation)" hint="PPS × post-FDS (incl. CN dilution)" class="md:col-span-2" />
+            <UiStat
+              v-if="compute.round.deferred?.totalDollars"
+              label="Deferred CN obligation"
+              :value="fmtUSD(compute.round.deferred.totalDollars)"
+              :hint="`${fmtShares(compute.round.deferred.projectedSharesAtRoundPPS)} shares at round PPS`"
+              tone="warn"
+            />
           </div>
-        </UiCard>
+        </div>
 
-        <UiCard v-if="compute?.round.cnDetails?.length" title="Convertible-note conversion detail" subtitle="Notes that convert at this round">
-          <div class="overflow-x-auto -mx-4">
+        <!-- Convertible-note conversion detail -->
+        <div v-if="compute?.round.cnDetails?.length">
+          <h2 class="text-[11px] font-semibold uppercase tracking-wider text-ink-500 mb-2">
+            CN conversion detail
+            <span class="text-ink-400 font-normal normal-case ml-1">— notes converting at this round</span>
+          </h2>
+          <div class="rounded-lg border border-ink-300 bg-white shadow-card overflow-hidden">
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm border-separate" style="border-spacing: 0; table-layout: fixed; min-width: 700px;">
+                <colgroup>
+                  <col v-for="c in cnDetailTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
+                </colgroup>
+                <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
+                  <tr>
+                    <th
+                      v-for="c in cnDetailTable.cols"
+                      :key="c.key"
+                      class="relative px-3 py-2 border-b border-ink-300 select-none font-semibold"
+                      :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
+                      @click="c.sortable ? cnDetailTable.toggleSort(c.key) : null"
+                    >
+                      <span class="inline-flex items-center gap-1" :class="c.align === 'right' ? 'flex-row-reverse' : ''">
+                        {{ c.label }}
+                        <ChevronUp v-if="sortIconFor(cnDetailTable, c.key) === 'asc'" :size="12" class="text-accent-600" />
+                        <ChevronDown v-if="sortIconFor(cnDetailTable, c.key) === 'desc'" :size="12" class="text-accent-600" />
+                      </span>
+                      <span class="resize-handle" @mousedown.prevent.stop="cnDetailTable.startResize($event, c.key)" @click.stop />
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="num">
+                  <tr v-for="d in sortedCnDetails" :key="d.id" class="hover:bg-accent-50/40 transition-colors">
+                    <td class="px-3 py-2 text-ink-900 border-b border-ink-200 truncate" :title="d.stakeholderName">{{ d.stakeholderName }}</td>
+                    <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtUSD(d.dollars) }}</td>
+                    <td class="px-3 py-2 text-right text-ink-700 border-b border-ink-200">{{ fmtPricePerShare(d.convPrice) }}</td>
+                    <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtShares(d.shares) }}</td>
+                    <td class="px-3 py-2 text-[11px] uppercase tracking-wide border-b border-ink-200" :class="{
+                      'text-emerald-700': d.basisApplied === 'discount',
+                      'text-amber-700': d.basisApplied === 'cap',
+                      'text-ink-600': d.basisApplied === 'round',
+                    }">{{ d.basisApplied }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Deferred -->
+        <div v-if="compute?.round.deferred?.details?.length">
+          <h2 class="text-[11px] font-semibold uppercase tracking-wider text-ink-500 mb-2">
+            Deferred CN obligations
+            <span class="text-ink-400 font-normal normal-case ml-1">— projected at the round PPS ({{ fmtPricePerShare(compute.round.pricePerShare) }})</span>
+          </h2>
+          <div class="rounded-lg border border-amber-200 bg-amber-50/50 p-4">
             <table class="w-full text-sm">
-              <thead class="text-left text-ink-400 text-xs uppercase tracking-wide">
-                <tr class="border-b border-ink-700">
-                  <th class="px-4 py-2">Holder</th>
-                  <th class="px-3 py-2 text-right">Dollars</th>
-                  <th class="px-3 py-2 text-right">Conv. price</th>
-                  <th class="px-3 py-2 text-right">Shares</th>
-                  <th class="px-3 py-2">Basis</th>
+              <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide">
+                <tr>
+                  <th class="px-2 py-1 font-semibold">Holder</th>
+                  <th class="px-2 py-1 text-right font-semibold">Dollars</th>
+                  <th class="px-2 py-1 text-right font-semibold">Projected shares</th>
                 </tr>
               </thead>
               <tbody class="num">
-                <tr v-for="d in compute.round.cnDetails" :key="d.id" class="border-b border-ink-800/80">
-                  <td class="px-4 py-2 text-ink-100">{{ d.stakeholderName }}</td>
-                  <td class="px-3 py-2 text-right">{{ fmtUSD(d.dollars) }}</td>
-                  <td class="px-3 py-2 text-right">{{ fmtPricePerShare(d.convPrice) }}</td>
-                  <td class="px-3 py-2 text-right">{{ fmtShares(d.shares) }}</td>
-                  <td class="px-3 py-2 text-[11px] uppercase tracking-wide" :class="{
-                    'text-emerald-400': d.basisApplied === 'discount',
-                    'text-amber-400': d.basisApplied === 'cap',
-                    'text-ink-400': d.basisApplied === 'round',
-                  }">{{ d.basisApplied }}</td>
+                <tr v-for="d in compute.round.deferred.details" :key="d.id" class="border-t border-amber-200/60">
+                  <td class="px-2 py-1.5 text-ink-900">{{ d.stakeholderName }}</td>
+                  <td class="px-2 py-1.5 text-right">{{ fmtUSD(d.dollars) }}</td>
+                  <td class="px-2 py-1.5 text-right">{{ fmtShares(d.shares) }}</td>
+                </tr>
+                <tr class="border-t-2 border-amber-300 font-semibold text-ink-900">
+                  <td class="px-2 py-1.5">Total</td>
+                  <td class="px-2 py-1.5 text-right">{{ fmtUSD(compute.round.deferred.totalDollars) }}</td>
+                  <td class="px-2 py-1.5 text-right">{{ fmtShares(compute.round.deferred.projectedSharesAtRoundPPS) }}</td>
                 </tr>
               </tbody>
             </table>
+            <p class="mt-3 text-xs text-ink-600">
+              Deferred notes do NOT add to post-round FDS or post-money. To include them as this-round conversions, flip "Converts at round?" on the
+              <NuxtLink :to="`/companies/${id}/cap-table`" class="text-accent-600 hover:text-accent-700 font-medium">Cap table</NuxtLink> page.
+            </p>
           </div>
-        </UiCard>
+        </div>
 
-        <UiCard v-if="compute?.round.deferred?.details?.length" title="Deferred CN obligations"
-                :subtitle="`Bought now, convert later — projected at the round PPS (${fmtPricePerShare(compute.round.pricePerShare)})`">
-          <div class="overflow-x-auto -mx-4">
-            <table class="w-full text-sm">
-              <thead class="text-left text-ink-400 text-xs uppercase tracking-wide">
-                <tr class="border-b border-ink-700">
-                  <th class="px-4 py-2">Holder</th>
-                  <th class="px-3 py-2 text-right">Dollars</th>
-                  <th class="px-3 py-2 text-right">Projected shares</th>
-                </tr>
-              </thead>
-              <tbody class="num">
-                <tr v-for="d in compute.round.deferred.details" :key="d.id" class="border-b border-ink-800/80">
-                  <td class="px-4 py-2 text-ink-100">{{ d.stakeholderName }}</td>
-                  <td class="px-3 py-2 text-right">{{ fmtUSD(d.dollars) }}</td>
-                  <td class="px-3 py-2 text-right">{{ fmtShares(d.shares) }}</td>
-                </tr>
-                <tr class="border-t border-ink-700 font-semibold text-ink-200">
-                  <td class="px-4 py-2">Total deferred</td>
-                  <td class="px-3 py-2 text-right">{{ fmtUSD(compute.round.deferred.totalDollars) }}</td>
-                  <td class="px-3 py-2 text-right">{{ fmtShares(compute.round.deferred.projectedSharesAtRoundPPS) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <p class="mt-3 text-xs text-ink-500">
-            These notes do NOT add to post-round FDS or post-money — they remain outstanding obligations.
-            To include them as Series-B conversions instead, flip "Converts at round?" to yes on the
-            <NuxtLink :to="`/companies/${id}/cap-table`" class="text-accent-400 hover:text-accent-300">Cap table</NuxtLink> page.
-          </p>
-        </UiCard>
-
-        <UiCard v-if="compute?.round.warnings?.length" title="Warnings">
-          <ul class="space-y-1 text-xs text-amber-200 list-disc pl-5">
+        <!-- Warnings -->
+        <div v-if="compute?.round.warnings?.length" class="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-amber-700 mb-2">Warnings</h3>
+          <ul class="space-y-1 text-sm text-amber-900 list-disc pl-5">
             <li v-for="(w, i) in compute.round.warnings" :key="i">{{ w }}</li>
           </ul>
-        </UiCard>
+        </div>
+      </section>
+    </div>
+
+    <!-- Per-stakeholder dilution table — full width below -->
+    <div v-if="compute?.dilution?.length" class="mt-6">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-[11px] font-semibold uppercase tracking-wider text-ink-500">
+          Per-stakeholder dilution
+          <span class="text-ink-400 font-normal normal-case ml-1">— {{ compute.dilution.length }} stakeholders. Click headers to sort, drag edges to resize.</span>
+        </h2>
+        <span class="text-xs text-ink-500">Unit: <span class="text-ink-900 font-medium">{{ unit === 'shares' ? 'shares' : unit === 'pct' ? '% of FDS' : '$ value' }}</span></span>
+      </div>
+      <div class="rounded-lg border border-ink-300 bg-white shadow-card overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="text-sm border-separate" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: dilutionWidth + 'px' }">
+            <colgroup>
+              <col v-for="col in dilutionTable.cols" :key="col.key" :style="{ width: col.width + 'px' }" />
+            </colgroup>
+            <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
+              <tr>
+                <th
+                  v-for="col in dilutionTable.cols"
+                  :key="col.key"
+                  class="relative px-3 py-2 border-b border-ink-300 select-none font-semibold"
+                  :class="[col.align === 'right' ? 'text-right' : 'text-left', col.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
+                  @click="col.sortable ? dilutionTable.toggleSort(col.key) : null"
+                >
+                  <span class="inline-flex items-center gap-1" :class="col.align === 'right' ? 'flex-row-reverse' : ''">
+                    {{ col.label }}
+                    <ChevronUp v-if="sortIconFor(dilutionTable, col.key) === 'asc'" :size="12" class="text-accent-600" />
+                    <ChevronDown v-if="sortIconFor(dilutionTable, col.key) === 'desc'" :size="12" class="text-accent-600" />
+                  </span>
+                  <span class="resize-handle" @mousedown.prevent.stop="dilutionTable.startResize($event, col.key)" @click.stop />
+                </th>
+              </tr>
+            </thead>
+            <tbody class="num">
+              <tr v-for="r in sortedDilution" :key="r.stakeholderId" class="hover:bg-accent-50/40 transition-colors">
+                <td class="px-3 py-2 font-medium text-ink-900 truncate border-b border-ink-200" :title="r.name">{{ r.name }}</td>
+                <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtShare(r.preShares, compute.round.preRoundFDS, compute.round.pricePerShare) }}</td>
+                <td class="px-3 py-2 text-right border-b border-ink-200">{{ r.cnShares ? fmtShare(r.cnShares, compute.round.postRoundFDS, compute.round.pricePerShare) : '—' }}</td>
+                <td class="px-3 py-2 text-right font-medium border-b border-ink-200 text-ink-900">{{ fmtShare(r.postShares, compute.round.postRoundFDS, compute.round.pricePerShare) }}</td>
+                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtPct(r.prePct, 2) }}</td>
+                <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtPct(r.postPct, 2) }}</td>
+                <td class="px-3 py-2 text-right border-b border-ink-200 font-medium" :class="r.delta < 0 ? 'text-red-600' : 'text-emerald-600'">
+                  {{ (r.delta >= 0 ? '+' : '') + fmtPct(r.delta, 2) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
-    <UiCard v-if="compute?.dilution?.length" class="mt-4" title="Per-stakeholder dilution" :subtitle="`${compute.dilution.length} stakeholders — click headers to sort, drag edges to resize`">
-      <div class="overflow-x-auto -mx-4">
-        <table class="text-sm border-separate" style="border-spacing: 0; table-layout: fixed;">
-          <colgroup>
-            <col v-for="col in dilutionTable.cols" :key="col.key" :style="{ width: col.width + 'px' }" />
-          </colgroup>
-          <thead class="text-left text-ink-400 text-xs uppercase tracking-wide">
-            <tr class="border-b border-ink-700">
-              <th
-                v-for="col in dilutionTable.cols"
-                :key="col.key"
-                class="relative px-3 py-2 border-b border-ink-700 select-none"
-                :class="[
-                  col.align === 'right' ? 'text-right' : (col.align === 'center' ? 'text-center' : 'text-left'),
-                  col.sortable ? 'cursor-pointer hover:text-ink-200' : '',
-                ]"
-                @click="col.sortable ? dilutionTable.toggleSort(col.key) : null"
-              >
-                <span class="inline-flex items-center gap-1" :class="col.align === 'right' ? 'flex-row-reverse' : ''">
-                  {{ col.label }}
-                  <ChevronUp v-if="dilutionTable.sort.key === col.key && dilutionTable.sort.dir === 'asc'" :size="11" />
-                  <ChevronDown v-if="dilutionTable.sort.key === col.key && dilutionTable.sort.dir === 'desc'" :size="11" />
-                </span>
-                <span
-                  class="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-accent-500/50"
-                  @mousedown.prevent.stop="dilutionTable.startResize($event, col.key)"
-                  @click.stop
-                />
-              </th>
-            </tr>
-          </thead>
-          <tbody class="num">
-            <tr v-for="r in sortedDilution" :key="r.stakeholderId" class="hover:bg-ink-800/40">
-              <td class="px-3 py-2 font-medium text-ink-100 truncate border-b border-ink-800/80" :title="r.name">{{ r.name }}</td>
-              <td class="px-3 py-2 text-right border-b border-ink-800/80">{{ fmtShares(r.preShares) }}</td>
-              <td class="px-3 py-2 text-right border-b border-ink-800/80">{{ r.cnShares ? fmtShares(r.cnShares) : '—' }}</td>
-              <td class="px-3 py-2 text-right font-medium border-b border-ink-800/80">{{ fmtShares(r.postShares) }}</td>
-              <td class="px-3 py-2 text-right text-ink-400 border-b border-ink-800/80">{{ fmtPct(r.prePct, 2) }}</td>
-              <td class="px-3 py-2 text-right border-b border-ink-800/80">{{ fmtPct(r.postPct, 2) }}</td>
-              <td class="px-3 py-2 text-right border-b border-ink-800/80" :class="r.delta < 0 ? 'text-red-400' : 'text-emerald-400'">
-                {{ (r.delta >= 0 ? '+' : '') + fmtPct(r.delta, 2) }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+    <!-- Versions drawer -->
+    <div v-if="showVersions" class="fixed inset-0 z-40 bg-ink-900/40 backdrop-blur-sm" @click.self="showVersions = false">
+      <aside class="absolute right-0 top-0 h-full w-full max-w-md bg-white border-l border-ink-300 shadow-2xl overflow-y-auto">
+        <div class="sticky top-0 bg-white border-b border-ink-200 p-4 flex items-center justify-between">
+          <div>
+            <h2 class="text-base font-semibold text-ink-900">Version history</h2>
+            <p class="text-xs text-ink-500">Auto-snapshots happen when numeric inputs change. Named snapshots are explicit.</p>
+          </div>
+          <button class="p-1.5 hover:bg-ink-200 rounded" @click="showVersions = false"><X :size="16" /></button>
+        </div>
+        <div class="p-4">
+          <div v-if="!versions?.length" class="text-sm text-ink-500 text-center py-8">No saved versions yet.</div>
+          <ul v-else class="space-y-2">
+            <li v-for="v in versions" :key="v.id" class="border border-ink-200 rounded-lg p-3 bg-white hover:border-accent-300 transition-colors">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span v-if="v.is_auto" class="text-[10px] uppercase tracking-wide text-ink-500 bg-ink-200 px-1.5 py-0.5 rounded">auto</span>
+                    <span v-else class="text-[10px] uppercase tracking-wide text-accent-700 bg-accent-50 border border-accent-200 px-1.5 py-0.5 rounded">named</span>
+                    <span class="text-sm font-medium text-ink-900 truncate">{{ v.label || fmtDate(v.created_at) }}</span>
+                  </div>
+                  <div class="mt-1 text-xs text-ink-500">{{ new Date(v.created_at).toLocaleString() }} · {{ v.round_name }}</div>
+                  <div class="mt-2 grid grid-cols-3 gap-1 text-[11px] num text-ink-700">
+                    <span>Pre {{ fmtUSD(v.pre_money) }}</span>
+                    <span>Raise {{ fmtUSD(v.new_money) }}</span>
+                    <span>FDS {{ v.pre_round_fds ? fmtShares(v.pre_round_fds) : 'auto' }}</span>
+                  </div>
+                </div>
+                <div class="shrink-0 flex flex-col gap-1">
+                  <button class="text-xs text-accent-600 hover:text-accent-700 inline-flex items-center gap-1 px-2 py-1 rounded border border-accent-300 hover:bg-accent-50" @click="loadVersion(v)">
+                    <Upload :size="11" /> load
+                  </button>
+                  <button class="text-xs text-ink-500 hover:text-red-600 inline-flex items-center gap-1 px-2 py-1 rounded border border-ink-300 hover:border-red-300" @click="deleteVersion(v)">
+                    <Trash2 :size="11" /> delete
+                  </button>
+                </div>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Name snapshot dialog -->
+    <div v-if="namingSnapshot" class="fixed inset-0 z-50 bg-ink-900/40 backdrop-blur-sm grid place-items-center p-4" @click.self="namingSnapshot = false">
+      <div class="w-full max-w-md rounded-lg border border-ink-300 bg-white p-5 shadow-card-hover">
+        <h2 class="text-base font-semibold text-ink-900">Name this snapshot</h2>
+        <p class="text-xs text-ink-500 mt-1">Captures the current working assumptions with a label you'll remember.</p>
+        <div class="mt-4">
+          <UiInput v-model="snapshotLabel" label="Label" placeholder="Series B base case" />
+        </div>
+        <div class="mt-5 flex justify-end gap-2">
+          <UiButton variant="ghost" @click="namingSnapshot = false">Cancel</UiButton>
+          <UiButton variant="primary" :disabled="!snapshotLabel.trim()" @click="snapshotNow">
+            <BookmarkPlus :size="14" /> Save snapshot
+          </UiButton>
+        </div>
       </div>
-    </UiCard>
+    </div>
   </div>
 </template>

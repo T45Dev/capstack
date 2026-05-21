@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Upload, Filter, Plus, Edit3, Trash2 } from 'lucide-vue-next'
+import { Upload, Filter, Plus, Edit3, Trash2, ChevronUp, ChevronDown } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtUSD, fmtDate, fmtPricePerShare } from '~/utils/format'
 
 const route = useRoute()
@@ -11,12 +11,16 @@ interface Holding { stakeholder_id: string; share_class_id: string; shares: numb
 interface Grant { id: string; stakeholder_id: string | null; recipient_name: string; quantity: number; status: string }
 interface Convertible { id: string; stakeholder_name: string; principal: number; interest_accrued: number; interest_rate: number; issue_date: string | null; maturity_date: string | null; valuation_cap: number | null; conversion_discount: number; converts_at_round: number }
 
-const { data, refresh } = await useFetch<{ share_classes: ShareClassRow[]; stakeholders: Stakeholder[]; holdings: Holding[]; grants: Grant[]; convertibles: Convertible[]; pools: any[] }>(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => ({ share_classes: [], stakeholders: [], holdings: [], grants: [], convertibles: [], pools: [] } as any) })
+const { data, refresh } = await useFetch<{ share_classes: ShareClassRow[]; stakeholders: Stakeholder[]; holdings: Holding[]; grants: Grant[]; convertibles: Convertible[]; pools: any[]; current_pps: number }>(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => ({ share_classes: [], stakeholders: [], holdings: [], grants: [], convertibles: [], pools: [], current_pps: 0 } as any) })
 
 const query = ref('')
+const { format: fmtShare, compareValue, unit } = useShareUnit()
+
+const currentPPS = computed(() => data.value?.current_pps || 0)
 
 // Build pivoted rows: stakeholder × share class + outstanding options
 interface PivotRow {
+  id: string
   stakeholderId: string
   name: string
   totalShares: number
@@ -28,7 +32,7 @@ interface PivotRow {
 const pivot = computed<PivotRow[]>(() => {
   const map = new Map<string, PivotRow>()
   for (const s of data.value!.stakeholders) {
-    map.set(s.id, { stakeholderId: s.id, name: s.name, totalShares: 0, optionShares: 0, fds: 0, byClass: {} })
+    map.set(s.id, { id: s.id, stakeholderId: s.id, name: s.name, totalShares: 0, optionShares: 0, fds: 0, byClass: {} })
   }
   for (const h of data.value!.holdings) {
     const row = map.get(h.stakeholder_id)
@@ -47,9 +51,9 @@ const pivot = computed<PivotRow[]>(() => {
   const arr = Array.from(map.values()).filter(r => r.fds > 0)
   if (query.value.trim()) {
     const q = query.value.toLowerCase()
-    return arr.filter(r => r.name.toLowerCase().includes(q)).sort((a, b) => b.fds - a.fds)
+    return arr.filter(r => r.name.toLowerCase().includes(q))
   }
-  return arr.sort((a, b) => b.fds - a.fds)
+  return arr
 })
 
 const totals = computed(() => {
@@ -68,7 +72,120 @@ const poolAuthorized = computed(() => data.value!.pools.reduce((a: number, p: an
 const poolAvailable = computed(() => Math.max(0, poolAuthorized.value - totals.value.totalOptions - data.value!.grants.filter((g: any) => g.status === 'proposed').reduce((a: number, g: any) => a + g.quantity, 0)))
 const fdsIncludingPool = computed(() => totals.value.fds + poolAvailable.value)
 
-// ---------- Convertible-note CRUD ----------
+// ----- Share classes table (sortable + resizable) -----
+const shareClassTable = useSortableTable({
+  key: 'capstack:cap-table:share-classes',
+  defaultSort: { key: 'seniority', dir: 'asc' },
+  columns: [
+    { key: 'code', label: 'Code', width: 90, sortable: true, align: 'left' },
+    { key: 'name', label: 'Name', width: 220, sortable: true, align: 'left' },
+    { key: 'kind', label: 'Kind', width: 100, sortable: true, align: 'left' },
+    { key: 'issued', label: 'Issued', width: 150, sortable: true, align: 'right' },
+    { key: 'authorized', label: 'Authorized', width: 140, sortable: true, align: 'right' },
+    { key: 'issue_price', label: 'PPS', width: 110, sortable: true, align: 'right' },
+    { key: 'pct', label: '% FDS', width: 90, sortable: true, align: 'right' },
+  ],
+})
+
+const sortedShareClasses = computed(() => {
+  const rows = (data.value?.share_classes || []).map((sc: any) => ({
+    ...sc,
+    issued: totals.value.byClass[sc.id] || 0,
+    pct: fdsIncludingPool.value > 0 ? (totals.value.byClass[sc.id] || 0) / fdsIncludingPool.value : 0,
+    seniority: sc.seniority || 0,
+  }))
+  const k = shareClassTable.sort.key
+  const sign = shareClassTable.sort.dir === 'asc' ? 1 : -1
+  return [...rows].sort((a, b) => {
+    const av = (a as any)[k], bv = (b as any)[k]
+    if (av == null && bv == null) return 0
+    if (av == null) return 1
+    if (bv == null) return -1
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sign
+    return String(av).localeCompare(String(bv), 'en', { numeric: true }) * sign
+  })
+})
+
+// ----- Holdings pivot table (sortable + resizable) -----
+// Columns are dynamic — one per share class + options + fds.
+const holdingsCols = computed(() => {
+  const cols: Array<{ key: string; label: string; width: number; sortable: boolean; align: 'left' | 'right' }> = [
+    { key: 'name', label: 'Stakeholder', width: 220, sortable: true, align: 'left' },
+  ]
+  for (const sc of (data.value?.share_classes || [])) {
+    cols.push({ key: `class_${sc.id}`, label: sc.code, width: 110, sortable: true, align: 'right' })
+  }
+  cols.push({ key: 'optionShares', label: 'Options', width: 110, sortable: true, align: 'right' })
+  cols.push({ key: 'fds', label: 'FDS', width: 130, sortable: true, align: 'right' })
+  return cols
+})
+
+const holdingsTable = useSortableTable({
+  key: 'capstack:cap-table:holdings',
+  defaultSort: { key: 'fds', dir: 'desc' },
+  columns: holdingsCols.value as any,
+})
+
+// Keep table cols in sync when share classes change
+// Rebuild table columns in the correct order whenever share classes change,
+// preserving any widths the user has already adjusted.
+watch(holdingsCols, (cols) => {
+  const widthMap: Record<string, number> = {}
+  for (const c of holdingsTable.cols) widthMap[c.key] = c.width
+  const next = cols.map(c => ({ ...c, width: widthMap[c.key] ?? c.width }))
+  holdingsTable.cols.splice(0, holdingsTable.cols.length, ...(next as any))
+}, { immediate: true })
+
+const sortedPivot = computed(() => {
+  const denom = fdsIncludingPool.value
+  const pps = currentPPS.value
+  const k = holdingsTable.sort.key
+  const sign = holdingsTable.sort.dir === 'asc' ? 1 : -1
+
+  return [...pivot.value].sort((a, b) => {
+    let av: number | string, bv: number | string
+    if (k === 'name') { av = a.name; bv = b.name }
+    else if (k === 'optionShares') { av = compareValue(a.optionShares, denom, pps); bv = compareValue(b.optionShares, denom, pps) }
+    else if (k === 'fds') { av = compareValue(a.fds, denom, pps); bv = compareValue(b.fds, denom, pps) }
+    else if (k.startsWith('class_')) {
+      const scId = k.slice(6)
+      av = compareValue(a.byClass[scId] || 0, denom, pps)
+      bv = compareValue(b.byClass[scId] || 0, denom, pps)
+    } else { av = 0; bv = 0 }
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sign
+    return String(av).localeCompare(String(bv), 'en', { numeric: true }) * sign
+  })
+})
+
+const holdingsWidth = computed(() => holdingsTable.cols.reduce((s, c) => s + c.width, 0))
+
+// ----- Convertibles ledger -----
+const cnTable = useSortableTable({
+  key: 'capstack:cap-table:convertibles',
+  defaultSort: { key: 'total', dir: 'desc' },
+  columns: [
+    { key: 'stakeholder_name', label: 'Holder', width: 200, sortable: true, align: 'left' },
+    { key: 'principal', label: 'Principal', width: 130, sortable: true, align: 'right' },
+    { key: 'interest_accrued', label: 'Interest accrued', width: 150, sortable: true, align: 'right' },
+    { key: 'total', label: 'Total', width: 130, sortable: true, align: 'right' },
+    { key: 'interest_rate', label: 'Rate', width: 80, sortable: true, align: 'right' },
+    { key: 'valuation_cap', label: 'Cap', width: 130, sortable: true, align: 'right' },
+    { key: 'conversion_discount', label: 'Discount', width: 100, sortable: true, align: 'right' },
+    { key: 'issue_date', label: 'Issued', width: 120, sortable: true, align: 'left' },
+    { key: 'maturity_date', label: 'Matures', width: 120, sortable: true, align: 'left' },
+    { key: 'converts_at_round', label: 'Converts at round?', width: 180, sortable: true, align: 'left' },
+    { key: 'actions', label: '', width: 90, sortable: false, align: 'right' },
+  ],
+})
+const sortedConvertibles = computed(() => {
+  const rows = (data.value?.convertibles || []).map((c: any) => ({
+    ...c,
+    total: (c.principal || 0) + (c.interest_accrued || 0),
+  }))
+  return cnTable.applySort(rows)
+})
+
+// ----- Convertible-note CRUD -----
 const cnModalOpen = ref(false)
 const cnEditing = ref<Convertible | null>(null)
 const cnSaving = ref(false)
@@ -142,19 +259,27 @@ async function deleteCn(cn: Convertible) {
   await $fetch(`/api/convertibles/${cn.id}`, { method: 'DELETE' })
   await refresh()
 }
+
+function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
+  if (table.sort.key !== key) return null
+  return table.sort.dir
+}
 </script>
 
 <template>
   <div v-if="data">
-    <div class="flex items-end justify-between mb-4 gap-3">
+    <div class="flex items-end justify-between mb-4 gap-3 flex-wrap">
       <div>
-        <h1 class="text-2xl font-semibold tracking-tight text-ink-100">Cap table</h1>
-        <p class="text-sm text-ink-400 mt-1">Stakeholders × share classes. Sorted by fully-diluted size.</p>
+        <h1 class="text-2xl font-semibold tracking-tight text-ink-900">Cap table</h1>
+        <p class="text-sm text-ink-600 mt-1">
+          Stakeholders × share classes. Display unit:
+          <span class="font-medium text-ink-900">{{ unit === 'shares' ? 'shares' : (unit === 'pct' ? '% of FDS' : `$ at ${fmtPricePerShare(currentPPS)}`) }}</span>.
+        </p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 flex-wrap">
         <div class="relative">
-          <Filter :size="12" class="absolute left-2 top-1/2 -translate-y-1/2 text-ink-500" />
-          <input v-model="query" placeholder="Filter stakeholders…" class="rounded-md border border-ink-600 bg-ink-800 pl-7 pr-3 py-1.5 text-sm w-64" />
+          <Filter :size="12" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-500" />
+          <input v-model="query" placeholder="Filter stakeholders…" class="rounded-md border border-ink-300 bg-white pl-7 pr-3 py-1.5 text-sm w-64 shadow-sm focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500" />
         </div>
         <NuxtLink :to="`/companies/${id}/import`">
           <UiButton><Upload :size="14" /> Re-import</UiButton>
@@ -170,135 +295,166 @@ async function deleteCn(cn: Convertible) {
       <NuxtLink :to="`/companies/${id}/import`"><UiButton variant="primary"><Upload :size="14" /> Import Carta export</UiButton></NuxtLink>
     </UiEmpty>
 
-    <div v-else>
-      <UiCard padded title="Share classes" :subtitle="`${data.share_classes.length} classes`">
-        <div class="overflow-x-auto -mx-4">
-          <table class="w-full text-sm">
-            <thead class="text-left text-ink-400 text-xs uppercase tracking-wide">
-              <tr class="border-b border-ink-700">
-                <th class="px-4 py-2">Code</th>
-                <th class="px-4 py-2">Name</th>
-                <th class="px-4 py-2 text-right">Issued</th>
-                <th class="px-4 py-2 text-right">Authorized</th>
-                <th class="px-4 py-2 text-right">PPS</th>
-                <th class="px-4 py-2 text-right">% FDS</th>
+    <div v-else class="space-y-6">
+      <!-- Share classes -->
+      <UiCard title="Share classes" :subtitle="`${data.share_classes.length} classes — click headers to sort, drag edges to resize`" :padded="false">
+        <div class="overflow-x-auto">
+          <table class="text-sm border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
+            <colgroup>
+              <col v-for="c in shareClassTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
+            </colgroup>
+            <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
+              <tr>
+                <th
+                  v-for="c in shareClassTable.cols"
+                  :key="c.key"
+                  class="relative px-3 py-2 border-b border-ink-300 select-none font-semibold"
+                  :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
+                  @click="c.sortable ? shareClassTable.toggleSort(c.key) : null"
+                >
+                  <span class="inline-flex items-center gap-1" :class="c.align === 'right' ? 'flex-row-reverse' : ''">
+                    {{ c.label }}
+                    <ChevronUp v-if="sortIconFor(shareClassTable, c.key) === 'asc'" :size="12" class="text-accent-600" />
+                    <ChevronDown v-if="sortIconFor(shareClassTable, c.key) === 'desc'" :size="12" class="text-accent-600" />
+                  </span>
+                  <span class="resize-handle" @mousedown.prevent.stop="shareClassTable.startResize($event, c.key)" @click.stop />
+                </th>
               </tr>
             </thead>
             <tbody class="num">
-              <tr v-for="sc in data.share_classes" :key="sc.id" class="border-b border-ink-800/80">
-                <td class="px-4 py-2 font-mono text-xs">{{ sc.code }}</td>
-                <td class="px-4 py-2">{{ sc.name }} <span class="text-[10px] uppercase text-ink-500 ml-1">{{ sc.kind }}</span></td>
-                <td class="px-4 py-2 text-right">{{ fmtShares(totals.byClass[sc.id] || 0) }}</td>
-                <td class="px-4 py-2 text-right text-ink-400">{{ sc.authorized ? fmtShares(sc.authorized) : '—' }}</td>
-                <td class="px-4 py-2 text-right text-ink-400">{{ fmtPricePerShare(sc.issue_price) }}</td>
-                <td class="px-4 py-2 text-right text-ink-400">{{ fdsIncludingPool ? fmtPct((totals.byClass[sc.id] || 0) / fdsIncludingPool, 2) : '—' }}</td>
+              <tr v-for="sc in sortedShareClasses" :key="sc.id" class="hover:bg-accent-50/40 transition-colors">
+                <td class="px-3 py-2 font-mono text-xs border-b border-ink-200 text-ink-800">{{ sc.code }}</td>
+                <td class="px-3 py-2 border-b border-ink-200 text-ink-900 truncate" :title="sc.name">{{ sc.name }}</td>
+                <td class="px-3 py-2 text-[11px] uppercase tracking-wide text-ink-500 border-b border-ink-200">{{ sc.kind }}</td>
+                <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtShare(sc.issued, fdsIncludingPool, sc.issue_price || currentPPS) }}</td>
+                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ sc.authorized ? fmtShares(sc.authorized) : '—' }}</td>
+                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtPricePerShare(sc.issue_price) }}</td>
+                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtPct(sc.pct, 2) }}</td>
               </tr>
-              <tr class="bg-ink-800/40 font-medium">
-                <td class="px-4 py-2">Pool</td>
-                <td class="px-4 py-2">Option pool authorized</td>
-                <td class="px-4 py-2 text-right">{{ fmtShares(totals.totalOptions) }} <span class="text-xs text-ink-500">(attributed)</span></td>
-                <td class="px-4 py-2 text-right text-ink-400">{{ fmtShares(poolAuthorized) }}</td>
-                <td class="px-4 py-2 text-right text-ink-400">—</td>
-                <td class="px-4 py-2 text-right text-ink-400">{{ fdsIncludingPool ? fmtPct((totals.totalOptions + poolAvailable) / fdsIncludingPool, 2) : '—' }}</td>
+              <tr class="bg-ink-100/60 font-medium">
+                <td class="px-3 py-2 border-b border-ink-200 text-ink-700">Pool</td>
+                <td class="px-3 py-2 border-b border-ink-200 text-ink-700">Option pool authorized</td>
+                <td class="px-3 py-2 border-b border-ink-200"></td>
+                <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtShare(totals.totalOptions, fdsIncludingPool, currentPPS) }}<span class="text-[10px] text-ink-500 ml-1">attributed</span></td>
+                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtShares(poolAuthorized) }}</td>
+                <td class="px-3 py-2 border-b border-ink-200"></td>
+                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fdsIncludingPool ? fmtPct((totals.totalOptions + poolAvailable) / fdsIncludingPool, 2) : '—' }}</td>
               </tr>
-              <tr class="font-semibold">
-                <td class="px-4 py-2"></td>
-                <td class="px-4 py-2">Fully-diluted shares</td>
-                <td class="px-4 py-2 text-right" colspan="3">{{ fmtShares(fdsIncludingPool) }}</td>
-                <td class="px-4 py-2 text-right">{{ fmtPct(1, 0) }}</td>
+              <tr class="font-semibold bg-ink-100 text-ink-900">
+                <td class="px-3 py-2" colspan="3">Fully-diluted shares</td>
+                <td class="px-3 py-2 text-right">{{ fmtShare(fdsIncludingPool, fdsIncludingPool, currentPPS) }}</td>
+                <td class="px-3 py-2"></td>
+                <td class="px-3 py-2"></td>
+                <td class="px-3 py-2 text-right">{{ fmtPct(1, 0) }}</td>
               </tr>
             </tbody>
           </table>
         </div>
       </UiCard>
 
-      <UiCard padded class="mt-4" title="Stakeholder holdings" :subtitle="`${pivot.length} positions`">
-        <div class="overflow-x-auto -mx-4">
-          <table class="w-full text-sm">
-            <thead class="text-left text-ink-400 text-xs uppercase tracking-wide">
-              <tr class="border-b border-ink-700">
-                <th class="px-4 py-2 sticky left-0 bg-ink-800/60">Name</th>
-                <th v-for="sc in data.share_classes" :key="sc.id" class="px-3 py-2 text-right">{{ sc.code }}</th>
-                <th class="px-3 py-2 text-right">Options</th>
-                <th class="px-3 py-2 text-right">FDS</th>
-                <th class="px-3 py-2 text-right">% FDS</th>
+      <!-- Stakeholder holdings -->
+      <UiCard title="Stakeholder holdings" :subtitle="`${pivot.length} positions`" :padded="false">
+        <div class="overflow-x-auto">
+          <table class="text-sm border-separate" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: holdingsWidth + 'px' }">
+            <colgroup>
+              <col v-for="c in holdingsTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
+            </colgroup>
+            <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
+              <tr>
+                <th
+                  v-for="c in holdingsTable.cols"
+                  :key="c.key"
+                  class="relative px-3 py-2 border-b border-ink-300 select-none font-semibold"
+                  :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
+                  @click="c.sortable ? holdingsTable.toggleSort(c.key) : null"
+                >
+                  <span class="inline-flex items-center gap-1" :class="c.align === 'right' ? 'flex-row-reverse' : ''">
+                    {{ c.label }}
+                    <ChevronUp v-if="sortIconFor(holdingsTable, c.key) === 'asc'" :size="12" class="text-accent-600" />
+                    <ChevronDown v-if="sortIconFor(holdingsTable, c.key) === 'desc'" :size="12" class="text-accent-600" />
+                  </span>
+                  <span class="resize-handle" @mousedown.prevent.stop="holdingsTable.startResize($event, c.key)" @click.stop />
+                </th>
               </tr>
             </thead>
             <tbody class="num">
-              <tr v-for="r in pivot" :key="r.stakeholderId" class="border-b border-ink-800/80 hover:bg-ink-800/40">
-                <td class="px-4 py-2 sticky left-0 bg-ink-900/95 font-medium text-ink-100">{{ r.name }}</td>
-                <td v-for="sc in data.share_classes" :key="sc.id" class="px-3 py-2 text-right">
-                  <span v-if="r.byClass[sc.id]">{{ fmtShares(r.byClass[sc.id]) }}</span>
-                  <span v-else class="text-ink-600">—</span>
+              <tr v-for="r in sortedPivot" :key="r.stakeholderId" class="hover:bg-accent-50/40 transition-colors">
+                <td class="px-3 py-2 font-medium text-ink-900 border-b border-ink-200 truncate" :title="r.name">{{ r.name }}</td>
+                <td v-for="sc in data.share_classes" :key="sc.id" class="px-3 py-2 text-right border-b border-ink-200">
+                  <span v-if="r.byClass[sc.id]">{{ fmtShare(r.byClass[sc.id], fdsIncludingPool, currentPPS) }}</span>
+                  <span v-else class="text-ink-400">—</span>
                 </td>
-                <td class="px-3 py-2 text-right">
-                  <span v-if="r.optionShares">{{ fmtShares(r.optionShares) }}</span>
-                  <span v-else class="text-ink-600">—</span>
+                <td class="px-3 py-2 text-right border-b border-ink-200">
+                  <span v-if="r.optionShares">{{ fmtShare(r.optionShares, fdsIncludingPool, currentPPS) }}</span>
+                  <span v-else class="text-ink-400">—</span>
                 </td>
-                <td class="px-3 py-2 text-right font-medium">{{ fmtShares(r.fds) }}</td>
-                <td class="px-3 py-2 text-right">{{ fdsIncludingPool ? fmtPct(r.fds / fdsIncludingPool, 3) : '—' }}</td>
+                <td class="px-3 py-2 text-right font-medium border-b border-ink-200 text-ink-900">{{ fmtShare(r.fds, fdsIncludingPool, currentPPS) }}</td>
+              </tr>
+              <tr class="text-ink-900 font-semibold num bg-ink-100">
+                <td class="px-3 py-2 border-t-2 border-ink-300">Total</td>
+                <td v-for="sc in data.share_classes" :key="sc.id" class="px-3 py-2 text-right border-t-2 border-ink-300">{{ fmtShare(totals.byClass[sc.id] || 0, fdsIncludingPool, currentPPS) }}</td>
+                <td class="px-3 py-2 text-right border-t-2 border-ink-300">{{ fmtShare(totals.totalOptions, fdsIncludingPool, currentPPS) }}</td>
+                <td class="px-3 py-2 text-right border-t-2 border-ink-300">{{ fmtShare(totals.fds, fdsIncludingPool, currentPPS) }}</td>
               </tr>
             </tbody>
-            <tfoot class="text-ink-200 font-semibold num">
-              <tr class="border-t border-ink-700 bg-ink-800/40">
-                <td class="px-4 py-2 sticky left-0 bg-ink-800/60">Total</td>
-                <td v-for="sc in data.share_classes" :key="sc.id" class="px-3 py-2 text-right">{{ fmtShares(totals.byClass[sc.id] || 0) }}</td>
-                <td class="px-3 py-2 text-right">{{ fmtShares(totals.totalOptions) }}</td>
-                <td class="px-3 py-2 text-right">{{ fmtShares(totals.fds) }}</td>
-                <td class="px-3 py-2 text-right">{{ fdsIncludingPool ? fmtPct(totals.fds / fdsIncludingPool, 2) : '—' }}</td>
-              </tr>
-            </tfoot>
           </table>
         </div>
       </UiCard>
 
-      <UiCard padded class="mt-4" title="Convertible notes" :subtitle="`${data.convertibles.length} outstanding`">
+      <!-- Convertible notes -->
+      <UiCard title="Convertible notes" :subtitle="`${data.convertibles.length} outstanding — imported from Carta Convertible Notes sheet`" :padded="false">
         <template #header>
           <UiButton size="sm" variant="primary" @click="openCnModal()"><Plus :size="12" /> Add convertible</UiButton>
         </template>
-        <div v-if="!data.convertibles.length" class="text-sm text-ink-500 px-1 py-2">
+        <div v-if="!data.convertibles.length" class="text-sm text-ink-500 px-4 py-6 text-center">
           No convertibles. Click "Add convertible" to enter a note manually (e.g. a bridge note bought between rounds).
         </div>
-        <div v-else class="overflow-x-auto -mx-4">
-          <table class="w-full text-sm">
-            <thead class="text-left text-ink-400 text-xs uppercase tracking-wide">
-              <tr class="border-b border-ink-700">
-                <th class="px-4 py-2">Holder</th>
-                <th class="px-3 py-2 text-right">Principal</th>
-                <th class="px-3 py-2 text-right">Interest accrued</th>
-                <th class="px-3 py-2 text-right">Total</th>
-                <th class="px-3 py-2 text-right">Rate</th>
-                <th class="px-3 py-2 text-right">Cap</th>
-                <th class="px-3 py-2 text-right">Discount</th>
-                <th class="px-3 py-2">Issue</th>
-                <th class="px-3 py-2">Maturity</th>
-                <th class="px-3 py-2">Converts at round?</th>
-                <th class="px-3 py-2"></th>
+        <div v-else class="overflow-x-auto">
+          <table class="text-sm border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
+            <colgroup>
+              <col v-for="c in cnTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
+            </colgroup>
+            <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
+              <tr>
+                <th
+                  v-for="c in cnTable.cols"
+                  :key="c.key"
+                  class="relative px-3 py-2 border-b border-ink-300 select-none font-semibold"
+                  :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
+                  @click="c.sortable ? cnTable.toggleSort(c.key) : null"
+                >
+                  <span class="inline-flex items-center gap-1" :class="c.align === 'right' ? 'flex-row-reverse' : ''">
+                    {{ c.label }}
+                    <ChevronUp v-if="sortIconFor(cnTable, c.key) === 'asc'" :size="12" class="text-accent-600" />
+                    <ChevronDown v-if="sortIconFor(cnTable, c.key) === 'desc'" :size="12" class="text-accent-600" />
+                  </span>
+                  <span class="resize-handle" @mousedown.prevent.stop="cnTable.startResize($event, c.key)" @click.stop />
+                </th>
               </tr>
             </thead>
             <tbody class="num">
-              <tr v-for="cn in data.convertibles" :key="cn.id" class="border-b border-ink-800/80">
-                <td class="px-4 py-2 font-medium text-ink-100">{{ cn.stakeholder_name }}</td>
-                <td class="px-3 py-2 text-right">{{ fmtUSD(cn.principal) }}</td>
-                <td class="px-3 py-2 text-right text-ink-300">{{ fmtUSD(cn.interest_accrued) }}</td>
-                <td class="px-3 py-2 text-right font-medium">{{ fmtUSD(cn.principal + cn.interest_accrued) }}</td>
-                <td class="px-3 py-2 text-right text-ink-300">{{ fmtPct(cn.interest_rate, 1) }}</td>
-                <td class="px-3 py-2 text-right text-ink-300">{{ cn.valuation_cap ? fmtUSD(cn.valuation_cap) : '—' }}</td>
-                <td class="px-3 py-2 text-right text-ink-300">{{ cn.conversion_discount ? fmtPct(cn.conversion_discount, 0) : '—' }}</td>
-                <td class="px-3 py-2 text-ink-400">{{ fmtDate(cn.issue_date) }}</td>
-                <td class="px-3 py-2 text-ink-400">{{ fmtDate(cn.maturity_date) }}</td>
-                <td class="px-3 py-2">
+              <tr v-for="cn in sortedConvertibles" :key="cn.id" class="hover:bg-accent-50/40 transition-colors">
+                <td class="px-3 py-2 font-medium text-ink-900 border-b border-ink-200 truncate" :title="cn.stakeholder_name">{{ cn.stakeholder_name }}</td>
+                <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtUSD(cn.principal) }}</td>
+                <td class="px-3 py-2 text-right text-ink-700 border-b border-ink-200">{{ fmtUSD(cn.interest_accrued) }}</td>
+                <td class="px-3 py-2 text-right font-medium border-b border-ink-200 text-ink-900">{{ fmtUSD(cn.total) }}</td>
+                <td class="px-3 py-2 text-right text-ink-700 border-b border-ink-200">{{ fmtPct(cn.interest_rate, 1) }}</td>
+                <td class="px-3 py-2 text-right text-ink-700 border-b border-ink-200">{{ cn.valuation_cap ? fmtUSD(cn.valuation_cap) : '—' }}</td>
+                <td class="px-3 py-2 text-right text-ink-700 border-b border-ink-200">{{ cn.conversion_discount ? fmtPct(cn.conversion_discount, 0) : '—' }}</td>
+                <td class="px-3 py-2 text-ink-600 border-b border-ink-200">{{ fmtDate(cn.issue_date) }}</td>
+                <td class="px-3 py-2 text-ink-600 border-b border-ink-200">{{ fmtDate(cn.maturity_date) }}</td>
+                <td class="px-3 py-2 border-b border-ink-200">
                   <button
-                    class="text-xs px-2 py-1 rounded-md border transition-colors"
-                    :class="cn.converts_at_round ? 'border-emerald-700 bg-emerald-900/30 text-emerald-300 hover:bg-emerald-900/50' : 'border-amber-700 bg-amber-900/30 text-amber-300 hover:bg-amber-900/50'"
+                    class="text-xs px-2 py-1 rounded-md border transition-colors font-medium"
+                    :class="cn.converts_at_round ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100' : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'"
                     @click="toggleConvertsAtRound(cn)"
                   >
                     {{ cn.converts_at_round ? 'Yes — converts now' : 'No — deferred' }}
                   </button>
                 </td>
-                <td class="px-3 py-2 text-right whitespace-nowrap">
-                  <button class="text-ink-500 hover:text-ink-100 px-1.5 py-1" @click="openCnModal(cn)"><Edit3 :size="14" /></button>
-                  <button class="text-ink-500 hover:text-red-400 px-1.5 py-1" @click="deleteCn(cn)"><Trash2 :size="14" /></button>
+                <td class="px-3 py-2 text-right whitespace-nowrap border-b border-ink-200">
+                  <button class="text-ink-500 hover:text-accent-600 px-1.5 py-1 rounded" @click="openCnModal(cn)" title="Edit"><Edit3 :size="14" /></button>
+                  <button class="text-ink-500 hover:text-red-600 px-1.5 py-1 rounded" @click="deleteCn(cn)" title="Delete"><Trash2 :size="14" /></button>
                 </td>
               </tr>
             </tbody>
@@ -307,21 +463,21 @@ async function deleteCn(cn: Convertible) {
       </UiCard>
 
       <!-- Convertible create/edit modal -->
-      <div v-if="cnModalOpen" class="fixed inset-0 z-40 bg-ink-900/80 backdrop-blur-sm grid place-items-center p-4" @click.self="cnModalOpen = false">
-        <div class="w-full max-w-lg rounded-lg border border-ink-700 bg-ink-800 p-5">
-          <h2 class="text-base font-semibold text-ink-100">{{ cnEditing ? 'Edit convertible' : 'Add convertible' }}</h2>
-          <p class="text-xs text-ink-400 mt-1">For bridge notes purchased outside of a Carta export, or notes that convert at a different time than the modelled round.</p>
+      <div v-if="cnModalOpen" class="fixed inset-0 z-40 bg-ink-900/40 backdrop-blur-sm grid place-items-center p-4" @click.self="cnModalOpen = false">
+        <div class="w-full max-w-lg rounded-lg border border-ink-300 bg-white p-5 shadow-card-hover">
+          <h2 class="text-base font-semibold text-ink-900">{{ cnEditing ? 'Edit convertible' : 'Add convertible' }}</h2>
+          <p class="text-xs text-ink-500 mt-1">For bridge notes purchased outside of a Carta export, or notes that convert at a different time than the modelled round.</p>
           <div class="mt-4 grid grid-cols-2 gap-3">
             <UiInput v-model="cnForm.stakeholder_name" label="Holder name" placeholder="VCT Investments, Inc." class="col-span-2" />
             <UiInput v-model="cnForm.principal" type="number" label="Principal" prefix="$" step="1000" />
             <UiInput v-model="cnForm.interest_accrued" type="number" label="Interest accrued" prefix="$" step="1000" />
-            <UiInput v-model="cnForm.interest_rate" type="number" label="Interest rate" suffix="%" step="0.5" hint="As decimal: 0.08 = 8%" />
+            <UiInput v-model="cnForm.interest_rate" type="number" label="Interest rate" suffix="%" step="0.5" hint="Decimal: 0.08 = 8%" />
             <UiInput v-model="cnForm.valuation_cap" type="number" label="Valuation cap" prefix="$" step="1000000" />
-            <UiInput v-model="cnForm.conversion_discount" type="number" label="Conversion discount" suffix="%" step="0.05" hint="As decimal: 0.15 = 15%" />
+            <UiInput v-model="cnForm.conversion_discount" type="number" label="Conversion discount" suffix="%" step="0.05" hint="Decimal: 0.15 = 15%" />
             <UiInput v-model="cnForm.issue_date" type="date" label="Issue date" />
             <UiInput v-model="cnForm.maturity_date" type="date" label="Maturity date" />
-            <label class="col-span-2 flex items-center gap-2 text-sm text-ink-200 mt-1">
-              <input type="checkbox" v-model="cnForm.converts_at_round" class="rounded bg-ink-800 border-ink-600 text-accent-500" />
+            <label class="col-span-2 flex items-center gap-2 text-sm text-ink-800 mt-1 bg-ink-100 rounded p-3">
+              <input type="checkbox" v-model="cnForm.converts_at_round" class="rounded border-ink-400 text-accent-500 focus:ring-accent-500" />
               <span><b>Converts at the modelled round.</b> Uncheck for a deferred note — won't add to post-round FDS; we'll still project its shares at the round PPS for reference.</span>
             </label>
           </div>

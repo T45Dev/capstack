@@ -16,6 +16,7 @@ export default defineEventHandler(async (event) => {
     vest_months?: number
     cliff_months?: number
     status?: 'outstanding' | 'proposed' | 'cancelled'
+    approval_status?: 'Pending' | 'Approved' | 'Rejected'
     stakeholder_id?: string
     notes?: string
   }>(event)
@@ -33,11 +34,15 @@ export default defineEventHandler(async (event) => {
     stakeholderId = existing?.id || null
   }
 
+  const status = body.status || 'proposed'
+  // Proposed grants default to "Pending" board approval. Other statuses leave it null.
+  const approvalStatus = body.approval_status ?? (status === 'proposed' ? 'Pending' : null)
+
   db().prepare(`
     INSERT INTO grants (
       id, company_id, stakeholder_id, recipient_name, recipient_type, round, quantity, strike,
-      issue_date, vesting_start, vest_months, cliff_months, status, notes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      issue_date, vesting_start, vest_months, cliff_months, status, approval_status, notes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     grantId,
     id,
@@ -51,7 +56,8 @@ export default defineEventHandler(async (event) => {
     body.vesting_start || null,
     body.vest_months ?? 48,
     body.cliff_months ?? 12,
-    body.status || 'proposed',
+    status,
+    approvalStatus,
     body.notes || null,
   )
 

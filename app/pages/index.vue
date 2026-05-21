@@ -7,6 +7,8 @@ interface CompanyRow {
   name: string
   slug: string
   ticker: string | null
+  starting_round: string | null
+  starting_round_date: string | null
   created_at: string
   stakeholder_count: number
   grant_count: number
@@ -16,8 +18,19 @@ interface CompanyRow {
 const { data: companies, refresh } = await useFetch<CompanyRow[]>('/api/companies', { default: () => [] })
 
 const showCreate = ref(false)
-const form = reactive({ name: '', ticker: '' })
+const form = reactive({
+  name: '',
+  ticker: '',
+  starting_round: 'Series A',
+  starting_round_date: new Date().toISOString().slice(0, 10),
+})
 const creating = ref(false)
+
+const roundOptions = [
+  'Pre-seed', 'Seed', 'Series A', 'Series A-1', 'Series A-2', 'Series A-3', 'Series A-4',
+  'Series B', 'Series B-1', 'Series B-2',
+  'Series C', 'Series D', 'Bridge',
+]
 
 async function create() {
   if (!form.name.trim() || creating.value) return
@@ -25,7 +38,12 @@ async function create() {
   try {
     const c = await $fetch<CompanyRow>('/api/companies', {
       method: 'POST',
-      body: { name: form.name.trim(), ticker: form.ticker.trim() || undefined },
+      body: {
+        name: form.name.trim(),
+        ticker: form.ticker.trim() || undefined,
+        starting_round: form.starting_round || undefined,
+        starting_round_date: form.starting_round_date || undefined,
+      },
     })
     showCreate.value = false
     form.name = ''
@@ -48,8 +66,8 @@ async function remove(id: string, name: string) {
   <div>
     <div class="flex items-center justify-between mb-6">
       <div>
-        <h1 class="text-2xl font-semibold tracking-tight text-ink-100">Companies</h1>
-        <p class="text-sm text-ink-400 mt-1">Each workspace holds a Carta-sourced cap table, key assumptions, grants, and scenarios.</p>
+        <h1 class="text-2xl font-semibold tracking-tight text-ink-900">Companies</h1>
+        <p class="text-sm text-ink-600 mt-1">Each workspace holds a Carta-sourced cap table, key assumptions, grants, and scenarios.</p>
       </div>
       <UiButton variant="primary" @click="showCreate = true">
         <Plus :size="14" /> New company
@@ -66,47 +84,51 @@ async function remove(id: string, name: string) {
       </UiButton>
     </UiEmpty>
 
-    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       <NuxtLink
         v-for="c in companies"
         :key="c.id"
         :to="`/companies/${c.id}`"
-        class="group block rounded-lg border border-ink-700 bg-ink-800/40 hover:border-ink-600 hover:bg-ink-800/70 p-4 transition-colors"
+        class="group block rounded-lg border border-ink-300 bg-white hover:border-accent-400 hover:shadow-card-hover p-4 transition-all"
       >
         <div class="flex items-start gap-3">
-          <div class="grid place-items-center w-10 h-10 rounded-md bg-accent-900/40 text-accent-300 shrink-0">
+          <div class="grid place-items-center w-10 h-10 rounded-md bg-accent-50 text-accent-600 shrink-0">
             <Building2 :size="18" />
           </div>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2">
-              <h3 class="font-medium text-ink-100 truncate">{{ c.name }}</h3>
-              <span v-if="c.ticker" class="text-[10px] uppercase tracking-wide text-ink-400 bg-ink-700 px-1.5 py-0.5 rounded">{{ c.ticker }}</span>
+            <div class="flex items-center gap-2 flex-wrap">
+              <h3 class="font-semibold text-ink-900 truncate">{{ c.name }}</h3>
+              <span v-if="c.ticker" class="text-[10px] uppercase tracking-wide text-ink-600 bg-ink-200 px-1.5 py-0.5 rounded">{{ c.ticker }}</span>
             </div>
-            <p class="text-xs text-ink-400 mt-1">Added {{ fmtDate(c.created_at) }}</p>
+            <p class="text-xs text-ink-500 mt-1">
+              <span v-if="c.starting_round" class="text-accent-700 font-medium">{{ c.starting_round }}</span>
+              <span v-if="c.starting_round_date" class="ml-1">· {{ fmtDate(c.starting_round_date) }}</span>
+              <span v-if="!c.starting_round">Added {{ fmtDate(c.created_at) }}</span>
+            </p>
             <div class="mt-3 grid grid-cols-3 gap-2 text-center">
-              <div class="rounded bg-ink-900/60 py-1.5">
-                <div class="text-[10px] uppercase text-ink-500">Holders</div>
-                <div class="text-sm font-semibold num text-ink-200">{{ c.stakeholder_count }}</div>
+              <div class="rounded bg-ink-100 py-1.5">
+                <div class="text-[10px] uppercase text-ink-500 font-medium">Holders</div>
+                <div class="text-sm font-semibold num text-ink-900">{{ c.stakeholder_count }}</div>
               </div>
-              <div class="rounded bg-ink-900/60 py-1.5">
-                <div class="text-[10px] uppercase text-ink-500">Issued</div>
-                <div class="text-sm font-semibold num text-ink-200">{{ fmtShares(c.total_issued) }}</div>
+              <div class="rounded bg-ink-100 py-1.5">
+                <div class="text-[10px] uppercase text-ink-500 font-medium">Issued</div>
+                <div class="text-sm font-semibold num text-ink-900">{{ fmtShares(c.total_issued) }}</div>
               </div>
-              <div class="rounded bg-ink-900/60 py-1.5">
-                <div class="text-[10px] uppercase text-ink-500">Grants</div>
-                <div class="text-sm font-semibold num text-ink-200">{{ c.grant_count }}</div>
+              <div class="rounded bg-ink-100 py-1.5">
+                <div class="text-[10px] uppercase text-ink-500 font-medium">Grants</div>
+                <div class="text-sm font-semibold num text-ink-900">{{ c.grant_count }}</div>
               </div>
             </div>
           </div>
         </div>
         <div class="mt-3 flex items-center justify-between">
           <button
-            class="text-xs text-ink-500 hover:text-red-400 inline-flex items-center gap-1"
+            class="text-xs text-ink-500 hover:text-red-600 inline-flex items-center gap-1"
             @click.stop.prevent="remove(c.id, c.name)"
           >
             <Trash2 :size="12" /> delete
           </button>
-          <span class="text-xs text-accent-400 inline-flex items-center gap-1 opacity-0 group-hover:opacity-100">
+          <span class="text-xs text-accent-600 inline-flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             open <ArrowRight :size="12" />
           </span>
         </div>
@@ -114,13 +136,22 @@ async function remove(id: string, name: string) {
     </div>
 
     <!-- Create modal -->
-    <div v-if="showCreate" class="fixed inset-0 z-40 bg-ink-900/80 backdrop-blur-sm grid place-items-center p-4" @click.self="showCreate = false">
-      <div class="w-full max-w-md rounded-lg border border-ink-700 bg-ink-800 p-5">
-        <h2 class="text-base font-semibold text-ink-100">New company</h2>
-        <p class="text-xs text-ink-400 mt-1">You'll be able to upload a Carta export on the next page.</p>
+    <div v-if="showCreate" class="fixed inset-0 z-40 bg-ink-900/40 backdrop-blur-sm grid place-items-center p-4" @click.self="showCreate = false">
+      <div class="w-full max-w-md rounded-lg border border-ink-300 bg-white p-5 shadow-card-hover">
+        <h2 class="text-base font-semibold text-ink-900">New company</h2>
+        <p class="text-xs text-ink-500 mt-1">Establishes a baseline round so future modelling has a reference point. You can upload a Carta export on the next page.</p>
         <div class="mt-4 space-y-3">
           <UiInput v-model="form.name" label="Name" placeholder="Advanced NanoTherapies, Inc." />
           <UiInput v-model="form.ticker" label="Ticker / short code (optional)" placeholder="ANT" />
+          <div class="grid grid-cols-2 gap-3">
+            <label class="block">
+              <span class="block text-xs font-medium text-ink-700 mb-1">Current round</span>
+              <select v-model="form.starting_round" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500">
+                <option v-for="r in roundOptions" :key="r" :value="r">{{ r }}</option>
+              </select>
+            </label>
+            <UiInput v-model="form.starting_round_date" type="date" label="Round date (closing)" />
+          </div>
         </div>
         <div class="mt-5 flex justify-end gap-2">
           <UiButton variant="ghost" @click="showCreate = false">Cancel</UiButton>
