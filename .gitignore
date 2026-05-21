@@ -1,0 +1,14 @@
+node_modules
+.output
+.nuxt
+.nitro
+.cache
+dist
+*.log
+.DS_Store
+data/*.db
+data/*.db-journal
+data/*.db-shm
+data/*.db-wal
+.env
+.env.local
