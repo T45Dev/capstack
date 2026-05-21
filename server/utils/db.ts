@@ -110,9 +110,10 @@ function migrate(d: Database.Database): void {
       round_name TEXT NOT NULL DEFAULT 'Series B',
       new_money REAL NOT NULL DEFAULT 0,
       pre_money REAL NOT NULL DEFAULT 0,
+      pre_round_fds INTEGER,                              -- override; null = use computed-from-cap-table
       target_pool_pct REAL,
       pool_top_up_shares INTEGER DEFAULT 0,
-      cn_conversion_basis TEXT DEFAULT 'round_price',  -- 'round_price' | 'cap' | 'discount'
+      cn_conversion_basis TEXT DEFAULT 'best',  -- 'best' | 'round_price' | 'cap' | 'discount'
       notes TEXT,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -142,6 +143,15 @@ function migrate(d: Database.Database): void {
       imported_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `)
+
+  // ----- Idempotent column additions for upgrades on existing DBs -----
+  const colsOf = (table: string) =>
+    (d.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(r => r.name)
+  const ensureColumn = (table: string, col: string, decl: string) => {
+    if (!colsOf(table).includes(col)) d.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${decl}`)
+  }
+
+  ensureColumn('assumptions', 'pre_round_fds', 'INTEGER')
 }
 
 export function reset(): void {

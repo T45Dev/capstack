@@ -1,13 +1,13 @@
 // Core round math. Pure functions, no DB.
-
-export interface ShareClassPos {
-  id: string
-  code: string
-  name: string
-  kind: 'common' | 'preferred'
-  shares: number
-  issuePrice?: number | null
-}
+//
+// Inputs the user owns directly:
+//   - preRoundFDS  (pre-round fully-diluted shares, including pool available)
+//   - preMoney     (round pre-money valuation, $)
+//   - newMoney     (amount raised, $)
+//   - convertibles (per-note: principal, accrued interest, discount, cap)
+//   - cnBasis      (how each CN's conversion price is determined)
+//
+// Everything else flows from those.
 
 export interface ConvertibleNote {
   id: string
@@ -18,99 +18,113 @@ export interface ConvertibleNote {
   valuationCap?: number | null
 }
 
-export interface RoundAssumptions {
-  newMoney: number
-  preMoney: number
-  poolTopUpShares?: number
-  // Cap/discount handling for convertibles
-  cnBasis?: 'round_price' | 'cap' | 'discount'
+export type CNBasis = 'best' | 'discount' | 'cap' | 'round_price'
+
+export interface RoundInputs {
+  preRoundFDS: number      // pre-round FDS — primary input
+  preMoney: number         // pre-money valuation, $
+  newMoney: number         // new money raised, $
+  convertibles: ConvertibleNote[]
+  cnBasis?: CNBasis        // default 'best' = min(round, discount, cap) per note
 }
 
-export interface PreRoundState {
-  shareClasses: ShareClassPos[]
-  optionsOutstanding: number
-  optionsAvailable: number
-  poolAuthorized: number
-  convertibles: ConvertibleNote[]
+export interface CNDetail {
+  id: string
+  stakeholderName: string
+  dollars: number          // principal + accrued interest
+  convPrice: number        // price actually used to convert
+  shares: number           // resulting shares
+  basisApplied: 'round' | 'discount' | 'cap'
 }
 
 export interface RoundResult {
   preMoney: number
   newMoney: number
-  postMoney: number
-  preRoundFDS: number          // pre-round fully-diluted shares (incl. unissued pool)
-  effectiveFDS: number         // FDS used for PPS denominator (incl. pool top-up)
+  postMoney: number              // term-sheet definition = preMoney + newMoney
+  preRoundFDS: number
   pricePerShare: number
   newPreferredShares: number
-  newPoolShares: number
   cnConvertedShares: number
   cnConvertedDollars: number
+  cnDetails: CNDetail[]
   postRoundFDS: number
+  impliedPostFDSValuation: number  // PPS × postRoundFDS (informational)
   warnings: string[]
 }
 
-export function sumHoldings(state: PreRoundState): number {
-  return state.shareClasses.reduce((a, c) => a + (c.shares || 0), 0)
-}
-
-export function fdsExclPool(state: PreRoundState): number {
-  return sumHoldings(state) + state.optionsOutstanding
-}
-
-export function computeRound(state: PreRoundState, a: RoundAssumptions): RoundResult {
+export function computeRound(a: RoundInputs): RoundResult {
   const warnings: string[] = []
-  const issuedAndOptions = fdsExclPool(state)
-  const preRoundFDS = issuedAndOptions + state.optionsAvailable
-
-  const topUp = Math.max(0, a.poolTopUpShares || 0)
-  const effectiveFDS = preRoundFDS + topUp
-
   if (a.preMoney <= 0) warnings.push('Pre-money is zero or negative.')
   if (a.newMoney <= 0) warnings.push('New money is zero or negative.')
-  if (effectiveFDS <= 0) warnings.push('No pre-round shares — load a cap table first.')
+  if (a.preRoundFDS <= 0) warnings.push('Pre-round FDS is zero — set a value or import a cap table.')
 
-  // PPS = preMoney / effective pre-round FDS (incl. pool top-up).
-  const pricePerShare = effectiveFDS > 0 ? a.preMoney / effectiveFDS : 0
+  const pricePerShare = a.preRoundFDS > 0 ? a.preMoney / a.preRoundFDS : 0
+  const basis: CNBasis = a.cnBasis || 'best'
 
-  // Convertible conversion. Default basis: round_price (no discount applied — the
-  // typical Carta model where notes convert at round PPS net of any discount).
   let cnConvertedShares = 0
   let cnConvertedDollars = 0
-  for (const cn of state.convertibles) {
+  const cnDetails: CNDetail[] = []
+
+  for (const cn of a.convertibles) {
     const total = (cn.principal || 0) + (cn.interestAccrued || 0)
     cnConvertedDollars += total
-    if (pricePerShare <= 0) continue
-    const basis = a.cnBasis || 'round_price'
-    let convPrice = pricePerShare
-    if (basis === 'discount' && cn.conversionDiscount > 0) {
-      convPrice = pricePerShare * (1 - cn.conversionDiscount)
-    } else if (basis === 'cap' && cn.valuationCap && cn.valuationCap > 0 && effectiveFDS > 0) {
-      const capPrice = cn.valuationCap / effectiveFDS
-      convPrice = Math.min(pricePerShare, capPrice)
+    if (pricePerShare <= 0 || total <= 0) continue
+
+    const candidates: Array<{ label: 'round' | 'discount' | 'cap'; price: number }> = []
+    candidates.push({ label: 'round', price: pricePerShare })
+    if (cn.conversionDiscount > 0) {
+      candidates.push({ label: 'discount', price: pricePerShare * (1 - cn.conversionDiscount) })
     }
-    cnConvertedShares += convPrice > 0 ? total / convPrice : 0
+    if (cn.valuationCap && cn.valuationCap > 0 && a.preRoundFDS > 0) {
+      candidates.push({ label: 'cap', price: cn.valuationCap / a.preRoundFDS })
+    }
+
+    let chosen = candidates[0]
+    if (basis === 'best') {
+      // Lowest price = most shares for the holder.
+      chosen = candidates.reduce((acc, c) => (c.price < acc.price ? c : acc), candidates[0])
+    } else if (basis === 'discount') {
+      const d = candidates.find(c => c.label === 'discount')
+      chosen = d ?? candidates[0]
+    } else if (basis === 'cap') {
+      const cap = candidates.find(c => c.label === 'cap')
+      // Capped notes still benefit from the round price if it's lower
+      if (cap) chosen = cap.price < pricePerShare ? cap : { label: 'round', price: pricePerShare }
+    }
+
+    const shares = chosen.price > 0 ? total / chosen.price : 0
+    cnConvertedShares += shares
+    cnDetails.push({
+      id: cn.id,
+      stakeholderName: cn.stakeholderName,
+      dollars: total,
+      convPrice: chosen.price,
+      shares,
+      basisApplied: chosen.label,
+    })
   }
 
   const newPreferredShares = pricePerShare > 0 ? a.newMoney / pricePerShare : 0
-  const postRoundFDS = effectiveFDS + newPreferredShares + cnConvertedShares
+  const postRoundFDS = a.preRoundFDS + newPreferredShares + cnConvertedShares
+  const impliedPostFDSValuation = pricePerShare * postRoundFDS
 
   return {
     preMoney: a.preMoney,
     newMoney: a.newMoney,
     postMoney: a.preMoney + a.newMoney,
-    preRoundFDS,
-    effectiveFDS,
+    preRoundFDS: a.preRoundFDS,
     pricePerShare,
     newPreferredShares,
-    newPoolShares: topUp,
     cnConvertedShares,
     cnConvertedDollars,
+    cnDetails,
     postRoundFDS,
+    impliedPostFDSValuation,
     warnings,
   }
 }
 
-// Stakeholder-level dilution: pre and post-round ownership for a single position size.
+// Stakeholder-level dilution at the round.
 export interface DilutionRow {
   label: string
   shares: number
@@ -119,15 +133,20 @@ export interface DilutionRow {
   delta: number
 }
 
-export function computeDilution(holders: Array<{ label: string; shares: number }>, preFDS: number, postFDS: number): DilutionRow[] {
-  return holders.map((h) => {
-    const pre = preFDS > 0 ? h.shares / preFDS : 0
-    const post = postFDS > 0 ? h.shares / postFDS : 0
-    return { label: h.label, shares: h.shares, prePct: pre, postPct: post, delta: post - pre }
-  })
+export function computeDilution(
+  holders: Array<{ label: string; shares: number }>,
+  preFDS: number,
+  postFDS: number,
+): DilutionRow[] {
+  return holders.map((h) => ({
+    label: h.label,
+    shares: h.shares,
+    prePct: preFDS > 0 ? h.shares / preFDS : 0,
+    postPct: postFDS > 0 ? h.shares / postFDS : 0,
+    delta: (postFDS > 0 ? h.shares / postFDS : 0) - (preFDS > 0 ? h.shares / preFDS : 0),
+  }))
 }
 
-// Exit-value table: given total post-round FDS and a stakeholder's share count, payout at an exit.
 export function exitPayout(shares: number, postRoundFDS: number, exitValue: number): number {
   if (postRoundFDS <= 0) return 0
   return (shares / postRoundFDS) * exitValue
