@@ -175,6 +175,7 @@ function migrate(d: Database.Database): void {
   ensureColumn('convertibles', 'converts_at_round', 'INTEGER NOT NULL DEFAULT 1')
   ensureColumn('companies', 'starting_round', 'TEXT')
   ensureColumn('companies', 'starting_round_date', 'TEXT')
+  ensureColumn('grants', 'approval_status', 'TEXT')
 }
 
 export function reset(): void {

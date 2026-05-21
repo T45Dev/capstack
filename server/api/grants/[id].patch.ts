@@ -5,7 +5,7 @@ export default defineEventHandler(async (event) => {
   if (!id) throw createError({ statusCode: 400, message: 'id required' })
   const body = await readBody<Record<string, any>>(event)
 
-  const fields = ['recipient_name', 'recipient_type', 'round', 'quantity', 'strike', 'issue_date', 'vesting_start', 'vest_months', 'cliff_months', 'status', 'notes']
+  const fields = ['recipient_name', 'recipient_type', 'round', 'quantity', 'strike', 'issue_date', 'vesting_start', 'vest_months', 'cliff_months', 'status', 'approval_status', 'notes']
   const updates: string[] = []
   const params: any[] = []
   for (const f of fields) {

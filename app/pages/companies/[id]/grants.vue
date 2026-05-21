@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, Trash2, Edit3, Award, ChevronUp, ChevronDown } from 'lucide-vue-next'
+import { Plus, Trash2, Edit3, Award, ChevronUp, ChevronDown, FileDown } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtDate, fmtPricePerShare } from '~/utils/format'
 
 const route = useRoute()
@@ -17,6 +17,7 @@ interface Grant {
   vest_months: number | null
   cliff_months: number | null
   status: 'outstanding' | 'proposed' | 'cancelled'
+  approval_status: 'Pending' | 'Approved' | 'Rejected' | null
   notes: string | null
   linked_stakeholder: string | null
 }
@@ -55,6 +56,7 @@ const proposedTable = useSortableTable({
   columns: [
     { key: 'recipient_name', label: 'Recipient', width: 200, sortable: true, align: 'left' },
     { key: 'recipient_type', label: 'Type', width: 110, sortable: true, align: 'left' },
+    { key: 'approval_status', label: 'Approval', width: 120, sortable: true, align: 'left' },
     { key: 'quantity', label: 'Quantity', width: 120, sortable: true, align: 'right' },
     { key: 'poolPct', label: '% of available', width: 130, sortable: true, align: 'right' },
     { key: 'actions', label: '', width: 200, sortable: false, align: 'right' },
@@ -167,6 +169,17 @@ async function destroy(g: Grant) {
   await $fetch(`/api/grants/${g.id}`, { method: 'DELETE' })
   await refresh()
 }
+
+async function toggleApproval(g: Grant) {
+  const next: 'Pending' | 'Approved' = g.approval_status === 'Approved' ? 'Pending' : 'Approved'
+  await $fetch(`/api/grants/${g.id}`, { method: 'PATCH', body: { approval_status: next } })
+  await refresh()
+}
+
+function exportBoardApproval() {
+  // Browser handles the download via the endpoint's Content-Disposition header.
+  window.location.href = `/api/companies/${id.value}/board-approval`
+}
 </script>
 
 <template>
@@ -176,7 +189,12 @@ async function destroy(g: Grant) {
         <h1 class="text-2xl font-semibold tracking-tight text-ink-900">Option grants</h1>
         <p class="text-sm text-ink-600 mt-1">Outstanding grants from the cap table, plus any proposed grants you're modelling.</p>
       </div>
-      <UiButton variant="primary" @click="reset(); showCreate = true"><Plus :size="14" /> Propose grant</UiButton>
+      <div class="flex items-center gap-2">
+        <UiButton :disabled="!proposed.length" @click="exportBoardApproval">
+          <FileDown :size="14" /> Export board approval (.xlsx)
+        </UiButton>
+        <UiButton variant="primary" @click="reset(); showCreate = true"><Plus :size="14" /> Propose grant</UiButton>
+      </div>
     </div>
 
     <!-- Pool stats -->
@@ -265,6 +283,18 @@ async function destroy(g: Grant) {
               <tr v-for="g in sortedProposed" :key="g.id" class="hover:bg-accent-50/40 transition-colors">
                 <td class="px-3 py-2 font-medium text-ink-900 border-b border-ink-200 truncate" :title="g.recipient_name">{{ g.recipient_name }}</td>
                 <td class="px-3 py-2 text-ink-700 border-b border-ink-200">{{ g.recipient_type || '—' }}</td>
+                <td class="px-3 py-2 border-b border-ink-200">
+                  <button
+                    class="text-xs px-2 py-1 rounded-md border transition-colors font-medium"
+                    :class="g.approval_status === 'Approved'
+                      ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                      : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'"
+                    @click="toggleApproval(g)"
+                    :title="g.approval_status === 'Approved' ? 'Click to mark Pending' : 'Click to mark Approved'"
+                  >
+                    {{ g.approval_status || 'Pending' }}
+                  </button>
+                </td>
                 <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtShare(g.quantity, poolAvailable, g.strike || 0) }}</td>
                 <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtPct(g.poolPct, 1) }}</td>
                 <td class="px-3 py-2 text-right border-b border-ink-200 whitespace-nowrap space-x-1">
