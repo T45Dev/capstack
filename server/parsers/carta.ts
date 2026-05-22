@@ -269,32 +269,58 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
   }
 
   // ----- Convertible Notes -----
-  const cnSheet = wb.getWorksheet('Convertible Notes') || wb.getWorksheet('Convertible Note Ledger')
+  // Carta exports vary the sheet name across templates: "Convertible Notes",
+  // "Convertible Note Ledger", "Convertibles", "SAFEs", "Promissory Notes", etc.
+  // Match any worksheet whose name mentions convertibles, notes, or SAFEs.
+  const cnSheet = wb.worksheets.find((ws) => {
+    const n = (ws.name || '').toLowerCase()
+    return /convertible|^notes?\b|note\s*ledger|safes?/.test(n)
+  })
+  if (!cnSheet) {
+    warnings.push(
+      'No convertible-notes sheet found. Looked for a tab named "Convertible Notes", '
+      + '"Convertible Note Ledger", "Convertibles", "Notes", "SAFEs", or similar.',
+    )
+  }
   if (cnSheet) {
-    // Find header row
+    // Find header row by scanning the first ~25 rows for the "principal" + interest/cap pair.
     let cnHeader = -1
-    for (let i = 1; i <= Math.min(cnSheet.rowCount, 15); i++) {
+    for (let i = 1; i <= Math.min(cnSheet.rowCount, 25); i++) {
       const row = cnSheet.getRow(i)
       const flat = ((row.values as any[]) || []).map(v => asString(v).toLowerCase()).join('|')
-      if (flat.includes('principal') && (flat.includes('interest') || flat.includes('valuation cap'))) {
+      if (flat.includes('principal') && (flat.includes('interest') || flat.includes('valuation cap') || flat.includes('cap'))) {
         cnHeader = i
         break
       }
     }
-    if (cnHeader > 0) {
+    if (cnHeader < 0) {
+      warnings.push(
+        `Found "${cnSheet.name}" sheet but couldn't identify the header row — `
+        + 'expected columns including "Principal" and "Interest" or "Valuation Cap".',
+      )
+    } else {
       const hdr = (cnSheet.getRow(cnHeader).values as any[]).map(v => asString(v).toLowerCase())
       const col = (re: RegExp) => hdr.findIndex(s => re.test(s))
-      const cIdFmt = col(/formatted\s*security\s*id|security\s*id/i)
-      const cName = col(/stakeholder\s*name/i)
+      const cIdFmt = col(/formatted\s*security\s*id|security\s*id|certificate\s*id/i)
+      const cName = col(/stakeholder\s*name|holder\s*name|investor\s*name|^name$/i)
       const cEmail = col(/stakeholder\s*email|email/i)
-      const cPrincipal = col(/^principal$/i)
-      const cInterest = col(/^interest$/i)
-      const cIssue = col(/issue\s*date/i)
-      const cMaturity = col(/maturity\s*date/i)
-      const cRate = col(/interest\s*rate/i)
-      const cCap = col(/valuation\s*cap/i)
-      const cDiscount = col(/conversion\s*discount/i)
+      const cPrincipal = col(/^principal$|principal\s*amount|principal\s*\$/i)
+      const cInterest = col(/^interest$|accrued\s*interest|interest\s*accrued/i)
+      const cIssue = col(/issue\s*date|issued|effective\s*date/i)
+      const cMaturity = col(/maturity\s*date|maturity/i)
+      const cRate = col(/interest\s*rate|rate$/i)
+      const cCap = col(/valuation\s*cap|^cap$/i)
+      const cDiscount = col(/conversion\s*discount|^discount$/i)
 
+      if (cPrincipal < 0 || cName < 0) {
+        warnings.push(
+          `Could not find required columns in "${cnSheet.name}" — `
+          + `needed Principal (${cPrincipal < 0 ? 'missing' : 'ok'}) `
+          + `and Stakeholder Name (${cName < 0 ? 'missing' : 'ok'}).`,
+        )
+      }
+
+      let cnRowsRead = 0
       for (let i = cnHeader + 1; i <= cnSheet.rowCount; i++) {
         const row = cnSheet.getRow(i)
         const principal = cPrincipal > 0 ? asNumber(row.getCell(cPrincipal).value) : 0
@@ -313,6 +339,13 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
           valuationCap: cCap > 0 ? asNumber(row.getCell(cCap).value) || null : null,
           conversionDiscount: cDiscount > 0 ? asNumber(row.getCell(cDiscount).value) : 0,
         })
+        cnRowsRead++
+      }
+      if (cnRowsRead === 0) {
+        warnings.push(
+          `"${cnSheet.name}" sheet had a header row but 0 convertibles were parsed — `
+          + 'check that rows have non-zero Principal and a Stakeholder Name.',
+        )
       }
     }
   }

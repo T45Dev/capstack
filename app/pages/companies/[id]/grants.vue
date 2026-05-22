@@ -24,8 +24,44 @@ interface Grant {
 interface Pool { id: string; name: string; authorized: number }
 
 const { data, refresh } = await useFetch<{ grants: Grant[]; pools: Pool[] }>(() => `/api/companies/${id.value}/grants`, { watch: [id], default: () => ({ grants: [], pools: [] } as any) })
-// Pull cap-table so the toggle's % / $ views have an FDS denominator and a PPS.
+// Pull cap-table so the toggle's % / $ views have an FDS denominator and a PPS,
+// AND so we can surface each proposed grantee's existing position (common,
+// preferred, outstanding options).
 const { data: capTable } = await useFetch(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => null as any })
+// Compute for pre/post-round FDS denominators for the % columns.
+const { data: compute } = await useFetch(() => `/api/companies/${id.value}/compute`, {
+  method: 'POST',
+  watch: [id],
+  default: () => null as any,
+})
+
+// Per-stakeholder existing position derived from the cap table.
+//   common    — shares held in share classes where kind = common
+//   preferred — shares in share classes where kind = preferred / other
+//   options   — sum of outstanding grants for this stakeholder
+const positionByStakeholder = computed(() => {
+  const map = new Map<string, { common: number; preferred: number; options: number }>()
+  if (!capTable.value) return map
+  const kindByClass = new Map<string, string>()
+  for (const sc of capTable.value.share_classes) kindByClass.set(sc.id, (sc.kind || '').toLowerCase())
+  for (const h of capTable.value.holdings) {
+    const kind = kindByClass.get(h.share_class_id) || ''
+    const row = map.get(h.stakeholder_id) || { common: 0, preferred: 0, options: 0 }
+    if (kind === 'common') row.common += h.shares
+    else row.preferred += h.shares
+    map.set(h.stakeholder_id, row)
+  }
+  for (const g of capTable.value.grants) {
+    if (g.status !== 'outstanding' || !g.stakeholder_id) continue
+    const row = map.get(g.stakeholder_id) || { common: 0, preferred: 0, options: 0 }
+    row.options += g.quantity
+    map.set(g.stakeholder_id, row)
+  }
+  return map
+})
+
+const preFDS = computed(() => (compute.value?.round?.preRoundFDS as number) || (capTable.value ? fdsAnchor.value : 0))
+const postFDS = computed(() => (compute.value?.round?.postRoundFDS as number) || preFDS.value)
 
 const outstanding = computed(() => data.value!.grants.filter(g => g.status === 'outstanding'))
 const proposed = computed(() => data.value!.grants.filter(g => g.status === 'proposed'))
@@ -69,17 +105,23 @@ const outstandingCols = computed<GrCol[]>(() => {
 
 const proposedCols = computed<GrCol[]>(() => {
   const cols: GrCol[] = [
-    { key: 'recipient_name', label: 'Recipient', width: 220, sortable: true, align: 'left' },
+    { key: 'recipient_name', label: 'Recipient', width: 200, sortable: true, align: 'left' },
   ]
   for (const u of propUnits.selected.value) {
     cols.push({
       key: `quantity_${u}`, baseKey: 'quantity', unit: u,
-      label: `Quantity${unitSuffix(u)}`,
+      label: `New grant${unitSuffix(u)}`,
       width: u === 'shares' ? 110 : 95, sortable: true, align: 'right',
     })
   }
-  cols.push({ key: 'poolPct', label: '% of available', width: 120, sortable: true, align: 'right' })
-  cols.push({ key: 'actions', label: '', width: 88, sortable: false, align: 'right' })
+  // Per-grantee existing position from the cap table.
+  cols.push({ key: 'existing_options', label: 'Out. options', width: 105, sortable: true, align: 'right' })
+  cols.push({ key: 'existing_common',  label: 'Common',       width: 95,  sortable: true, align: 'right' })
+  cols.push({ key: 'existing_pref',    label: 'Preferred',    width: 95,  sortable: true, align: 'right' })
+  cols.push({ key: 'total',            label: 'Total',        width: 110, sortable: true, align: 'right' })
+  cols.push({ key: 'prePct',           label: '% Pre',        width: 75,  sortable: true, align: 'right' })
+  cols.push({ key: 'postPct',          label: '% Post',       width: 75,  sortable: true, align: 'right' })
+  cols.push({ key: 'actions',          label: '',             width: 88,  sortable: false, align: 'right' })
   return cols
 })
 
@@ -124,10 +166,25 @@ const sortedOutstanding = computed(() => {
   })
 })
 const sortedProposed = computed(() => {
-  const rows = proposed.value.map(g => ({ ...g, poolPct: poolAvailable.value ? g.quantity / poolAvailable.value : 0 }))
+  const preDenom = preFDS.value
+  const postDenom = postFDS.value
+  const rows = proposed.value.map(g => {
+    const pos = g.stakeholder_id ? positionByStakeholder.value.get(g.stakeholder_id) : null
+    const existing_options = pos?.options || 0
+    const existing_common  = pos?.common || 0
+    const existing_pref    = pos?.preferred || 0
+    const total            = g.quantity + existing_options + existing_common + existing_pref
+    return {
+      ...g,
+      existing_options, existing_common, existing_pref, total,
+      prePct:  preDenom  > 0 ? total / preDenom  : 0,
+      postPct: postDenom > 0 ? total / postDenom : 0,
+    }
+  })
   const k = proposedTable.sort.key
   const sign = proposedTable.sort.dir === 'asc' ? 1 : -1
-  const baseKey = k.replace(/_(shares|pct|value)$/, '')
+  // Quantity_{unit} variants collapse to "quantity" for sorting.
+  const baseKey = k.startsWith('quantity_') ? 'quantity' : k
   return [...rows].sort((a, b) => {
     const av = (a as any)[baseKey], bv = (b as any)[baseKey]
     if (av == null && bv == null) return 0
@@ -375,7 +432,21 @@ function exportBoardApproval() {
                     >{{ optionTypeOf(g.recipient_type) }}</span>
                   </td>
                   <td v-else-if="c.baseKey === 'quantity'" class="px-2.5 py-1.5 text-right border-b border-ink-200 group-hover:bg-accent-50/40">{{ formatBy(c.unit!, g.quantity, fdsAnchor, ppsAnchor) }}</td>
-                  <td v-else-if="c.key === 'poolPct'" class="px-2.5 py-1.5 text-right text-ink-600 border-b border-ink-200 group-hover:bg-accent-50/40">{{ fmtPct(g.poolPct, 1) }}</td>
+                  <td v-else-if="c.key === 'existing_options'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-accent-50/40">
+                    <span v-if="g.existing_options">{{ fmtShares(g.existing_options) }}</span>
+                    <span v-else class="text-ink-400">—</span>
+                  </td>
+                  <td v-else-if="c.key === 'existing_common'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-accent-50/40">
+                    <span v-if="g.existing_common">{{ fmtShares(g.existing_common) }}</span>
+                    <span v-else class="text-ink-400">—</span>
+                  </td>
+                  <td v-else-if="c.key === 'existing_pref'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-accent-50/40">
+                    <span v-if="g.existing_pref">{{ fmtShares(g.existing_pref) }}</span>
+                    <span v-else class="text-ink-400">—</span>
+                  </td>
+                  <td v-else-if="c.key === 'total'" class="px-2.5 py-1.5 text-right font-medium text-ink-900 border-b border-ink-200 group-hover:bg-accent-50/40">{{ fmtShares(g.total) }}</td>
+                  <td v-else-if="c.key === 'prePct'" class="px-2.5 py-1.5 text-right text-ink-600 border-b border-ink-200 group-hover:bg-accent-50/40">{{ fmtPct(g.prePct, 2) }}</td>
+                  <td v-else-if="c.key === 'postPct'" class="px-2.5 py-1.5 text-right text-ink-600 border-b border-ink-200 group-hover:bg-accent-50/40">{{ fmtPct(g.postPct, 2) }}</td>
                   <td v-else-if="c.key === 'actions'" class="px-2 py-1 text-right border-b border-ink-200 whitespace-nowrap group-hover:bg-accent-50/40">
                     <button class="text-ink-500 hover:text-accent-600 px-1 py-0.5 rounded" @click="startEdit(g)" title="Edit"><Edit3 :size="13" /></button>
                     <button class="text-ink-500 hover:text-accent-600 px-1 py-0.5 rounded" @click="promote(g)" title="Promote to outstanding"><ArrowUpCircle :size="13" /></button>
