@@ -132,8 +132,9 @@ export default defineEventHandler(async (event) => {
         INSERT INTO convertibles (
           id, company_id, stakeholder_id, external_id, stakeholder_name,
           principal, interest_accrued, interest_rate, issue_date, maturity_date,
-          conversion_date, valuation_cap, conversion_discount, converts_at_round, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outstanding')
+          conversion_date, destination_class_code,
+          valuation_cap, conversion_discount, converts_at_round, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outstanding')
       `)
       for (const cn of parsed.convertibles) {
         try {
@@ -149,6 +150,7 @@ export default defineEventHandler(async (event) => {
             cn.issueDate ?? null,
             cn.maturityDate ?? null,
             cn.conversionDate ?? null,
+            cn.destinationClassCode ?? null,
             cn.valuationCap ?? null,
             cn.conversionDiscount ?? 0,
             cn.conversionDate ? 1 : 0,
