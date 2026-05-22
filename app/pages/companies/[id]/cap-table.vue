@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Upload, Filter, Plus, Edit3, Trash2, ChevronUp, ChevronDown } from 'lucide-vue-next'
-import { fmtShares, fmtPct, fmtUSD, fmtDate, fmtPricePerShare } from '~/utils/format'
+import { Upload, Filter, ChevronUp, ChevronDown } from 'lucide-vue-next'
+import { fmtShares, fmtPct, fmtPricePerShare } from '~/utils/format'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -9,19 +9,14 @@ interface ShareClassRow { id: string; code: string; name: string; kind: string; 
 interface Stakeholder { id: string; name: string; type: string | null }
 interface Holding { stakeholder_id: string; share_class_id: string; shares: number }
 interface Grant { id: string; stakeholder_id: string | null; recipient_name: string; quantity: number; status: string }
-interface Convertible { id: string; stakeholder_name: string; principal: number; interest_accrued: number; interest_rate: number; issue_date: string | null; maturity_date: string | null; valuation_cap: number | null; conversion_discount: number; converts_at_round: number }
 
-const { data, refresh } = await useFetch<{ share_classes: ShareClassRow[]; stakeholders: Stakeholder[]; holdings: Holding[]; grants: Grant[]; convertibles: Convertible[]; pools: any[]; current_pps: number }>(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => ({ share_classes: [], stakeholders: [], holdings: [], grants: [], convertibles: [], pools: [], current_pps: 0 } as any) })
+const { data } = await useFetch<{ share_classes: ShareClassRow[]; stakeholders: Stakeholder[]; holdings: Holding[]; grants: Grant[]; pools: any[]; current_pps: number }>(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => ({ share_classes: [], stakeholders: [], holdings: [], grants: [], pools: [], current_pps: 0 } as any) })
 
 const query = ref('')
 const currentPPS = computed(() => data.value?.current_pps || 0)
 
 // Per-table unit visibility.
-const scUnits = useTableUnits('capstack:cap-table:share-classes:units')
 const holdUnits = useTableUnits('capstack:cap-table:holdings:units')
-
-// Share-classes section is collapsible — the holdings pivot is the main view.
-const scExpanded = ref(false)
 
 // Build pivoted rows: stakeholder × share class + outstanding options.
 // Convertible notes are NOT counted here — they're either already represented
@@ -85,13 +80,21 @@ const fdsIncludingPool = computed(() => totals.value.fds + poolAvailable.value)
 // Recreates Carta's Summary Cap Table tab — one line per security plus
 // subtotals for Common / Preferred and a row for the Stock Plan. Each
 // security contributes to FDS = outstanding shares (or pool authorized).
+// `kind` drives row styling. The `*-gap` rows render as small spacer rows
+// between Common / Preferred / Pool sections so the visual breathing room
+// holds up even when subtotals are absent (single-class group).
 interface SummaryRow {
+  code: string | null
   label: string
   authorized: number | null
   outstanding: number | null
   available: number | null
   fds: number
-  kind: 'common' | 'preferred' | 'pool' | 'common-subtotal' | 'preferred-subtotal' | 'total'
+  kind: 'common' | 'preferred' | 'pool' | 'common-subtotal' | 'preferred-subtotal' | 'total' | 'gap'
+}
+
+function gapRow(): SummaryRow {
+  return { code: null, label: '', authorized: null, outstanding: null, available: null, fds: 0, kind: 'gap' }
 }
 
 const summaryRows = computed<SummaryRow[]>(() => {
@@ -108,6 +111,7 @@ const summaryRows = computed<SummaryRow[]>(() => {
 
   for (const c of common) {
     rows.push({
+      code: c.code || null,
       label: c.name || c.code,
       authorized: c.authorized ?? null,
       outstanding: issued[c.id] || 0,
@@ -119,11 +123,14 @@ const summaryRows = computed<SummaryRow[]>(() => {
   if (common.length > 1) {
     const sumAuth = common.reduce((a, c) => a + (c.authorized || 0), 0)
     const sumOut  = common.reduce((a, c) => a + (issued[c.id] || 0), 0)
-    rows.push({ label: 'Common — subtotal', authorized: sumAuth, outstanding: sumOut, available: null, fds: sumOut, kind: 'common-subtotal' })
+    rows.push({ code: null, label: 'Common — subtotal', authorized: sumAuth, outstanding: sumOut, available: null, fds: sumOut, kind: 'common-subtotal' })
   }
+
+  if (common.length && preferred.length) rows.push(gapRow())
 
   for (const c of preferred) {
     rows.push({
+      code: c.code || null,
       label: c.name || c.code,
       authorized: c.authorized ?? null,
       outstanding: issued[c.id] || 0,
@@ -135,11 +142,14 @@ const summaryRows = computed<SummaryRow[]>(() => {
   if (preferred.length > 1) {
     const sumAuth = preferred.reduce((a, c) => a + (c.authorized || 0), 0)
     const sumOut  = preferred.reduce((a, c) => a + (issued[c.id] || 0), 0)
-    rows.push({ label: 'Preferred — subtotal', authorized: sumAuth, outstanding: sumOut, available: null, fds: sumOut, kind: 'preferred-subtotal' })
+    rows.push({ code: null, label: 'Preferred — subtotal', authorized: sumAuth, outstanding: sumOut, available: null, fds: sumOut, kind: 'preferred-subtotal' })
   }
+
+  if ((common.length || preferred.length) && other.length) rows.push(gapRow())
 
   for (const c of other) {
     rows.push({
+      code: c.code || null,
       label: c.name || c.code,
       authorized: c.authorized ?? null,
       outstanding: issued[c.id] || 0,
@@ -149,9 +159,12 @@ const summaryRows = computed<SummaryRow[]>(() => {
     })
   }
 
+  if (common.length || preferred.length || other.length) rows.push(gapRow())
+
   const pools = data.value?.pools || []
   const poolName = pools.length === 1 ? (pools[0] as any).name : 'Equity incentive plans'
   rows.push({
+    code: null,
     label: poolName,
     authorized: poolAuthorized.value,
     outstanding: totals.value.totalOptions,
@@ -161,6 +174,7 @@ const summaryRows = computed<SummaryRow[]>(() => {
   })
 
   rows.push({
+    code: null,
     label: 'Total fully diluted',
     authorized: null,
     outstanding: totals.value.totalShares,
@@ -169,69 +183,6 @@ const summaryRows = computed<SummaryRow[]>(() => {
     kind: 'total',
   })
   return rows
-})
-
-// ----- Share classes table (sortable + resizable) -----
-// "Issued" + "Authorized" each unfold into up to 3 sub-columns
-// (shares / % / $) depending on which units the user has toggled on.
-interface ScCol { key: string; label: string; width: number; sortable: boolean; align: 'left' | 'right'; baseKey?: string; unit?: 'shares' | 'pct' | 'value' }
-
-const shareClassCols = computed<ScCol[]>(() => {
-  const cols: ScCol[] = [
-    { key: 'code', label: 'Code', width: 90, sortable: true, align: 'left' },
-    { key: 'name', label: 'Name', width: 220, sortable: true, align: 'left' },
-    { key: 'kind', label: 'Kind', width: 100, sortable: true, align: 'left' },
-  ]
-  for (const u of scUnits.selected.value) {
-    cols.push({
-      key: `issued_${u}`, baseKey: 'issued', unit: u,
-      label: `Issued${unitSuffix(u)}`, width: 130, sortable: true, align: 'right',
-    })
-  }
-  for (const u of scUnits.selected.value) {
-    cols.push({
-      key: `authorized_${u}`, baseKey: 'authorized', unit: u,
-      label: `Authorized${unitSuffix(u)}`, width: 130, sortable: true, align: 'right',
-    })
-  }
-  cols.push({ key: 'issue_price', label: 'PPS', width: 110, sortable: true, align: 'right' })
-  return cols
-})
-
-const shareClassTable = useSortableTable({
-  key: 'capstack:cap-table:share-classes',
-  defaultSort: { key: 'seniority', dir: 'asc' },
-  columns: shareClassCols.value as any,
-})
-
-// Rebuild columns on toggle change, preserving any widths the user has adjusted.
-watch(shareClassCols, (cols) => {
-  const widthMap: Record<string, number> = {}
-  for (const c of shareClassTable.cols) widthMap[c.key] = c.width
-  const next = cols.map(c => ({ ...c, width: widthMap[c.key] ?? c.width }))
-  shareClassTable.cols.splice(0, shareClassTable.cols.length, ...(next as any))
-}, { immediate: true })
-
-const sortedShareClasses = computed(() => {
-  const rows = (data.value?.share_classes || []).map((sc: any) => ({
-    ...sc,
-    issued: totals.value.byClass[sc.id] || 0,
-    seniority: sc.seniority || 0,
-  }))
-  const k = shareClassTable.sort.key
-  const sign = shareClassTable.sort.dir === 'asc' ? 1 : -1
-  // Unit-variant sort keys all collapse to the same underlying base value.
-  const baseKey = k.startsWith('issued_') ? 'issued'
-    : k.startsWith('authorized_') ? 'authorized'
-    : k
-  return [...rows].sort((a, b) => {
-    const av = (a as any)[baseKey], bv = (b as any)[baseKey]
-    if (av == null && bv == null) return 0
-    if (av == null) return 1
-    if (bv == null) return -1
-    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sign
-    return String(av).localeCompare(String(bv), 'en', { numeric: true }) * sign
-  })
 })
 
 // ----- Holdings pivot table (sortable + resizable) -----
@@ -341,107 +292,6 @@ const sortedPivot = computed(() => {
 
 const holdingsWidth = computed(() => holdingsTable.cols.reduce((s, c) => s + c.width, 0))
 
-// ----- Convertibles ledger -----
-const cnTable = useSortableTable({
-  key: 'capstack:cap-table:convertibles',
-  defaultSort: { key: 'total', dir: 'desc' },
-  columns: [
-    { key: 'stakeholder_name', label: 'Holder', width: 200, sortable: true, align: 'left' },
-    { key: 'principal', label: 'Principal', width: 130, sortable: true, align: 'right' },
-    { key: 'interest_accrued', label: 'Interest accrued', width: 150, sortable: true, align: 'right' },
-    { key: 'total', label: 'Total', width: 130, sortable: true, align: 'right' },
-    { key: 'interest_rate', label: 'Rate', width: 80, sortable: true, align: 'right' },
-    { key: 'valuation_cap', label: 'Cap', width: 130, sortable: true, align: 'right' },
-    { key: 'conversion_discount', label: 'Discount', width: 100, sortable: true, align: 'right' },
-    { key: 'issue_date', label: 'Issued', width: 120, sortable: true, align: 'left' },
-    { key: 'maturity_date', label: 'Matures', width: 120, sortable: true, align: 'left' },
-    { key: 'converts_at_round', label: 'Converts at round?', width: 180, sortable: true, align: 'left' },
-    { key: 'actions', label: '', width: 90, sortable: false, align: 'right' },
-  ],
-})
-const sortedConvertibles = computed(() => {
-  const rows = (data.value?.convertibles || []).map((c: any) => ({
-    ...c,
-    total: (c.principal || 0) + (c.interest_accrued || 0),
-  }))
-  return cnTable.applySort(rows)
-})
-
-// ----- Convertible-note CRUD -----
-const cnModalOpen = ref(false)
-const cnEditing = ref<Convertible | null>(null)
-const cnSaving = ref(false)
-const cnForm = reactive({
-  stakeholder_name: '',
-  principal: 0,
-  interest_accrued: 0,
-  interest_rate: 0.08,
-  valuation_cap: null as number | null,
-  conversion_discount: 0,
-  issue_date: '',
-  maturity_date: '',
-  converts_at_round: true,
-})
-
-function resetCnForm() {
-  cnForm.stakeholder_name = ''
-  cnForm.principal = 0
-  cnForm.interest_accrued = 0
-  cnForm.interest_rate = 0.08
-  cnForm.valuation_cap = null
-  cnForm.conversion_discount = 0
-  cnForm.issue_date = ''
-  cnForm.maturity_date = ''
-  cnForm.converts_at_round = true
-  cnEditing.value = null
-}
-
-function openCnModal(cn?: Convertible) {
-  if (cn) {
-    cnEditing.value = cn
-    cnForm.stakeholder_name = cn.stakeholder_name
-    cnForm.principal = cn.principal
-    cnForm.interest_accrued = cn.interest_accrued
-    cnForm.interest_rate = cn.interest_rate
-    cnForm.valuation_cap = cn.valuation_cap
-    cnForm.conversion_discount = cn.conversion_discount
-    cnForm.issue_date = cn.issue_date || ''
-    cnForm.maturity_date = cn.maturity_date || ''
-    cnForm.converts_at_round = !!cn.converts_at_round
-  } else {
-    resetCnForm()
-  }
-  cnModalOpen.value = true
-}
-
-async function saveCn() {
-  if (cnSaving.value) return
-  cnSaving.value = true
-  try {
-    if (cnEditing.value) {
-      await $fetch(`/api/convertibles/${cnEditing.value.id}`, { method: 'PATCH', body: cnForm })
-    } else {
-      await $fetch(`/api/companies/${id.value}/convertibles`, { method: 'POST', body: cnForm })
-    }
-    cnModalOpen.value = false
-    await refresh()
-  } finally {
-    cnSaving.value = false
-  }
-}
-
-async function toggleConvertsAtRound(cn: Convertible) {
-  const next = !cn.converts_at_round
-  await $fetch(`/api/convertibles/${cn.id}`, { method: 'PATCH', body: { converts_at_round: next } })
-  await refresh()
-}
-
-async function deleteCn(cn: Convertible) {
-  if (!confirm(`Delete the ${cn.stakeholder_name} convertible (${fmtUSD(cn.principal)})?`)) return
-  await $fetch(`/api/convertibles/${cn.id}`, { method: 'DELETE' })
-  await refresh()
-}
-
 function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
   if (table.sort.key !== key) return null
   return table.sort.dir
@@ -479,13 +329,14 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
     <div v-else class="space-y-6">
       <!-- Summary cap table — Carta-style rollup. One line per security, with
            Common / Preferred subtotals when more than one class exists in the
-           group. Pool row shows authorized / outstanding (granted) / available.
-           Total row sums FDS including unissued pool. -->
+           group, small spacer rows between Common / Preferred / Pool sections,
+           and a Total fully-diluted row at the bottom. -->
       <UiCard title="Summary cap table" subtitle="Rolled up by security — recreates the Carta Summary tab" :padded="false">
         <div class="overflow-x-auto">
           <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
-              <col style="width: 38%" />
+              <col style="width: 70px" />
+              <col />
               <col style="width: 14%" />
               <col style="width: 14%" />
               <col style="width: 13%" />
@@ -494,6 +345,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
             </colgroup>
             <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
               <tr>
+                <th class="px-3 py-1.5 border-b border-ink-300 font-semibold">Code</th>
                 <th class="px-3 py-1.5 border-b border-ink-300 font-semibold">Security</th>
                 <th class="px-3 py-1.5 border-b border-ink-300 font-semibold text-right">Authorized</th>
                 <th class="px-3 py-1.5 border-b border-ink-300 font-semibold text-right">Outstanding</th>
@@ -503,107 +355,78 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               </tr>
             </thead>
             <tbody class="num">
-              <tr
-                v-for="(r, i) in summaryRows"
-                :key="i"
-                :class="[
-                  r.kind === 'total' ? 'bg-ink-100 font-semibold text-ink-900' : '',
-                  (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal') ? 'bg-ink-100/60 italic text-ink-700' : '',
-                  r.kind === 'pool' ? 'bg-amber-50/40' : '',
-                  r.kind !== 'total' ? 'hover:bg-accent-50/30 transition-colors' : '',
-                ]"
-              >
-                <td class="px-3 py-1.5 border-b border-ink-200 truncate" :title="r.label">{{ r.label }}</td>
-                <td class="px-3 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ r.authorized == null ? '—' : fmtShares(r.authorized) }}</td>
-                <td class="px-3 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ r.outstanding == null ? '—' : fmtShares(r.outstanding) }}</td>
-                <td class="px-3 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ r.available == null ? '—' : fmtShares(r.available) }}</td>
-                <td class="px-3 py-1.5 text-right border-b border-ink-200" :class="r.kind === 'total' ? '' : 'font-medium text-ink-900'">{{ fmtShares(r.fds) }}</td>
-                <td class="px-3 py-1.5 text-right border-b border-ink-200" :class="r.kind === 'total' ? '' : 'text-ink-600'">{{ fdsIncludingPool > 0 ? fmtPct(r.fds / fdsIncludingPool, 2) : '—' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </UiCard>
-
-      <!-- Share classes — compact, collapsible (the holdings pivot is the main view). -->
-      <UiCard :title="`Share classes (${data.share_classes.length})`" :padded="false">
-        <template #header>
-          <div class="flex items-center gap-2">
-            <TableUnitsToggle v-if="scExpanded" storage-key="capstack:cap-table:share-classes:units" />
-            <button
-              type="button"
-              class="text-xs text-ink-500 hover:text-ink-900 inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-ink-100"
-              @click="scExpanded = !scExpanded"
-            >
-              <ChevronUp v-if="scExpanded" :size="12" />
-              <ChevronDown v-else :size="12" />
-              {{ scExpanded ? 'collapse' : 'expand' }}
-            </button>
-          </div>
-        </template>
-        <div v-if="scExpanded" class="overflow-x-auto">
-          <table class="text-xs border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
-            <colgroup>
-              <col v-for="c in shareClassTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
-            </colgroup>
-            <thead class="text-left text-ink-500 text-[10px] uppercase tracking-wide bg-ink-100">
-              <tr>
-                <th
-                  v-for="c in shareClassTable.cols"
-                  :key="c.key"
-                  class="relative px-2 py-1 border-b border-ink-300 select-none font-semibold"
-                  :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
-                  @click="c.sortable ? shareClassTable.toggleSort(c.key) : null"
+              <template v-for="(r, i) in summaryRows" :key="i">
+                <!-- Spacer row between sections. Transparent so the card stays clean. -->
+                <tr v-if="r.kind === 'gap'" aria-hidden="true">
+                  <td colspan="7" class="h-3 p-0 bg-transparent" />
+                </tr>
+                <tr
+                  v-else
+                  :class="[
+                    r.kind === 'total' ? 'bg-ink-200 font-semibold text-ink-900' : '',
+                    (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal') ? 'bg-ink-100 font-semibold text-ink-800' : '',
+                    r.kind === 'pool' ? 'bg-amber-50/50' : '',
+                    (r.kind === 'common' || r.kind === 'preferred') ? 'hover:bg-accent-50/30 transition-colors' : '',
+                  ]"
                 >
-                  <span class="inline-flex items-center gap-1" :class="c.align === 'right' ? 'flex-row-reverse' : ''">
-                    {{ c.label }}
-                    <ChevronUp v-if="sortIconFor(shareClassTable, c.key) === 'asc'" :size="11" class="text-accent-600" />
-                    <ChevronDown v-if="sortIconFor(shareClassTable, c.key) === 'desc'" :size="11" class="text-accent-600" />
-                  </span>
-                  <span class="resize-handle" @mousedown.prevent.stop="shareClassTable.startResize($event, c.key)" @click.stop />
-                </th>
-              </tr>
-            </thead>
-            <tbody class="num">
-              <tr v-for="sc in sortedShareClasses" :key="sc.id" class="hover:bg-accent-50/40 transition-colors">
-                <template v-for="c in shareClassTable.cols" :key="c.key">
-                  <td v-if="c.key === 'code'"  class="px-2 py-0.5 font-mono text-xs border-b border-ink-200 text-ink-800">{{ sc.code }}</td>
-                  <td v-else-if="c.key === 'name'"  class="px-2 py-0.5 border-b border-ink-200 text-ink-900 truncate" :title="sc.name">{{ sc.name }}</td>
-                  <td v-else-if="c.key === 'kind'"  class="px-2 py-0.5 text-[11px] uppercase tracking-wide text-ink-500 border-b border-ink-200">{{ sc.kind }}</td>
-                  <td v-else-if="c.key === 'issue_price'"  class="px-2 py-0.5 text-right text-ink-600 border-b border-ink-200">{{ fmtPricePerShare(sc.issue_price) }}</td>
-                  <td v-else-if="c.baseKey === 'issued'"  class="px-2 py-0.5 text-right border-b border-ink-200">{{ formatBy(c.unit!, sc.issued, fdsIncludingPool, sc.issue_price || currentPPS) }}</td>
-                  <td v-else-if="c.baseKey === 'authorized'"  class="px-2 py-0.5 text-right text-ink-600 border-b border-ink-200">{{ sc.authorized ? formatBy(c.unit!, sc.authorized, fdsIncludingPool, sc.issue_price || currentPPS) : '—' }}</td>
-                </template>
-              </tr>
-              <tr class="bg-ink-100/60 font-medium">
-                <template v-for="(c, idx) in shareClassTable.cols" :key="c.key">
-                  <td v-if="c.key === 'code'"  class="px-2 py-0.5 border-b border-ink-200 text-ink-700">Pool</td>
-                  <td v-else-if="c.key === 'name'"  class="px-2 py-0.5 border-b border-ink-200 text-ink-700">Option pool authorized</td>
-                  <td v-else-if="c.key === 'kind'"  class="px-2 py-0.5 border-b border-ink-200"></td>
-                  <td v-else-if="c.key === 'issue_price'"  class="px-2 py-0.5 border-b border-ink-200"></td>
-                  <td v-else-if="c.baseKey === 'issued'"  class="px-2 py-0.5 text-right border-b border-ink-200">
-                    {{ formatBy(c.unit!, totals.totalOptions, fdsIncludingPool, currentPPS) }}<span class="text-[10px] text-ink-500 ml-1">attributed</span>
-                  </td>
-                  <td v-else-if="c.baseKey === 'authorized'"  class="px-2 py-0.5 text-right text-ink-600 border-b border-ink-200">{{ formatBy(c.unit!, poolAuthorized, fdsIncludingPool, currentPPS) }}</td>
-                </template>
-              </tr>
-              <tr class="font-semibold bg-ink-100 text-ink-900">
-                <template v-for="c in shareClassTable.cols" :key="c.key">
-                  <td v-if="c.key === 'code'"  class="px-2 py-0.5">FDS</td>
-                  <td v-else-if="c.key === 'name'"  class="px-2 py-0.5">Fully-diluted shares</td>
-                  <td v-else-if="c.key === 'kind'"  class="px-2 py-0.5"></td>
-                  <td v-else-if="c.key === 'issue_price'"  class="px-2 py-0.5"></td>
-                  <td v-else-if="c.baseKey === 'issued'"  class="px-2 py-0.5 text-right">{{ formatBy(c.unit!, fdsIncludingPool, fdsIncludingPool, currentPPS) }}</td>
-                  <td v-else-if="c.baseKey === 'authorized'"  class="px-2 py-0.5 text-right">—</td>
-                </template>
-              </tr>
+                  <td
+                    class="px-3 py-1.5 font-mono text-[11px] border-b border-ink-200"
+                    :class="[
+                      (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal' || r.kind === 'total') ? 'border-t border-ink-300' : '',
+                      r.kind === 'total' ? 'text-ink-900' : 'text-ink-700',
+                    ]"
+                  >{{ r.code || '' }}</td>
+                  <td
+                    class="px-3 py-1.5 border-b border-ink-200 truncate"
+                    :class="[
+                      (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal' || r.kind === 'total') ? 'border-t border-ink-300' : '',
+                    ]"
+                    :title="r.label"
+                  >{{ r.label }}</td>
+                  <td
+                    class="px-3 py-1.5 text-right border-b border-ink-200"
+                    :class="[
+                      r.kind === 'total' ? '' : 'text-ink-700',
+                      (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal' || r.kind === 'total') ? 'border-t border-ink-300' : '',
+                    ]"
+                  >{{ r.authorized == null ? '—' : fmtShares(r.authorized) }}</td>
+                  <td
+                    class="px-3 py-1.5 text-right border-b border-ink-200"
+                    :class="[
+                      r.kind === 'total' ? '' : 'text-ink-700',
+                      (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal' || r.kind === 'total') ? 'border-t border-ink-300' : '',
+                    ]"
+                  >{{ r.outstanding == null ? '—' : fmtShares(r.outstanding) }}</td>
+                  <td
+                    class="px-3 py-1.5 text-right border-b border-ink-200"
+                    :class="[
+                      r.kind === 'total' ? '' : 'text-ink-700',
+                      (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal' || r.kind === 'total') ? 'border-t border-ink-300' : '',
+                    ]"
+                  >{{ r.available == null ? '—' : fmtShares(r.available) }}</td>
+                  <td
+                    class="px-3 py-1.5 text-right border-b border-ink-200"
+                    :class="[
+                      r.kind === 'total' ? '' : 'font-medium text-ink-900',
+                      (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal' || r.kind === 'total') ? 'border-t border-ink-300' : '',
+                    ]"
+                  >{{ fmtShares(r.fds) }}</td>
+                  <td
+                    class="px-3 py-1.5 text-right border-b border-ink-200"
+                    :class="[
+                      r.kind === 'total' ? '' : 'text-ink-600',
+                      (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal' || r.kind === 'total') ? 'border-t border-ink-300' : '',
+                    ]"
+                  >{{ fdsIncludingPool > 0 ? fmtPct(r.fds / fdsIncludingPool, 2) : '—' }}</td>
+                </tr>
+              </template>
             </tbody>
           </table>
         </div>
       </UiCard>
 
-      <!-- Stakeholder holdings -->
-      <UiCard title="Stakeholder holdings" :subtitle="`${pivot.length} positions`" :padded="false">
+      <!-- Holdings -->
+      <UiCard title="Holdings" :subtitle="`${pivot.length} positions`" :padded="false">
         <template #header>
           <TableUnitsToggle storage-key="capstack:cap-table:holdings:units" />
         </template>
@@ -689,94 +512,6 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
         </div>
       </UiCard>
 
-      <!-- Convertible notes -->
-      <UiCard title="Convertible notes" :subtitle="`${data.convertibles.length} outstanding — imported from Carta Convertible Notes sheet`" :padded="false">
-        <template #header>
-          <UiButton size="sm" variant="primary" @click="openCnModal()"><Plus :size="12" /> Add convertible</UiButton>
-        </template>
-        <div v-if="!data.convertibles.length" class="text-sm text-ink-500 px-4 py-6 text-center">
-          No convertibles. Click "Add convertible" to enter a note manually (e.g. a bridge note bought between rounds).
-        </div>
-        <div v-else class="overflow-x-auto">
-          <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
-            <colgroup>
-              <col v-for="c in cnTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
-            </colgroup>
-            <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
-              <tr>
-                <th
-                  v-for="c in cnTable.cols"
-                  :key="c.key"
-                  class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold"
-                  :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
-                  @click="c.sortable ? cnTable.toggleSort(c.key) : null"
-                >
-                  <span class="inline-flex items-center gap-1" :class="c.align === 'right' ? 'flex-row-reverse' : ''">
-                    {{ c.label }}
-                    <ChevronUp v-if="sortIconFor(cnTable, c.key) === 'asc'" :size="12" class="text-accent-600" />
-                    <ChevronDown v-if="sortIconFor(cnTable, c.key) === 'desc'" :size="12" class="text-accent-600" />
-                  </span>
-                  <span class="resize-handle" @mousedown.prevent.stop="cnTable.startResize($event, c.key)" @click.stop />
-                </th>
-              </tr>
-            </thead>
-            <tbody class="num">
-              <tr v-for="cn in sortedConvertibles" :key="cn.id" class="hover:bg-accent-50/40 transition-colors">
-                <td class="px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate" :title="cn.stakeholder_name">{{ cn.stakeholder_name }}</td>
-                <td class="px-2.5 py-1.5 text-right border-b border-ink-200">{{ fmtUSD(cn.principal) }}</td>
-                <td class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ fmtUSD(cn.interest_accrued) }}</td>
-                <td class="px-2.5 py-1.5 text-right font-medium border-b border-ink-200 text-ink-900">{{ fmtUSD(cn.total) }}</td>
-                <td class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ fmtPct(cn.interest_rate, 1) }}</td>
-                <td class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ cn.valuation_cap ? fmtUSD(cn.valuation_cap) : '—' }}</td>
-                <td class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ cn.conversion_discount ? fmtPct(cn.conversion_discount, 0) : '—' }}</td>
-                <td class="px-2.5 py-1.5 text-ink-600 border-b border-ink-200">{{ fmtDate(cn.issue_date) }}</td>
-                <td class="px-2.5 py-1.5 text-ink-600 border-b border-ink-200">{{ fmtDate(cn.maturity_date) }}</td>
-                <td class="px-2.5 py-1.5 border-b border-ink-200">
-                  <button
-                    class="text-xs px-2 py-1 rounded-md border transition-colors font-medium"
-                    :class="cn.converts_at_round ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100' : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'"
-                    @click="toggleConvertsAtRound(cn)"
-                  >
-                    {{ cn.converts_at_round ? 'Yes — converts now' : 'No — deferred' }}
-                  </button>
-                </td>
-                <td class="px-2.5 py-1.5 text-right whitespace-nowrap border-b border-ink-200">
-                  <button class="text-ink-500 hover:text-accent-600 px-1.5 py-1 rounded" @click="openCnModal(cn)" title="Edit"><Edit3 :size="14" /></button>
-                  <button class="text-ink-500 hover:text-red-600 px-1.5 py-1 rounded" @click="deleteCn(cn)" title="Delete"><Trash2 :size="14" /></button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </UiCard>
-
-      <!-- Convertible create/edit modal -->
-      <div v-if="cnModalOpen" class="fixed inset-0 z-40 bg-ink-900/40 backdrop-blur-sm grid place-items-center p-4" @click.self="cnModalOpen = false">
-        <div class="w-full max-w-lg rounded-lg border border-ink-300 bg-white p-5 shadow-card-hover">
-          <h2 class="text-base font-semibold text-ink-900">{{ cnEditing ? 'Edit convertible' : 'Add convertible' }}</h2>
-          <p class="text-xs text-ink-500 mt-1">For bridge notes purchased outside of a Carta export, or notes that convert at a different time than the modelled round.</p>
-          <div class="mt-4 grid grid-cols-2 gap-3">
-            <UiInput v-model="cnForm.stakeholder_name" label="Holder name" placeholder="VCT Investments, Inc." class="col-span-2" />
-            <UiInput v-model="cnForm.principal" type="number" label="Principal" prefix="$" step="1000" />
-            <UiInput v-model="cnForm.interest_accrued" type="number" label="Interest accrued" prefix="$" step="1000" />
-            <UiInput v-model="cnForm.interest_rate" type="number" label="Interest rate" suffix="%" step="0.5" hint="Decimal: 0.08 = 8%" />
-            <UiInput v-model="cnForm.valuation_cap" type="number" label="Valuation cap" prefix="$" step="1000000" />
-            <UiInput v-model="cnForm.conversion_discount" type="number" label="Conversion discount" suffix="%" step="0.05" hint="Decimal: 0.15 = 15%" />
-            <UiInput v-model="cnForm.issue_date" type="date" label="Issue date" />
-            <UiInput v-model="cnForm.maturity_date" type="date" label="Maturity date" />
-            <label class="col-span-2 flex items-center gap-2 text-sm text-ink-800 mt-1 bg-ink-100 rounded p-3">
-              <input type="checkbox" v-model="cnForm.converts_at_round" class="rounded border-ink-400 text-accent-500 focus:ring-accent-500" />
-              <span><b>Converts at the modelled round.</b> Uncheck for a deferred note — won't add to post-round FDS; we'll still project its shares at the round PPS for reference.</span>
-            </label>
-          </div>
-          <div class="mt-5 flex justify-end gap-2">
-            <UiButton variant="ghost" @click="cnModalOpen = false">Cancel</UiButton>
-            <UiButton variant="primary" :disabled="!cnForm.stakeholder_name?.trim() || !cnForm.principal || cnSaving" @click="saveCn">
-              {{ cnSaving ? 'Saving…' : (cnEditing ? 'Update' : 'Add convertible') }}
-            </UiButton>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </template>
