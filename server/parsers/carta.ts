@@ -38,6 +38,7 @@ export interface ParsedConvertible {
   issueDate?: string | null
   maturityDate?: string | null
   conversionDate?: string | null
+  destinationClassCode?: string | null   // raw from Carta (e.g. "SA2-1")
   valuationCap?: number | null
   conversionDiscount: number
 }
@@ -316,6 +317,10 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
       // regardless of label.
       let cConvDate = col(/conv(?:erted|ersion)?\s*date|converted\s*on/i)
       if (cConvDate < 0) cConvDate = 15
+      // "Destination" tells us which share class the note converted into
+      // (e.g. SA2-1, PB2-3). Position fallback: column I (9).
+      let cDestination = col(/destination|converted\s*(to|into)/i)
+      if (cDestination < 0) cDestination = 9
       const cRate = col(/interest\s*rate|rate$/i)
       const cCap = col(/valuation\s*cap|^cap$/i)
       const cDiscount = col(/conversion\s*discount|^discount$/i)
@@ -346,6 +351,7 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
             issueDate: cIssue > 0 ? asDate(row.getCell(cIssue).value) : null,
             maturityDate: cMaturity > 0 ? asDate(row.getCell(cMaturity).value) : null,
             conversionDate: cConvDate > 0 ? asDate(row.getCell(cConvDate).value) : null,
+            destinationClassCode: cDestination > 0 ? asString(row.getCell(cDestination).value) || null : null,
             valuationCap: cCap > 0 ? asNumber(row.getCell(cCap).value) || null : null,
             conversionDiscount: cDiscount > 0 ? asNumber(row.getCell(cDiscount).value) : 0,
           })

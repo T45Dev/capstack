@@ -28,7 +28,7 @@ export default defineEventHandler((event) => {
 
   const convertibles = db().prepare(`
     SELECT id, stakeholder_id, stakeholder_name, principal, interest_accrued, interest_rate,
-           issue_date, maturity_date, conversion_date,
+           issue_date, maturity_date, conversion_date, destination_class_code,
            valuation_cap, conversion_discount, converts_at_round, status
     FROM convertibles WHERE company_id = ?
   `).all(id) as Array<{

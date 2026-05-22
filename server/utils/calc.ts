@@ -20,6 +20,13 @@ export interface ConvertibleNote {
   conversionDate?: string | null
   issueDate?: string | null
   interestRate?: number
+  // For notes that already converted historically into a known share class
+  // (e.g. Carta "Destination" column = "SA2-1"), the resulting shares are
+  // calculated at that class's issue price — NOT the modeled round PPS.
+  // These notes also don't add to cnConvertedShares / cnConvertedDollars
+  // because they're already represented in cap-table holdings.
+  destinationClassCode?: string | null   // e.g. "SA2-1" (raw, suffix preserved)
+  destinationPPS?: number | null         // issue_price of the destination class
 }
 
 export type CNBasis = 'best' | 'discount' | 'cap' | 'round_price'
@@ -40,10 +47,11 @@ export interface CNDetail {
   dollars: number          // principal + accrued interest
   convPrice: number        // price actually used to convert
   shares: number           // resulting shares
-  basisApplied: 'round' | 'discount' | 'cap' | 'deferred'
+  basisApplied: 'round' | 'discount' | 'cap' | 'deferred' | 'destination'
   conversionDate?: string | null
   issueDate?: string | null
   interestRate?: number
+  destinationClassCode?: string | null
 }
 
 export interface DeferredCNSummary {
@@ -104,6 +112,30 @@ export function computeRound(a: RoundInputs): RoundResult {
         conversionDate: cn.conversionDate ?? null,
         issueDate: cn.issueDate ?? null,
         interestRate: cn.interestRate,
+        destinationClassCode: cn.destinationClassCode ?? null,
+      })
+      continue
+    }
+
+    // Historical conversion: the note already converted into a known share
+    // class. Use that class's issue price for the share math, and DON'T add
+    // to cnConvertedShares / cnConvertedDollars — the resulting shares are
+    // already represented in cap-table holdings.
+    if (cn.destinationPPS && cn.destinationPPS > 0) {
+      const shares = total / cn.destinationPPS
+      cnDetails.push({
+        id: cn.id,
+        stakeholderName: cn.stakeholderName,
+        principal: cn.principal || 0,
+        interestAccrued: cn.interestAccrued || 0,
+        dollars: total,
+        convPrice: cn.destinationPPS,
+        shares,
+        basisApplied: 'destination',
+        conversionDate: cn.conversionDate ?? null,
+        issueDate: cn.issueDate ?? null,
+        interestRate: cn.interestRate,
+        destinationClassCode: cn.destinationClassCode ?? null,
       })
       continue
     }
@@ -145,6 +177,7 @@ export function computeRound(a: RoundInputs): RoundResult {
       conversionDate: cn.conversionDate ?? null,
       issueDate: cn.issueDate ?? null,
       interestRate: cn.interestRate,
+      destinationClassCode: cn.destinationClassCode ?? null,
     })
   }
 

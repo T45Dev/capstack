@@ -203,19 +203,20 @@ interface CnCol { key: string; label: string; width: number; sortable: boolean; 
 const cnDetailCols = computed<CnCol[]>(() => {
   const cols: CnCol[] = [
     { key: 'stakeholderName', label: 'Holder', width: 160, sortable: true, align: 'left' },
+    { key: 'destinationClassCode', label: 'Destination', width: 95, sortable: true, align: 'left' },
     { key: 'conversionDate', label: 'Conv. date', width: 140, sortable: true, align: 'left' },
-    { key: 'principal', label: 'Principal', width: 120, sortable: true, align: 'right' },
-    { key: 'interestAccrued', label: 'Interest', width: 110, sortable: true, align: 'right' },
-    { key: 'convPrice', label: 'Conv. price', width: 110, sortable: true, align: 'right' },
+    { key: 'principal', label: 'Principal', width: 110, sortable: true, align: 'right' },
+    { key: 'interestAccrued', label: 'Interest', width: 100, sortable: true, align: 'right' },
+    { key: 'convPrice', label: 'Conv. price', width: 105, sortable: true, align: 'right' },
   ]
   for (const u of cnDetailUnits.selected.value) {
     cols.push({
       key: `shares_${u}`, baseKey: 'shares', unit: u,
       label: `Resulting${unitSuffix(u)}`,
-      width: u === 'shares' ? 130 : 110, sortable: true, align: 'right',
+      width: u === 'shares' ? 125 : 105, sortable: true, align: 'right',
     })
   }
-  cols.push({ key: 'basisApplied', label: 'Basis', width: 90, sortable: true, align: 'left' })
+  cols.push({ key: 'basisApplied', label: 'Basis', width: 100, sortable: true, align: 'left' })
   return cols
 })
 
@@ -490,6 +491,10 @@ async function updateCnConversionDate(cnId: string, value: string) {
                       class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border border-amber-300 bg-amber-100 text-amber-800 align-middle"
                       title="No conversion date — projected at round PPS but not added to post-FDS or post-money."
                     >incomplete</span>
+                  </td>
+                  <td v-else-if="c.key === 'destinationClassCode'" class="px-2.5 py-1 border-b border-ink-200">
+                    <span v-if="d.destinationClassCode" class="text-xs font-mono text-ink-800 bg-ink-100 px-1.5 py-0.5 rounded">{{ d.destinationClassCode }}</span>
+                    <span v-else class="text-ink-400">—</span>
                   </td>
                   <td v-else-if="c.key === 'conversionDate'" class="px-1.5 py-1 border-b border-ink-200">
                     <input

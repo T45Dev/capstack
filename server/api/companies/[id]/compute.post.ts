@@ -34,10 +34,25 @@ export default defineEventHandler(async (event) => {
   // input is missing.
   const cnRows = db().prepare(`
     SELECT id, stakeholder_id, stakeholder_name, principal, interest_accrued,
-           interest_rate, issue_date, conversion_date,
+           interest_rate, issue_date, conversion_date, destination_class_code,
            conversion_discount, valuation_cap, converts_at_round
     FROM convertibles WHERE company_id = ? AND status = 'outstanding'
   `).all(id) as any[]
+
+  // Build code -> issue_price so we can resolve each CN's Destination class
+  // (Carta tags blocks as "SA2-1", "PB2-3"; the share-class code is the
+  // prefix before the "-N" suffix).
+  const classPriceByCode = new Map<string, number>()
+  for (const sc of (db().prepare(
+    'SELECT code, issue_price FROM share_classes WHERE company_id = ?',
+  ).all(id) as any[])) {
+    if (sc.issue_price) classPriceByCode.set(String(sc.code).toUpperCase(), sc.issue_price)
+  }
+  function destinationPPSFor(code: string | null | undefined): number | null {
+    if (!code) return null
+    const stripped = String(code).replace(/-\d+$/, '').toUpperCase()
+    return classPriceByCode.get(stripped) ?? null
+  }
 
   function accruedInterestFor(c: any): number {
     if (!c.conversion_date || !c.issue_date || !c.interest_rate || c.interest_rate <= 0) {
@@ -62,6 +77,8 @@ export default defineEventHandler(async (event) => {
     conversionDate: c.conversion_date || null,
     issueDate: c.issue_date || null,
     interestRate: c.interest_rate || 0,
+    destinationClassCode: c.destination_class_code || null,
+    destinationPPS: destinationPPSFor(c.destination_class_code),
   }))
 
   const inputs: RoundInputs = {
