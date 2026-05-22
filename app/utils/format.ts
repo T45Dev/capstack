@@ -52,3 +52,16 @@ export function fmtDate(s: string | null | undefined): string {
 export function optionTypeOf(recipientType: string | null | undefined): 'ISO' | 'NSO' {
   return (recipientType || '').trim().toLowerCase() === 'employee' ? 'ISO' : 'NSO'
 }
+
+// Normalize a date string from a native <input type="date">. Chrome parses a
+// 2-digit year typed in the year segment literally (so "09/09/26" becomes
+// "0026-09-09" instead of "2026-09-09"). When the parsed year is below 100,
+// promote it to 2000+yy so the user gets the obvious intent.
+export function normalizeDate(s: string | null | undefined): string {
+  if (!s) return ''
+  const m = /^(\d{1,4})-(\d{2})-(\d{2})$/.exec(s)
+  if (!m) return s
+  let y = Number(m[1])
+  if (y < 100) y += 2000
+  return `${String(y).padStart(4, '0')}-${m[2]}-${m[3]}`
+}

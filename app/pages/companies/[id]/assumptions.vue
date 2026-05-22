@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Save, RefreshCw, RotateCcw, ChevronUp, ChevronDown, BookmarkPlus, History, Trash2, Upload, X } from 'lucide-vue-next'
-import { fmtUSD, fmtPct, fmtShares, fmtPricePerShare, fmtDate } from '~/utils/format'
+import { fmtUSD, fmtPct, fmtShares, fmtPricePerShare, fmtDate, normalizeDate } from '~/utils/format'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -255,14 +255,18 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
   return table.sort.dir
 }
 
-// Patch a CN's conversion_date. Triggers a fresh compute via the watcher on
-// form, so the interest + shares update across the equation strip + tables.
+// Patch a CN's conversion_date. Setting a date also marks the note as
+// converting at this round (moves it out of Deferred); clearing the date
+// sends it back to Deferred. Triggers a fresh compute so the equation strip
+// + tables update live.
 async function updateCnConversionDate(cnId: string, value: string) {
   await $fetch(`/api/convertibles/${cnId}`, {
     method: 'PATCH',
-    body: { conversion_date: value || null },
+    body: {
+      conversion_date: value || null,
+      converts_at_round: !!value,
+    },
   })
-  // Force the compute endpoint to re-fetch with the new data.
   await refreshNuxtData()
 }
 </script>
@@ -478,7 +482,7 @@ async function updateCnConversionDate(cnId: string, value: string) {
                         class="w-full rounded border px-1.5 py-0.5 text-xs text-ink-900 focus:outline-none focus:ring-2 focus:ring-accent-500"
                         :class="d.conversionDate ? 'border-ink-300 bg-white' : 'border-amber-400 bg-amber-50'"
                         :title="d.conversionDate ? '' : 'No conversion date — set one to accrue interest accurately'"
-                        @change="updateCnConversionDate(d.id, ($event.target as HTMLInputElement).value)"
+                        @change="updateCnConversionDate(d.id, normalizeDate(($event.target as HTMLInputElement).value))"
                       />
                     </td>
                     <td v-else-if="c.key === 'principal'" class="px-2.5 py-1 text-right text-ink-700 border-b border-ink-200">{{ fmtUSD(d.principal) }}</td>
@@ -525,7 +529,7 @@ async function updateCnConversionDate(cnId: string, value: string) {
                       class="w-full rounded border px-1.5 py-0.5 text-xs text-ink-900 focus:outline-none focus:ring-2 focus:ring-accent-500"
                       :class="d.conversionDate ? 'border-amber-300 bg-white' : 'border-amber-500 bg-amber-50'"
                       :title="d.conversionDate ? '' : 'No conversion date — set one to model when this note would actually convert'"
-                      @change="updateCnConversionDate(d.id, ($event.target as HTMLInputElement).value)"
+                      @change="updateCnConversionDate(d.id, normalizeDate(($event.target as HTMLInputElement).value))"
                     />
                   </td>
                   <td class="px-2.5 py-1 text-right">{{ fmtUSD(d.dollars) }}</td>
