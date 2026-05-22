@@ -39,6 +39,18 @@ input[type='number'] {
 }
 .scrollbar-none::-webkit-scrollbar { display: none; }
 
+/* Freeze a table column to the left edge during horizontal scroll.
+   Cells using this need to set their own background so other columns
+   don't bleed through. */
+.sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+thead .sticky-col {
+  z-index: 2;
+}
+
 /* Table column resize handle. Always faintly visible, brighter on hover/drag. */
 .resize-handle {
   position: absolute;

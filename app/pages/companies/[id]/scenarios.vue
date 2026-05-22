@@ -167,7 +167,7 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
   <div>
     <div class="flex items-end justify-between mb-5 gap-3 flex-wrap">
       <div>
-        <h1 class="text-2xl font-semibold tracking-tight text-ink-900">Scenarios</h1>
+        <h1 class="text-xl font-semibold tracking-tight text-ink-900">Scenarios</h1>
         <p class="text-sm text-ink-600 mt-1">Clone the current cap table state and vary raise / pre-money / pool. Compare exit payouts side-by-side.</p>
       </div>
       <UiButton variant="primary" @click="startCreate()"><Plus :size="14" /> New scenario</UiButton>
@@ -244,7 +244,7 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
             </div>
             <div class="rounded-lg border border-ink-300 bg-white shadow-card overflow-hidden">
               <div class="overflow-x-auto">
-                <table class="text-sm border-separate" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: payoutWidth + 'px' }">
+                <table class="text-[13px] border-separate" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: payoutWidth + 'px' }">
                   <colgroup>
                     <col v-for="c in payoutTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
                   </colgroup>
@@ -253,7 +253,7 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
                       <th
                         v-for="c in payoutTable.cols"
                         :key="c.key"
-                        class="relative px-3 py-2 border-b border-ink-300 select-none font-semibold"
+                        class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold"
                         :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
                         @click="c.sortable ? payoutTable.toggleSort(c.key) : null"
                       >
@@ -269,9 +269,9 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
                   <tbody class="num">
                     <tr v-for="r in sortedPayouts" :key="r.stakeholderId" class="hover:bg-accent-50/40 transition-colors">
                       <template v-for="c in payoutTable.cols" :key="c.key">
-                        <td v-if="c.key === 'name'" class="px-3 py-2 font-medium text-ink-900 border-b border-ink-200 truncate" :title="r.name">{{ r.name }}</td>
-                        <td v-else-if="c.baseKey === 'postShares'" class="px-3 py-2 text-right border-b border-ink-200">{{ formatBy(c.unit!, r.postShares, result.round.postRoundFDS, result.round.pricePerShare) }}</td>
-                        <td v-else-if="c.exitIdx != null" class="px-3 py-2 text-right border-b border-ink-200 text-ink-800">{{ fmtUSD(r.exits?.[c.exitIdx] || 0) }}</td>
+                        <td v-if="c.key === 'name'" class="px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate" :title="r.name">{{ r.name }}</td>
+                        <td v-else-if="c.baseKey === 'postShares'" class="px-2.5 py-1.5 text-right border-b border-ink-200">{{ formatBy(c.unit!, r.postShares, result.round.postRoundFDS, result.round.pricePerShare) }}</td>
+                        <td v-else-if="c.exitIdx != null" class="px-2.5 py-1.5 text-right border-b border-ink-200 text-ink-800">{{ fmtUSD(r.exits?.[c.exitIdx] || 0) }}</td>
                       </template>
                     </tr>
                   </tbody>

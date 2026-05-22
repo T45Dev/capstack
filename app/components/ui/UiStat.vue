@@ -6,7 +6,7 @@ defineProps<{ label: string; value: string | number; hint?: string; emphasis?: b
   <div class="rounded-md border border-ink-200 bg-white px-3 py-2.5">
     <div class="text-[11px] uppercase tracking-wide text-ink-500 font-medium">{{ label }}</div>
     <div
-      class="mt-1 text-lg font-semibold num"
+      class="mt-1 text-base font-semibold num"
       :class="[
         emphasis ? 'text-accent-600' : 'text-ink-900',
         tone === 'positive' ? 'text-emerald-600' : '',

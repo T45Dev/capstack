@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Plus, Trash2, Edit3, Award, ChevronUp, ChevronDown, FileDown } from 'lucide-vue-next'
-import { fmtShares, fmtPct, fmtDate, fmtPricePerShare } from '~/utils/format'
+import { Plus, Trash2, Edit3, Award, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle } from 'lucide-vue-next'
+import { fmtShares, fmtPct, fmtDate, fmtPricePerShare, optionTypeOf } from '~/utils/format'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -51,39 +51,35 @@ interface GrCol { key: string; label: string; width: number; sortable: boolean; 
 
 const outstandingCols = computed<GrCol[]>(() => {
   const cols: GrCol[] = [
-    { key: 'recipient_name', label: 'Recipient', width: 200, sortable: true, align: 'left' },
-    { key: 'recipient_type', label: 'Type', width: 110, sortable: true, align: 'left' },
-    { key: 'round', label: 'Round', width: 140, sortable: true, align: 'left' },
+    { key: 'recipient_name', label: 'Recipient', width: 220, sortable: true, align: 'left' },
   ]
   for (const u of outUnits.selected.value) {
     cols.push({
       key: `quantity_${u}`, baseKey: 'quantity', unit: u,
       label: `Quantity${unitSuffix(u)}`,
-      width: u === 'shares' ? 120 : 100, sortable: true, align: 'right',
+      width: u === 'shares' ? 110 : 95, sortable: true, align: 'right',
     })
   }
-  cols.push({ key: 'strike', label: 'Strike', width: 100, sortable: true, align: 'right' })
-  cols.push({ key: 'issue_date', label: 'Issued', width: 120, sortable: true, align: 'left' })
-  cols.push({ key: 'vest', label: 'Vest', width: 140, sortable: true, align: 'right' })
-  cols.push({ key: 'actions', label: '', width: 80, sortable: false, align: 'right' })
+  cols.push({ key: 'strike', label: 'Strike', width: 90, sortable: true, align: 'right' })
+  cols.push({ key: 'issue_date', label: 'Issued', width: 110, sortable: true, align: 'left' })
+  cols.push({ key: 'vest', label: 'Vest', width: 130, sortable: true, align: 'right' })
+  cols.push({ key: 'actions', label: '', width: 88, sortable: false, align: 'right' })
   return cols
 })
 
 const proposedCols = computed<GrCol[]>(() => {
   const cols: GrCol[] = [
-    { key: 'recipient_name', label: 'Recipient', width: 200, sortable: true, align: 'left' },
-    { key: 'recipient_type', label: 'Type', width: 110, sortable: true, align: 'left' },
-    { key: 'approval_status', label: 'Approval', width: 120, sortable: true, align: 'left' },
+    { key: 'recipient_name', label: 'Recipient', width: 220, sortable: true, align: 'left' },
   ]
   for (const u of propUnits.selected.value) {
     cols.push({
       key: `quantity_${u}`, baseKey: 'quantity', unit: u,
       label: `Quantity${unitSuffix(u)}`,
-      width: u === 'shares' ? 120 : 100, sortable: true, align: 'right',
+      width: u === 'shares' ? 110 : 95, sortable: true, align: 'right',
     })
   }
-  cols.push({ key: 'poolPct', label: '% of available', width: 130, sortable: true, align: 'right' })
-  cols.push({ key: 'actions', label: '', width: 200, sortable: false, align: 'right' })
+  cols.push({ key: 'poolPct', label: '% of available', width: 120, sortable: true, align: 'right' })
+  cols.push({ key: 'actions', label: '', width: 88, sortable: false, align: 'right' })
   return cols
 })
 
@@ -224,6 +220,12 @@ async function promote(g: Grant) {
   await refresh()
 }
 
+async function demote(g: Grant) {
+  // Send the grant back to the proposed list for further consideration.
+  await $fetch(`/api/grants/${g.id}`, { method: 'PATCH', body: { status: 'proposed' } })
+  await refresh()
+}
+
 async function destroy(g: Grant) {
   if (!confirm(`Permanently delete grant for ${g.recipient_name}? (history will not be retained)`)) return
   await $fetch(`/api/grants/${g.id}`, { method: 'DELETE' })
@@ -246,7 +248,7 @@ function exportBoardApproval() {
   <div v-if="data">
     <div class="flex items-end justify-between mb-5 gap-3 flex-wrap">
       <div>
-        <h1 class="text-2xl font-semibold tracking-tight text-ink-900">Option grants</h1>
+        <h1 class="text-xl font-semibold tracking-tight text-ink-900">Option grants</h1>
         <p class="text-sm text-ink-600 mt-1">Outstanding grants from the cap table, plus any proposed grants you're modelling.</p>
       </div>
       <div class="flex items-center gap-2">
@@ -273,17 +275,21 @@ function exportBoardApproval() {
         </template>
         <div v-if="!outstanding.length" class="text-sm text-ink-500 px-4 py-6 text-center">No outstanding grants.</div>
         <div v-else class="overflow-x-auto">
-          <table class="text-sm border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
+          <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
               <col v-for="c in outstandingTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
             </colgroup>
-            <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
+            <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide">
               <tr>
                 <th
                   v-for="c in outstandingTable.cols"
                   :key="c.key"
-                  class="relative px-3 py-2 border-b border-ink-300 select-none font-semibold"
-                  :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
+                  class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold bg-ink-100"
+                  :class="[
+                    c.align === 'right' ? 'text-right' : 'text-left',
+                    c.sortable ? 'cursor-pointer hover:text-ink-900' : '',
+                    c.key === 'recipient_name' ? 'sticky-col' : '',
+                  ]"
                   @click="c.sortable ? outstandingTable.toggleSort(c.key) : null"
                 >
                   <span class="inline-flex items-center gap-1" :class="c.align === 'right' ? 'flex-row-reverse' : ''">
@@ -296,21 +302,26 @@ function exportBoardApproval() {
               </tr>
             </thead>
             <tbody class="num">
-              <tr v-for="g in sortedOutstanding" :key="g.id" class="hover:bg-accent-50/40 transition-colors">
+              <tr v-for="g in sortedOutstanding" :key="g.id" class="group">
                 <template v-for="c in outstandingTable.cols" :key="c.key">
-                  <td v-if="c.key === 'recipient_name'" class="px-3 py-2 font-medium text-ink-900 border-b border-ink-200 truncate" :title="g.recipient_name">
-                    {{ g.recipient_name }}
-                    <span v-if="!g.linked_stakeholder" class="ml-1 text-[10px] uppercase tracking-wide text-amber-700">unlinked</span>
+                  <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-accent-50/40" :title="g.recipient_name">
+                    <span>{{ g.recipient_name }}</span>
+                    <span
+                      class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle"
+                      :class="optionTypeOf(g.recipient_type) === 'ISO'
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                        : 'border-slate-300 bg-slate-100 text-slate-700'"
+                    >{{ optionTypeOf(g.recipient_type) }}</span>
+                    <span v-if="!g.linked_stakeholder" class="ml-1 text-[9px] uppercase tracking-wide text-amber-700">unlinked</span>
                   </td>
-                  <td v-else-if="c.key === 'recipient_type'" class="px-3 py-2 text-ink-700 border-b border-ink-200">{{ g.recipient_type || '—' }}</td>
-                  <td v-else-if="c.key === 'round'" class="px-3 py-2 text-ink-700 border-b border-ink-200 truncate">{{ g.round || '—' }}</td>
-                  <td v-else-if="c.baseKey === 'quantity'" class="px-3 py-2 text-right border-b border-ink-200">{{ formatBy(c.unit!, g.quantity, fdsAnchor, ppsAnchor) }}</td>
-                  <td v-else-if="c.key === 'strike'" class="px-3 py-2 text-right text-ink-700 border-b border-ink-200">{{ fmtPricePerShare(g.strike) }}</td>
-                  <td v-else-if="c.key === 'issue_date'" class="px-3 py-2 text-ink-600 border-b border-ink-200">{{ fmtDate(g.issue_date) }}</td>
-                  <td v-else-if="c.key === 'vest'" class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ g.vest_months ? `${g.vest_months}m / ${g.cliff_months}m` : '—' }}</td>
-                  <td v-else-if="c.key === 'actions'" class="px-3 py-2 text-right border-b border-ink-200 whitespace-nowrap">
-                    <button class="text-ink-500 hover:text-accent-600 px-1.5 py-1 rounded" @click="startEdit(g)" title="Edit"><Edit3 :size="14" /></button>
-                    <button class="text-ink-500 hover:text-amber-600 px-1.5 py-1 rounded" @click="cancel(g)" title="Cancel"><Trash2 :size="14" /></button>
+                  <td v-else-if="c.baseKey === 'quantity'" class="px-2.5 py-1.5 text-right border-b border-ink-200 group-hover:bg-accent-50/40">{{ formatBy(c.unit!, g.quantity, fdsAnchor, ppsAnchor) }}</td>
+                  <td v-else-if="c.key === 'strike'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-accent-50/40">{{ fmtPricePerShare(g.strike) }}</td>
+                  <td v-else-if="c.key === 'issue_date'" class="px-2.5 py-1.5 text-ink-600 border-b border-ink-200 group-hover:bg-accent-50/40">{{ fmtDate(g.issue_date) }}</td>
+                  <td v-else-if="c.key === 'vest'" class="px-2.5 py-1.5 text-right text-ink-600 border-b border-ink-200 group-hover:bg-accent-50/40">{{ g.vest_months ? `${g.vest_months}m / ${g.cliff_months}m` : '—' }}</td>
+                  <td v-else-if="c.key === 'actions'" class="px-2 py-1 text-right border-b border-ink-200 whitespace-nowrap group-hover:bg-accent-50/40">
+                    <button class="text-ink-500 hover:text-accent-600 px-1 py-0.5 rounded" @click="startEdit(g)" title="Edit"><Edit3 :size="13" /></button>
+                    <button class="text-ink-500 hover:text-amber-600 px-1 py-0.5 rounded" @click="demote(g)" title="Demote to proposed"><ArrowDownCircle :size="13" /></button>
+                    <button class="text-ink-500 hover:text-red-600 px-1 py-0.5 rounded" @click="cancel(g)" title="Cancel"><Trash2 :size="13" /></button>
                   </td>
                 </template>
               </tr>
@@ -325,17 +336,21 @@ function exportBoardApproval() {
         </template>
         <div v-if="!proposed.length" class="text-sm text-ink-500 px-4 py-6 text-center">No proposed grants. Click "Propose grant" to draft one.</div>
         <div v-else class="overflow-x-auto">
-          <table class="text-sm border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
+          <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
               <col v-for="c in proposedTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
             </colgroup>
-            <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
+            <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide">
               <tr>
                 <th
                   v-for="c in proposedTable.cols"
                   :key="c.key"
-                  class="relative px-3 py-2 border-b border-ink-300 select-none font-semibold"
-                  :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
+                  class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold bg-ink-100"
+                  :class="[
+                    c.align === 'right' ? 'text-right' : 'text-left',
+                    c.sortable ? 'cursor-pointer hover:text-ink-900' : '',
+                    c.key === 'recipient_name' ? 'sticky-col' : '',
+                  ]"
                   @click="c.sortable ? proposedTable.toggleSort(c.key) : null"
                 >
                   <span class="inline-flex items-center gap-1" :class="c.align === 'right' ? 'flex-row-reverse' : ''">
@@ -348,28 +363,23 @@ function exportBoardApproval() {
               </tr>
             </thead>
             <tbody class="num">
-              <tr v-for="g in sortedProposed" :key="g.id" class="hover:bg-accent-50/40 transition-colors">
+              <tr v-for="g in sortedProposed" :key="g.id" class="group">
                 <template v-for="c in proposedTable.cols" :key="c.key">
-                  <td v-if="c.key === 'recipient_name'" class="px-3 py-2 font-medium text-ink-900 border-b border-ink-200 truncate" :title="g.recipient_name">{{ g.recipient_name }}</td>
-                  <td v-else-if="c.key === 'recipient_type'" class="px-3 py-2 text-ink-700 border-b border-ink-200">{{ g.recipient_type || '—' }}</td>
-                  <td v-else-if="c.key === 'approval_status'" class="px-3 py-2 border-b border-ink-200">
-                    <button
-                      class="text-xs px-2 py-1 rounded-md border transition-colors font-medium"
-                      :class="g.approval_status === 'Approved'
-                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-                        : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'"
-                      @click="toggleApproval(g)"
-                      :title="g.approval_status === 'Approved' ? 'Click to mark Pending' : 'Click to mark Approved'"
-                    >
-                      {{ g.approval_status || 'Pending' }}
-                    </button>
+                  <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-accent-50/40" :title="g.recipient_name">
+                    <span>{{ g.recipient_name }}</span>
+                    <span
+                      class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle"
+                      :class="optionTypeOf(g.recipient_type) === 'ISO'
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                        : 'border-slate-300 bg-slate-100 text-slate-700'"
+                    >{{ optionTypeOf(g.recipient_type) }}</span>
                   </td>
-                  <td v-else-if="c.baseKey === 'quantity'" class="px-3 py-2 text-right border-b border-ink-200">{{ formatBy(c.unit!, g.quantity, fdsAnchor, ppsAnchor) }}</td>
-                  <td v-else-if="c.key === 'poolPct'" class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtPct(g.poolPct, 1) }}</td>
-                  <td v-else-if="c.key === 'actions'" class="px-3 py-2 text-right border-b border-ink-200 whitespace-nowrap space-x-1">
-                    <UiButton size="sm" @click="startEdit(g)"><Edit3 :size="12" /> Edit</UiButton>
-                    <UiButton size="sm" variant="primary" @click="promote(g)">Promote</UiButton>
-                    <UiButton size="sm" variant="ghost" @click="destroy(g)"><Trash2 :size="12" /></UiButton>
+                  <td v-else-if="c.baseKey === 'quantity'" class="px-2.5 py-1.5 text-right border-b border-ink-200 group-hover:bg-accent-50/40">{{ formatBy(c.unit!, g.quantity, fdsAnchor, ppsAnchor) }}</td>
+                  <td v-else-if="c.key === 'poolPct'" class="px-2.5 py-1.5 text-right text-ink-600 border-b border-ink-200 group-hover:bg-accent-50/40">{{ fmtPct(g.poolPct, 1) }}</td>
+                  <td v-else-if="c.key === 'actions'" class="px-2 py-1 text-right border-b border-ink-200 whitespace-nowrap group-hover:bg-accent-50/40">
+                    <button class="text-ink-500 hover:text-accent-600 px-1 py-0.5 rounded" @click="startEdit(g)" title="Edit"><Edit3 :size="13" /></button>
+                    <button class="text-ink-500 hover:text-accent-600 px-1 py-0.5 rounded" @click="promote(g)" title="Promote to outstanding"><ArrowUpCircle :size="13" /></button>
+                    <button class="text-ink-500 hover:text-red-600 px-1 py-0.5 rounded" @click="destroy(g)" title="Delete"><Trash2 :size="13" /></button>
                   </td>
                 </template>
               </tr>

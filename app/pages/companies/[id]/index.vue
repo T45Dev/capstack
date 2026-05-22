@@ -44,7 +44,7 @@ const currentValuation = computed(() => {
           <Building2 :size="22" />
         </div>
         <div class="min-w-0">
-          <h1 class="text-2xl font-semibold tracking-tight text-ink-900 truncate">{{ company.name }}</h1>
+          <h1 class="text-xl font-semibold tracking-tight text-ink-900 truncate">{{ company.name }}</h1>
           <div class="text-sm text-ink-500 mt-0.5 flex items-center gap-3 flex-wrap">
             <span v-if="company.starting_round" class="inline-flex items-center gap-1 text-accent-700">
               <Calendar :size="12" /> {{ company.starting_round }}

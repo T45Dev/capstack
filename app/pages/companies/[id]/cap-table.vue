@@ -355,7 +355,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
   <div v-if="data">
     <div class="flex items-end justify-between mb-4 gap-3 flex-wrap">
       <div>
-        <h1 class="text-2xl font-semibold tracking-tight text-ink-900">Cap table</h1>
+        <h1 class="text-xl font-semibold tracking-tight text-ink-900">Cap table</h1>
         <p class="text-sm text-ink-600 mt-1">
           Stakeholders × share classes. Toggle Shares / % FDS / $ per table — % uses FDS (incl. pool); $ uses the latest PPS ({{ fmtPricePerShare(currentPPS) }}).
         </p>
@@ -386,7 +386,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
           <TableUnitsToggle storage-key="capstack:cap-table:share-classes:units" />
         </template>
         <div class="overflow-x-auto">
-          <table class="text-sm border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
+          <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
               <col v-for="c in shareClassTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
             </colgroup>
@@ -395,7 +395,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                 <th
                   v-for="c in shareClassTable.cols"
                   :key="c.key"
-                  class="relative px-3 py-2 border-b border-ink-300 select-none font-semibold"
+                  class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold"
                   :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
                   @click="c.sortable ? shareClassTable.toggleSort(c.key) : null"
                 >
@@ -411,34 +411,34 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
             <tbody class="num">
               <tr v-for="sc in sortedShareClasses" :key="sc.id" class="hover:bg-accent-50/40 transition-colors">
                 <template v-for="c in shareClassTable.cols" :key="c.key">
-                  <td v-if="c.key === 'code'"  class="px-3 py-2 font-mono text-xs border-b border-ink-200 text-ink-800">{{ sc.code }}</td>
-                  <td v-else-if="c.key === 'name'"  class="px-3 py-2 border-b border-ink-200 text-ink-900 truncate" :title="sc.name">{{ sc.name }}</td>
-                  <td v-else-if="c.key === 'kind'"  class="px-3 py-2 text-[11px] uppercase tracking-wide text-ink-500 border-b border-ink-200">{{ sc.kind }}</td>
-                  <td v-else-if="c.key === 'issue_price'"  class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtPricePerShare(sc.issue_price) }}</td>
-                  <td v-else-if="c.baseKey === 'issued'"  class="px-3 py-2 text-right border-b border-ink-200">{{ formatBy(c.unit!, sc.issued, fdsIncludingPool, sc.issue_price || currentPPS) }}</td>
-                  <td v-else-if="c.baseKey === 'authorized'"  class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ sc.authorized ? formatBy(c.unit!, sc.authorized, fdsIncludingPool, sc.issue_price || currentPPS) : '—' }}</td>
+                  <td v-if="c.key === 'code'"  class="px-2.5 py-1.5 font-mono text-xs border-b border-ink-200 text-ink-800">{{ sc.code }}</td>
+                  <td v-else-if="c.key === 'name'"  class="px-2.5 py-1.5 border-b border-ink-200 text-ink-900 truncate" :title="sc.name">{{ sc.name }}</td>
+                  <td v-else-if="c.key === 'kind'"  class="px-2.5 py-1.5 text-[11px] uppercase tracking-wide text-ink-500 border-b border-ink-200">{{ sc.kind }}</td>
+                  <td v-else-if="c.key === 'issue_price'"  class="px-2.5 py-1.5 text-right text-ink-600 border-b border-ink-200">{{ fmtPricePerShare(sc.issue_price) }}</td>
+                  <td v-else-if="c.baseKey === 'issued'"  class="px-2.5 py-1.5 text-right border-b border-ink-200">{{ formatBy(c.unit!, sc.issued, fdsIncludingPool, sc.issue_price || currentPPS) }}</td>
+                  <td v-else-if="c.baseKey === 'authorized'"  class="px-2.5 py-1.5 text-right text-ink-600 border-b border-ink-200">{{ sc.authorized ? formatBy(c.unit!, sc.authorized, fdsIncludingPool, sc.issue_price || currentPPS) : '—' }}</td>
                 </template>
               </tr>
               <tr class="bg-ink-100/60 font-medium">
                 <template v-for="(c, idx) in shareClassTable.cols" :key="c.key">
-                  <td v-if="c.key === 'code'"  class="px-3 py-2 border-b border-ink-200 text-ink-700">Pool</td>
-                  <td v-else-if="c.key === 'name'"  class="px-3 py-2 border-b border-ink-200 text-ink-700">Option pool authorized</td>
-                  <td v-else-if="c.key === 'kind'"  class="px-3 py-2 border-b border-ink-200"></td>
-                  <td v-else-if="c.key === 'issue_price'"  class="px-3 py-2 border-b border-ink-200"></td>
-                  <td v-else-if="c.baseKey === 'issued'"  class="px-3 py-2 text-right border-b border-ink-200">
+                  <td v-if="c.key === 'code'"  class="px-2.5 py-1.5 border-b border-ink-200 text-ink-700">Pool</td>
+                  <td v-else-if="c.key === 'name'"  class="px-2.5 py-1.5 border-b border-ink-200 text-ink-700">Option pool authorized</td>
+                  <td v-else-if="c.key === 'kind'"  class="px-2.5 py-1.5 border-b border-ink-200"></td>
+                  <td v-else-if="c.key === 'issue_price'"  class="px-2.5 py-1.5 border-b border-ink-200"></td>
+                  <td v-else-if="c.baseKey === 'issued'"  class="px-2.5 py-1.5 text-right border-b border-ink-200">
                     {{ formatBy(c.unit!, totals.totalOptions, fdsIncludingPool, currentPPS) }}<span class="text-[10px] text-ink-500 ml-1">attributed</span>
                   </td>
-                  <td v-else-if="c.baseKey === 'authorized'"  class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ formatBy(c.unit!, poolAuthorized, fdsIncludingPool, currentPPS) }}</td>
+                  <td v-else-if="c.baseKey === 'authorized'"  class="px-2.5 py-1.5 text-right text-ink-600 border-b border-ink-200">{{ formatBy(c.unit!, poolAuthorized, fdsIncludingPool, currentPPS) }}</td>
                 </template>
               </tr>
               <tr class="font-semibold bg-ink-100 text-ink-900">
                 <template v-for="c in shareClassTable.cols" :key="c.key">
-                  <td v-if="c.key === 'code'"  class="px-3 py-2">FDS</td>
-                  <td v-else-if="c.key === 'name'"  class="px-3 py-2">Fully-diluted shares</td>
-                  <td v-else-if="c.key === 'kind'"  class="px-3 py-2"></td>
-                  <td v-else-if="c.key === 'issue_price'"  class="px-3 py-2"></td>
-                  <td v-else-if="c.baseKey === 'issued'"  class="px-3 py-2 text-right">{{ formatBy(c.unit!, fdsIncludingPool, fdsIncludingPool, currentPPS) }}</td>
-                  <td v-else-if="c.baseKey === 'authorized'"  class="px-3 py-2 text-right">—</td>
+                  <td v-if="c.key === 'code'"  class="px-2.5 py-1.5">FDS</td>
+                  <td v-else-if="c.key === 'name'"  class="px-2.5 py-1.5">Fully-diluted shares</td>
+                  <td v-else-if="c.key === 'kind'"  class="px-2.5 py-1.5"></td>
+                  <td v-else-if="c.key === 'issue_price'"  class="px-2.5 py-1.5"></td>
+                  <td v-else-if="c.baseKey === 'issued'"  class="px-2.5 py-1.5 text-right">{{ formatBy(c.unit!, fdsIncludingPool, fdsIncludingPool, currentPPS) }}</td>
+                  <td v-else-if="c.baseKey === 'authorized'"  class="px-2.5 py-1.5 text-right">—</td>
                 </template>
               </tr>
             </tbody>
@@ -452,7 +452,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
           <TableUnitsToggle storage-key="capstack:cap-table:holdings:units" />
         </template>
         <div class="overflow-x-auto">
-          <table class="text-sm border-separate" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: holdingsWidth + 'px' }">
+          <table class="text-[13px] border-separate" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: holdingsWidth + 'px' }">
             <colgroup>
               <col v-for="c in holdingsTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
             </colgroup>
@@ -461,7 +461,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                 <th
                   v-for="c in holdingsTable.cols"
                   :key="c.key"
-                  class="relative px-3 py-2 border-b border-ink-300 select-none font-semibold"
+                  class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold"
                   :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
                   @click="c.sortable ? holdingsTable.toggleSort(c.key) : null"
                 >
@@ -477,12 +477,12 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
             <tbody class="num">
               <tr v-for="r in sortedPivot" :key="r.stakeholderId" class="hover:bg-accent-50/40 transition-colors">
                 <template v-for="c in holdingsTable.cols" :key="c.key">
-                  <td v-if="c.key === 'name'" class="px-3 py-2 font-medium text-ink-900 border-b border-ink-200 truncate" :title="r.name">{{ r.name }}</td>
-                  <td v-else-if="c.key === 'cnDollars'" class="px-3 py-2 text-right border-b border-ink-200">
+                  <td v-if="c.key === 'name'" class="px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate" :title="r.name">{{ r.name }}</td>
+                  <td v-else-if="c.key === 'cnDollars'" class="px-2.5 py-1.5 text-right border-b border-ink-200">
                     <span v-if="r.cnDollars" class="text-ink-800">{{ fmtUSD(r.cnDollars) }}</span>
                     <span v-else class="text-ink-400">—</span>
                   </td>
-                  <td v-else class="px-3 py-2 text-right border-b border-ink-200" :class="c.baseKey === 'fds' ? 'font-medium text-ink-900' : ''">
+                  <td v-else class="px-2.5 py-1.5 text-right border-b border-ink-200" :class="c.baseKey === 'fds' ? 'font-medium text-ink-900' : ''">
                     <template v-if="holdingBase(r, c.baseKey!)">{{ formatBy(c.unit!, holdingBase(r, c.baseKey!), fdsIncludingPool, currentPPS) }}</template>
                     <span v-else class="text-ink-400">—</span>
                   </td>
@@ -490,11 +490,11 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               </tr>
               <tr class="text-ink-900 font-semibold num bg-ink-100">
                 <template v-for="c in holdingsTable.cols" :key="c.key">
-                  <td v-if="c.key === 'name'" class="px-3 py-2 border-t-2 border-ink-300">Total</td>
-                  <td v-else-if="c.key === 'cnDollars'" class="px-3 py-2 text-right border-t-2 border-ink-300">{{ fmtUSD(totals.totalCNDollars) }}</td>
-                  <td v-else-if="c.baseKey === 'fds'" class="px-3 py-2 text-right border-t-2 border-ink-300">{{ formatBy(c.unit!, totals.fds, fdsIncludingPool, currentPPS) }}</td>
-                  <td v-else-if="c.baseKey === 'optionShares'" class="px-3 py-2 text-right border-t-2 border-ink-300">{{ formatBy(c.unit!, totals.totalOptions, fdsIncludingPool, currentPPS) }}</td>
-                  <td v-else-if="c.baseKey?.startsWith('class_')" class="px-3 py-2 text-right border-t-2 border-ink-300">{{ formatBy(c.unit!, totals.byClass[c.baseKey.slice(6)] || 0, fdsIncludingPool, currentPPS) }}</td>
+                  <td v-if="c.key === 'name'" class="px-2.5 py-1.5 border-t-2 border-ink-300">Total</td>
+                  <td v-else-if="c.key === 'cnDollars'" class="px-2.5 py-1.5 text-right border-t-2 border-ink-300">{{ fmtUSD(totals.totalCNDollars) }}</td>
+                  <td v-else-if="c.baseKey === 'fds'" class="px-2.5 py-1.5 text-right border-t-2 border-ink-300">{{ formatBy(c.unit!, totals.fds, fdsIncludingPool, currentPPS) }}</td>
+                  <td v-else-if="c.baseKey === 'optionShares'" class="px-2.5 py-1.5 text-right border-t-2 border-ink-300">{{ formatBy(c.unit!, totals.totalOptions, fdsIncludingPool, currentPPS) }}</td>
+                  <td v-else-if="c.baseKey?.startsWith('class_')" class="px-2.5 py-1.5 text-right border-t-2 border-ink-300">{{ formatBy(c.unit!, totals.byClass[c.baseKey.slice(6)] || 0, fdsIncludingPool, currentPPS) }}</td>
                 </template>
               </tr>
             </tbody>
@@ -511,7 +511,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
           No convertibles. Click "Add convertible" to enter a note manually (e.g. a bridge note bought between rounds).
         </div>
         <div v-else class="overflow-x-auto">
-          <table class="text-sm border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
+          <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
               <col v-for="c in cnTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
             </colgroup>
@@ -520,7 +520,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                 <th
                   v-for="c in cnTable.cols"
                   :key="c.key"
-                  class="relative px-3 py-2 border-b border-ink-300 select-none font-semibold"
+                  class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold"
                   :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
                   @click="c.sortable ? cnTable.toggleSort(c.key) : null"
                 >
@@ -535,16 +535,16 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
             </thead>
             <tbody class="num">
               <tr v-for="cn in sortedConvertibles" :key="cn.id" class="hover:bg-accent-50/40 transition-colors">
-                <td class="px-3 py-2 font-medium text-ink-900 border-b border-ink-200 truncate" :title="cn.stakeholder_name">{{ cn.stakeholder_name }}</td>
-                <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtUSD(cn.principal) }}</td>
-                <td class="px-3 py-2 text-right text-ink-700 border-b border-ink-200">{{ fmtUSD(cn.interest_accrued) }}</td>
-                <td class="px-3 py-2 text-right font-medium border-b border-ink-200 text-ink-900">{{ fmtUSD(cn.total) }}</td>
-                <td class="px-3 py-2 text-right text-ink-700 border-b border-ink-200">{{ fmtPct(cn.interest_rate, 1) }}</td>
-                <td class="px-3 py-2 text-right text-ink-700 border-b border-ink-200">{{ cn.valuation_cap ? fmtUSD(cn.valuation_cap) : '—' }}</td>
-                <td class="px-3 py-2 text-right text-ink-700 border-b border-ink-200">{{ cn.conversion_discount ? fmtPct(cn.conversion_discount, 0) : '—' }}</td>
-                <td class="px-3 py-2 text-ink-600 border-b border-ink-200">{{ fmtDate(cn.issue_date) }}</td>
-                <td class="px-3 py-2 text-ink-600 border-b border-ink-200">{{ fmtDate(cn.maturity_date) }}</td>
-                <td class="px-3 py-2 border-b border-ink-200">
+                <td class="px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate" :title="cn.stakeholder_name">{{ cn.stakeholder_name }}</td>
+                <td class="px-2.5 py-1.5 text-right border-b border-ink-200">{{ fmtUSD(cn.principal) }}</td>
+                <td class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ fmtUSD(cn.interest_accrued) }}</td>
+                <td class="px-2.5 py-1.5 text-right font-medium border-b border-ink-200 text-ink-900">{{ fmtUSD(cn.total) }}</td>
+                <td class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ fmtPct(cn.interest_rate, 1) }}</td>
+                <td class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ cn.valuation_cap ? fmtUSD(cn.valuation_cap) : '—' }}</td>
+                <td class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ cn.conversion_discount ? fmtPct(cn.conversion_discount, 0) : '—' }}</td>
+                <td class="px-2.5 py-1.5 text-ink-600 border-b border-ink-200">{{ fmtDate(cn.issue_date) }}</td>
+                <td class="px-2.5 py-1.5 text-ink-600 border-b border-ink-200">{{ fmtDate(cn.maturity_date) }}</td>
+                <td class="px-2.5 py-1.5 border-b border-ink-200">
                   <button
                     class="text-xs px-2 py-1 rounded-md border transition-colors font-medium"
                     :class="cn.converts_at_round ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100' : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'"
@@ -553,7 +553,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     {{ cn.converts_at_round ? 'Yes — converts now' : 'No — deferred' }}
                   </button>
                 </td>
-                <td class="px-3 py-2 text-right whitespace-nowrap border-b border-ink-200">
+                <td class="px-2.5 py-1.5 text-right whitespace-nowrap border-b border-ink-200">
                   <button class="text-ink-500 hover:text-accent-600 px-1.5 py-1 rounded" @click="openCnModal(cn)" title="Edit"><Edit3 :size="14" /></button>
                   <button class="text-ink-500 hover:text-red-600 px-1.5 py-1 rounded" @click="deleteCn(cn)" title="Delete"><Trash2 :size="14" /></button>
                 </td>
