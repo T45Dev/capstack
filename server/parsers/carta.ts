@@ -324,25 +324,29 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
 
       let cnRowsRead = 0
       for (let i = cnHeader + 1; i <= cnSheet.rowCount; i++) {
-        const row = cnSheet.getRow(i)
-        const principal = cPrincipal > 0 ? asNumber(row.getCell(cPrincipal).value) : 0
-        if (principal <= 0) continue
-        const name = cName > 0 ? asString(row.getCell(cName).value) : ''
-        if (!name) continue
-        result.convertibles.push({
-          externalId: cIdFmt > 0 ? asString(row.getCell(cIdFmt).value) || null : null,
-          stakeholderName: name,
-          email: cEmail > 0 ? asString(row.getCell(cEmail).value) || null : null,
-          principal,
-          interestAccrued: cInterest > 0 ? asNumber(row.getCell(cInterest).value) : 0,
-          interestRate: cRate > 0 ? asNumber(row.getCell(cRate).value) : 0,
-          issueDate: cIssue > 0 ? asDate(row.getCell(cIssue).value) : null,
-          maturityDate: cMaturity > 0 ? asDate(row.getCell(cMaturity).value) : null,
-          conversionDate: cConvDate > 0 ? asDate(row.getCell(cConvDate).value) : null,
-          valuationCap: cCap > 0 ? asNumber(row.getCell(cCap).value) || null : null,
-          conversionDiscount: cDiscount > 0 ? asNumber(row.getCell(cDiscount).value) : 0,
-        })
-        cnRowsRead++
+        try {
+          const row = cnSheet.getRow(i)
+          const principal = cPrincipal > 0 ? asNumber(row.getCell(cPrincipal).value) : 0
+          if (principal <= 0) continue
+          const name = cName > 0 ? asString(row.getCell(cName).value) : ''
+          if (!name) continue
+          result.convertibles.push({
+            externalId: cIdFmt > 0 ? asString(row.getCell(cIdFmt).value) || null : null,
+            stakeholderName: name,
+            email: cEmail > 0 ? asString(row.getCell(cEmail).value) || null : null,
+            principal,
+            interestAccrued: cInterest > 0 ? asNumber(row.getCell(cInterest).value) : 0,
+            interestRate: cRate > 0 ? asNumber(row.getCell(cRate).value) : 0,
+            issueDate: cIssue > 0 ? asDate(row.getCell(cIssue).value) : null,
+            maturityDate: cMaturity > 0 ? asDate(row.getCell(cMaturity).value) : null,
+            conversionDate: cConvDate > 0 ? asDate(row.getCell(cConvDate).value) : null,
+            valuationCap: cCap > 0 ? asNumber(row.getCell(cCap).value) || null : null,
+            conversionDiscount: cDiscount > 0 ? asNumber(row.getCell(cDiscount).value) : 0,
+          })
+          cnRowsRead++
+        } catch (err: any) {
+          warnings.push(`Skipped CN row ${i}: ${err?.message || err}`)
+        }
       }
       if (cnRowsRead === 0) {
         warnings.push(

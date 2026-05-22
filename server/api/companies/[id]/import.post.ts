@@ -18,7 +18,12 @@ export default defineEventHandler(async (event) => {
   const replaceFlag = parts.find(p => p.name === 'replace')
   const replace = replaceFlag?.data ? String(replaceFlag.data).trim() === 'true' : true
 
-  const parsed = await parseCartaXlsx(Buffer.from(file.data))
+  let parsed
+  try {
+    parsed = await parseCartaXlsx(Buffer.from(file.data))
+  } catch (e: any) {
+    throw createError({ statusCode: 400, message: `Failed to parse xlsx: ${e?.message || e}` })
+  }
 
   const tx = db().transaction(() => {
     if (replace) {
@@ -50,7 +55,11 @@ export default defineEventHandler(async (event) => {
       seniority++
       let scId = codeToId.get(sc.code)
       if (!scId) { scId = newId('sc'); codeToId.set(sc.code, scId) }
-      insSC.run(scId, id, sc.code, sc.name, sc.kind, seniority, sc.authorized ?? null, sc.issuePrice ?? null)
+      try {
+        insSC.run(scId, id, sc.code, sc.name, sc.kind, seniority, sc.authorized ?? null, sc.issuePrice ?? null)
+      } catch (err: any) {
+        parsed.warnings.push(`Couldn't import share class "${sc.code}": ${err?.message || err}`)
+      }
     }
 
     // Stakeholders
@@ -64,8 +73,12 @@ export default defineEventHandler(async (event) => {
     for (const sh of parsed.stakeholders) {
       if (nameToId.has(sh.name)) continue
       const shId = newId('sh')
-      insSH.run(shId, id, sh.name, sh.externalId || null)
-      nameToId.set(sh.name, shId)
+      try {
+        insSH.run(shId, id, sh.name, sh.externalId || null)
+        nameToId.set(sh.name, shId)
+      } catch (err: any) {
+        parsed.warnings.push(`Couldn't import stakeholder "${sh.name}": ${err?.message || err}`)
+      }
     }
 
     // Holdings
@@ -77,7 +90,11 @@ export default defineEventHandler(async (event) => {
       const shId = nameToId.get(h.stakeholderName)
       const scId = codeToId.get(h.shareClassCode)
       if (!shId || !scId) continue
-      insH.run(id, shId, scId, Math.round(h.shares))
+      try {
+        insH.run(id, shId, scId, Math.round(h.shares))
+      } catch (err: any) {
+        parsed.warnings.push(`Couldn't import holding for "${h.stakeholderName}" / ${h.shareClassCode}: ${err?.message || err}`)
+      }
     }
 
     // Grants (imported from cap-table options column — outstanding)
@@ -87,7 +104,11 @@ export default defineEventHandler(async (event) => {
         VALUES (?, ?, ?, ?, ?, ?, ?, 'outstanding')
       `)
       for (const g of parsed.grants) {
-        insG.run(newId('gr'), id, nameToId.get(g.recipientName) || null, g.recipientName, null, null, Math.round(g.quantity))
+        try {
+          insG.run(newId('gr'), id, nameToId.get(g.recipientName) || null, g.recipientName, null, null, Math.round(g.quantity))
+        } catch (err: any) {
+          parsed.warnings.push(`Couldn't import grant for "${g.recipientName}": ${err?.message || err}`)
+        }
       }
     }
 
@@ -105,22 +126,29 @@ export default defineEventHandler(async (event) => {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outstanding')
       `)
       for (const cn of parsed.convertibles) {
-        insCN.run(
-          newId('cn'),
-          id,
-          nameToId.get(cn.stakeholderName) || null,
-          cn.externalId || null,
-          cn.stakeholderName,
-          cn.principal,
-          cn.interestAccrued,
-          cn.interestRate,
-          cn.issueDate,
-          cn.maturityDate,
-          cn.conversionDate || null,
-          cn.valuationCap,
-          cn.conversionDiscount,
-          cn.conversionDate ? 1 : 0,
-        )
+        try {
+          insCN.run(
+            newId('cn'),
+            id,
+            nameToId.get(cn.stakeholderName) || null,
+            cn.externalId ?? null,
+            cn.stakeholderName,
+            cn.principal ?? 0,
+            cn.interestAccrued ?? 0,
+            cn.interestRate ?? 0,
+            cn.issueDate ?? null,
+            cn.maturityDate ?? null,
+            cn.conversionDate ?? null,
+            cn.valuationCap ?? null,
+            cn.conversionDiscount ?? 0,
+            cn.conversionDate ? 1 : 0,
+          )
+        } catch (err: any) {
+          // Surface a structured warning instead of failing the whole import.
+          parsed.warnings.push(
+            `Couldn't import convertible "${cn.stakeholderName}" (${cn.externalId || 'no ID'}): ${err?.message || err}`,
+          )
+        }
       }
     }
 
@@ -133,9 +161,13 @@ export default defineEventHandler(async (event) => {
     }
     if (poolSize > 0) {
       const poolId = newId('pl')
-      db().prepare(`
-        INSERT INTO option_pools (id, company_id, name, authorized) VALUES (?, ?, ?, ?)
-      `).run(poolId, id, 'Stock Option Plan', poolSize)
+      try {
+        db().prepare(`
+          INSERT INTO option_pools (id, company_id, name, authorized) VALUES (?, ?, ?, ?)
+        `).run(poolId, id, 'Stock Option Plan', poolSize)
+      } catch (err: any) {
+        parsed.warnings.push(`Couldn't write option pool: ${err?.message || err}`)
+      }
     }
 
     // Audit row
