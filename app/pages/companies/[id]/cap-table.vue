@@ -81,6 +81,96 @@ const poolAuthorized = computed(() => data.value!.pools.reduce((a: number, p: an
 const poolAvailable = computed(() => Math.max(0, poolAuthorized.value - totals.value.totalOptions - data.value!.grants.filter((g: any) => g.status === 'proposed').reduce((a: number, g: any) => a + g.quantity, 0)))
 const fdsIncludingPool = computed(() => totals.value.fds + poolAvailable.value)
 
+// ----- Summary cap table (top card, spec §5.1) -----
+// Recreates Carta's Summary Cap Table tab — one line per security plus
+// subtotals for Common / Preferred and a row for the Stock Plan. Each
+// security contributes to FDS = outstanding shares (or pool authorized).
+interface SummaryRow {
+  label: string
+  authorized: number | null
+  outstanding: number | null
+  available: number | null
+  fds: number
+  kind: 'common' | 'preferred' | 'pool' | 'common-subtotal' | 'preferred-subtotal' | 'total'
+}
+
+const summaryRows = computed<SummaryRow[]>(() => {
+  const rows: SummaryRow[] = []
+  const classes = (data.value?.share_classes || []) as any[]
+  const issued = totals.value.byClass
+
+  const common = classes.filter(c => (c.kind || '').toLowerCase() === 'common')
+  const preferred = classes.filter(c => (c.kind || '').toLowerCase() === 'preferred')
+  const other = classes.filter(c => {
+    const k = (c.kind || '').toLowerCase()
+    return k !== 'common' && k !== 'preferred'
+  })
+
+  for (const c of common) {
+    rows.push({
+      label: c.name || c.code,
+      authorized: c.authorized ?? null,
+      outstanding: issued[c.id] || 0,
+      available: null,
+      fds: issued[c.id] || 0,
+      kind: 'common',
+    })
+  }
+  if (common.length > 1) {
+    const sumAuth = common.reduce((a, c) => a + (c.authorized || 0), 0)
+    const sumOut  = common.reduce((a, c) => a + (issued[c.id] || 0), 0)
+    rows.push({ label: 'Common — subtotal', authorized: sumAuth, outstanding: sumOut, available: null, fds: sumOut, kind: 'common-subtotal' })
+  }
+
+  for (const c of preferred) {
+    rows.push({
+      label: c.name || c.code,
+      authorized: c.authorized ?? null,
+      outstanding: issued[c.id] || 0,
+      available: null,
+      fds: issued[c.id] || 0,
+      kind: 'preferred',
+    })
+  }
+  if (preferred.length > 1) {
+    const sumAuth = preferred.reduce((a, c) => a + (c.authorized || 0), 0)
+    const sumOut  = preferred.reduce((a, c) => a + (issued[c.id] || 0), 0)
+    rows.push({ label: 'Preferred — subtotal', authorized: sumAuth, outstanding: sumOut, available: null, fds: sumOut, kind: 'preferred-subtotal' })
+  }
+
+  for (const c of other) {
+    rows.push({
+      label: c.name || c.code,
+      authorized: c.authorized ?? null,
+      outstanding: issued[c.id] || 0,
+      available: null,
+      fds: issued[c.id] || 0,
+      kind: 'common',
+    })
+  }
+
+  const pools = data.value?.pools || []
+  const poolName = pools.length === 1 ? (pools[0] as any).name : 'Equity incentive plans'
+  rows.push({
+    label: poolName,
+    authorized: poolAuthorized.value,
+    outstanding: totals.value.totalOptions,
+    available: poolAvailable.value,
+    fds: poolAuthorized.value,
+    kind: 'pool',
+  })
+
+  rows.push({
+    label: 'Total fully diluted',
+    authorized: null,
+    outstanding: totals.value.totalShares,
+    available: poolAvailable.value,
+    fds: fdsIncludingPool.value,
+    kind: 'total',
+  })
+  return rows
+})
+
 // ----- Share classes table (sortable + resizable) -----
 // "Issued" + "Authorized" each unfold into up to 3 sub-columns
 // (shares / % / $) depending on which units the user has toggled on.
@@ -387,6 +477,54 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
     </UiEmpty>
 
     <div v-else class="space-y-6">
+      <!-- Summary cap table — Carta-style rollup. One line per security, with
+           Common / Preferred subtotals when more than one class exists in the
+           group. Pool row shows authorized / outstanding (granted) / available.
+           Total row sums FDS including unissued pool. -->
+      <UiCard title="Summary cap table" subtitle="Rolled up by security — recreates the Carta Summary tab" :padded="false">
+        <div class="overflow-x-auto">
+          <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
+            <colgroup>
+              <col style="width: 38%" />
+              <col style="width: 14%" />
+              <col style="width: 14%" />
+              <col style="width: 13%" />
+              <col style="width: 11%" />
+              <col style="width: 10%" />
+            </colgroup>
+            <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
+              <tr>
+                <th class="px-3 py-1.5 border-b border-ink-300 font-semibold">Security</th>
+                <th class="px-3 py-1.5 border-b border-ink-300 font-semibold text-right">Authorized</th>
+                <th class="px-3 py-1.5 border-b border-ink-300 font-semibold text-right">Outstanding</th>
+                <th class="px-3 py-1.5 border-b border-ink-300 font-semibold text-right">Available</th>
+                <th class="px-3 py-1.5 border-b border-ink-300 font-semibold text-right">FDS</th>
+                <th class="px-3 py-1.5 border-b border-ink-300 font-semibold text-right">% FDS</th>
+              </tr>
+            </thead>
+            <tbody class="num">
+              <tr
+                v-for="(r, i) in summaryRows"
+                :key="i"
+                :class="[
+                  r.kind === 'total' ? 'bg-ink-100 font-semibold text-ink-900' : '',
+                  (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal') ? 'bg-ink-100/60 italic text-ink-700' : '',
+                  r.kind === 'pool' ? 'bg-amber-50/40' : '',
+                  r.kind !== 'total' ? 'hover:bg-accent-50/30 transition-colors' : '',
+                ]"
+              >
+                <td class="px-3 py-1.5 border-b border-ink-200 truncate" :title="r.label">{{ r.label }}</td>
+                <td class="px-3 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ r.authorized == null ? '—' : fmtShares(r.authorized) }}</td>
+                <td class="px-3 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ r.outstanding == null ? '—' : fmtShares(r.outstanding) }}</td>
+                <td class="px-3 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ r.available == null ? '—' : fmtShares(r.available) }}</td>
+                <td class="px-3 py-1.5 text-right border-b border-ink-200" :class="r.kind === 'total' ? '' : 'font-medium text-ink-900'">{{ fmtShares(r.fds) }}</td>
+                <td class="px-3 py-1.5 text-right border-b border-ink-200" :class="r.kind === 'total' ? '' : 'text-ink-600'">{{ fdsIncludingPool > 0 ? fmtPct(r.fds / fdsIncludingPool, 2) : '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </UiCard>
+
       <!-- Share classes — compact, collapsible (the holdings pivot is the main view). -->
       <UiCard :title="`Share classes (${data.share_classes.length})`" :padded="false">
         <template #header>
