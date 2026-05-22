@@ -309,7 +309,13 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
       const cInterest = col(/^interest$|accrued\s*interest|interest\s*accrued/i)
       const cIssue = col(/issue\s*date|issued|effective\s*date/i)
       const cMaturity = col(/maturity\s*date|maturity/i)
-      const cConvDate = col(/conversion\s*date|converted\s*on|conv\.?\s*date/i)
+      // Carta's actual export uses "Converted Date" (past tense). Earlier
+      // versions of CapStack only looked for "Conversion Date", so all 13
+      // rows came in without dates. Broadened to catch both, plus a
+      // positional fallback to column O (15) — that's where Carta puts it
+      // regardless of label.
+      let cConvDate = col(/conv(?:erted|ersion)?\s*date|converted\s*on/i)
+      if (cConvDate < 0) cConvDate = 15
       const cRate = col(/interest\s*rate|rate$/i)
       const cCap = col(/valuation\s*cap|^cap$/i)
       const cDiscount = col(/conversion\s*discount|^discount$/i)
