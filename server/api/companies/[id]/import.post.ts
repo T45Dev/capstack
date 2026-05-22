@@ -9,7 +9,13 @@ export default defineEventHandler(async (event) => {
   const co = db().prepare('SELECT id FROM companies WHERE id = ?').get(id)
   if (!co) throw createError({ statusCode: 404, message: 'Company not found' })
 
-  const parts = await readMultipartFormData(event)
+  let parts
+  try {
+    parts = await readMultipartFormData(event)
+  } catch (e: any) {
+    console.error('[import] multipart parse failed:', e)
+    throw createError({ statusCode: 400, message: `Failed to read upload: ${e?.message || e}` })
+  }
   if (!parts?.length) throw createError({ statusCode: 400, message: 'No file uploaded' })
 
   const file = parts.find(p => p.name === 'file' || (p.filename && /\.(xlsx|xlsm)$/i.test(p.filename)))
@@ -171,29 +177,44 @@ export default defineEventHandler(async (event) => {
     }
 
     // Audit row
-    db().prepare(`
-      INSERT INTO imports (id, company_id, filename, source, raw_meta)
-      VALUES (?, ?, ?, 'carta_proforma', ?)
-    `).run(
-      newId('im'),
-      id,
-      file.filename || 'cap-table.xlsx',
-      JSON.stringify({
-        companyName: parsed.companyName,
-        asOfDate: parsed.asOfDate,
-        warnings: parsed.warnings,
-        counts: {
-          stakeholders: parsed.stakeholders.length,
-          holdings: parsed.holdings.length,
-          shareClasses: parsed.shareClasses.length,
-          convertibles: parsed.convertibles.length,
-          grants: parsed.grants.length,
-        },
-      }),
-    )
+    try {
+      db().prepare(`
+        INSERT INTO imports (id, company_id, filename, source, raw_meta)
+        VALUES (?, ?, ?, 'carta_proforma', ?)
+      `).run(
+        newId('im'),
+        id,
+        file.filename || 'cap-table.xlsx',
+        JSON.stringify({
+          companyName: parsed.companyName,
+          asOfDate: parsed.asOfDate,
+          warnings: parsed.warnings,
+          counts: {
+            stakeholders: parsed.stakeholders.length,
+            holdings: parsed.holdings.length,
+            shareClasses: parsed.shareClasses.length,
+            convertibles: parsed.convertibles.length,
+            grants: parsed.grants.length,
+          },
+        }),
+      )
+    } catch (err: any) {
+      parsed.warnings.push(`Couldn't write import audit row: ${err?.message || err}`)
+    }
   })
 
-  tx()
+  // Run the whole insert transaction. If anything still escapes the per-row
+  // try/catches, surface the real error message to the client as a 400 so
+  // they can see what's wrong, and log to server stderr for `docker logs`.
+  try {
+    tx()
+  } catch (err: any) {
+    console.error('[import] transaction failed:', err)
+    throw createError({
+      statusCode: 400,
+      message: `Import transaction failed: ${err?.message || err}`,
+    })
+  }
 
   return {
     ok: true,
