@@ -266,99 +266,149 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
       </div>
     </div>
 
-    <!-- Inputs + Derived round math, side-by-side at wide widths -->
-    <div class="grid grid-cols-1 xl:grid-cols-12 gap-5">
-      <!-- Inputs column -->
-      <section class="xl:col-span-5">
-        <div class="rounded-lg border border-ink-300 bg-white shadow-card p-5">
-          <div class="flex items-baseline justify-between mb-4">
-            <h2 class="text-sm font-semibold text-ink-900">Inputs</h2>
-            <p v-if="savedAt" class="text-xs text-emerald-600">Saved at {{ savedAt }}</p>
-          </div>
+    <!-- Compact equation strip — inputs are the blanks, equations show how
+         they roll up into round math. Each editable variable appears wherever
+         it's used; same v-model so all instances stay in sync. -->
+    <div class="rounded-lg border border-ink-300 bg-white shadow-card p-4 mb-4">
+      <!-- Selectors strip -->
+      <div class="flex items-center gap-3 mb-4 pb-3 border-b border-ink-200 flex-wrap">
+        <label class="flex items-center gap-2">
+          <span class="text-[11px] font-medium text-ink-500 uppercase tracking-wider">Round</span>
+          <select v-model="form.round_name" class="rounded-md border border-ink-300 bg-white px-2.5 py-1 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500">
+            <option v-for="s in seriesShortcuts" :key="s" :value="s">{{ s }}</option>
+          </select>
+        </label>
+        <label class="flex items-center gap-2">
+          <span class="text-[11px] font-medium text-ink-500 uppercase tracking-wider">CN basis</span>
+          <select v-model="form.cn_conversion_basis" class="rounded-md border border-ink-300 bg-white px-2.5 py-1 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500">
+            <option value="best">Best for holder</option>
+            <option value="discount">Discount only</option>
+            <option value="cap">Cap only</option>
+            <option value="round_price">Round price</option>
+          </select>
+        </label>
+        <RefreshCw v-if="pending" :size="12" class="text-ink-400 animate-spin" />
+        <p v-if="savedAt" class="ml-auto text-xs text-emerald-600">Saved at {{ savedAt }}</p>
+      </div>
 
-          <div class="space-y-4">
-            <div class="grid grid-cols-2 gap-3">
-              <label class="block">
-                <span class="block text-xs font-medium text-ink-700 mb-1">Round name</span>
-                <select v-model="form.round_name" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500">
-                  <option v-for="s in seriesShortcuts" :key="s" :value="s">{{ s }}</option>
-                </select>
-              </label>
-              <label class="block">
-                <span class="block text-xs font-medium text-ink-700 mb-1">CN conversion basis</span>
-                <select v-model="form.cn_conversion_basis" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500">
-                  <option value="best">Best for holder</option>
-                  <option value="discount">Discount only</option>
-                  <option value="cap">Cap only</option>
-                  <option value="round_price">Round price</option>
-                </select>
-              </label>
+      <!-- Equation rows -->
+      <div class="grid grid-cols-1 xl:grid-cols-2 gap-x-8 gap-y-5">
+        <!-- Eq 1: PPS = pre-money ÷ pre-round FDS -->
+        <div class="flex items-end gap-2.5 flex-wrap">
+          <div class="flex flex-col">
+            <div class="flex items-center rounded-md border border-ink-300 bg-white focus-within:ring-2 focus-within:ring-accent-500 focus-within:border-accent-500">
+              <span class="pl-1.5 text-ink-500 text-sm">$</span>
+              <input v-model="form.pre_money" type="number" step="100000" class="w-32 pr-1.5 py-1 text-right text-sm num bg-transparent border-0 focus:outline-none focus:ring-0" />
             </div>
-
-            <div class="grid grid-cols-2 gap-3">
-              <UiInput v-model="form.pre_money" type="number" label="Pre-money valuation" prefix="$" step="100000" />
-              <UiInput v-model="form.new_money" type="number" label="New money (raise)" prefix="$" step="100000" />
-            </div>
-
-            <div>
-              <UiInput
-                v-model="form.pre_round_fds"
-                type="number"
-                label="Pre-round fully-diluted shares"
-                step="1"
-                hint="Holdings + outstanding options + available pool. Override if you're modelling a planned adjustment."
-              />
-              <div class="mt-1.5 flex items-center justify-between text-xs">
-                <span class="text-ink-500">
-                  From cap table:
-                  <button type="button" class="text-accent-600 hover:text-accent-700 font-medium num" @click="useComputedFDS">
-                    {{ fmtShares(fdsFromCapTable) }}
-                  </button>
-                </span>
-                <button v-if="form.pre_round_fds != null" type="button"
-                  class="text-ink-500 hover:text-ink-900 inline-flex items-center gap-1"
-                  @click="clearOverride">
-                  <RotateCcw :size="11" /> use computed
-                </button>
-              </div>
-            </div>
-
-            <label class="block">
-              <span class="block text-xs font-medium text-ink-700 mb-1">Notes</span>
-              <textarea v-model="form.notes" rows="3" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500" />
-            </label>
+            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">pre-money</span>
           </div>
-        </div>
-      </section>
-
-      <!-- Derived metrics + CN math column -->
-      <section class="xl:col-span-7 space-y-5">
-        <!-- Round math, flat stat strip — no card to make it feel like an output -->
-        <div>
-          <div class="flex items-center justify-between mb-2">
-            <h2 class="text-[11px] font-semibold uppercase tracking-wider text-ink-500">
-              Derived round math
-              <RefreshCw v-if="pending" :size="11" class="inline animate-spin text-ink-400 ml-1" />
-            </h2>
+          <span class="pb-5 text-ink-500 text-base">÷</span>
+          <div class="flex flex-col">
+            <input v-model="form.pre_round_fds" type="number" step="1" :placeholder="String(fdsFromCapTable || 0)" class="w-32 px-2 py-1 text-right text-sm num rounded-md border border-ink-300 bg-white focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500" />
+            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">pre-round FDS</span>
           </div>
-          <div v-if="compute" class="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <UiStat label="Price per share" :value="fmtPricePerShare(compute.round.pricePerShare)" emphasis />
-            <UiStat label="Post-money" :value="fmtUSD(compute.round.postMoney)" emphasis />
-            <UiStat label="Post-round FDS" :value="fmtShares(compute.round.postRoundFDS)" emphasis />
-            <UiStat label="Pre-round FDS" :value="fmtShares(compute.round.preRoundFDS)" :hint="usingOverride ? 'override' : 'from cap table'" />
-            <UiStat label="New preferred shares" :value="fmtShares(compute.round.newPreferredShares)" />
-            <UiStat label="CN conversion shares" :value="fmtShares(compute.round.cnConvertedShares)" :hint="compute.round.cnConvertedDollars ? `from ${fmtUSD(compute.round.cnConvertedDollars)}` : ''" />
-            <UiStat label="Valuation at post-FDS" :value="fmtUSD(compute.round.impliedPostFDSValuation)" hint="PPS × post-FDS (incl. CN dilution)" class="md:col-span-2" />
-            <UiStat
-              v-if="compute.round.deferred?.totalDollars"
-              label="Deferred CN obligation"
-              :value="fmtUSD(compute.round.deferred.totalDollars)"
-              :hint="`${fmtShares(compute.round.deferred.projectedSharesAtRoundPPS)} at round PPS`"
-              tone="warn"
-            />
+          <span class="pb-5 text-ink-500 text-base">=</span>
+          <div class="flex flex-col items-end">
+            <span class="px-2.5 py-1 text-sm num rounded-md bg-accent-50 border border-accent-200 text-accent-700 font-semibold">{{ fmtPricePerShare(compute?.round?.pricePerShare) }}</span>
+            <span class="mt-1 text-[10px] uppercase tracking-wider text-accent-700">price per share</span>
           </div>
         </div>
 
+        <!-- Eq 2: Post-money = pre-money + new money -->
+        <div class="flex items-end gap-2.5 flex-wrap">
+          <div class="flex flex-col">
+            <div class="flex items-center rounded-md border border-ink-300 bg-white focus-within:ring-2 focus-within:ring-accent-500 focus-within:border-accent-500">
+              <span class="pl-1.5 text-ink-500 text-sm">$</span>
+              <input v-model="form.pre_money" type="number" step="100000" class="w-32 pr-1.5 py-1 text-right text-sm num bg-transparent border-0 focus:outline-none focus:ring-0" />
+            </div>
+            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">pre-money</span>
+          </div>
+          <span class="pb-5 text-ink-500 text-base">+</span>
+          <div class="flex flex-col">
+            <div class="flex items-center rounded-md border border-ink-300 bg-white focus-within:ring-2 focus-within:ring-accent-500 focus-within:border-accent-500">
+              <span class="pl-1.5 text-ink-500 text-sm">$</span>
+              <input v-model="form.new_money" type="number" step="100000" class="w-32 pr-1.5 py-1 text-right text-sm num bg-transparent border-0 focus:outline-none focus:ring-0" />
+            </div>
+            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">new money</span>
+          </div>
+          <span class="pb-5 text-ink-500 text-base">=</span>
+          <div class="flex flex-col items-end">
+            <span class="px-2.5 py-1 text-sm num rounded-md bg-accent-50 border border-accent-200 text-accent-700 font-semibold">{{ fmtUSD(compute?.round?.postMoney) }}</span>
+            <span class="mt-1 text-[10px] uppercase tracking-wider text-accent-700">post-money</span>
+          </div>
+        </div>
+
+        <!-- Eq 3: Post-round FDS = pre-round FDS + new preferred + CN shares -->
+        <div class="flex items-end gap-2.5 flex-wrap">
+          <div class="flex flex-col">
+            <input v-model="form.pre_round_fds" type="number" step="1" :placeholder="String(fdsFromCapTable || 0)" class="w-32 px-2 py-1 text-right text-sm num rounded-md border border-ink-300 bg-white focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500" />
+            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">pre-round FDS</span>
+          </div>
+          <span class="pb-5 text-ink-500 text-base">+</span>
+          <div class="flex flex-col">
+            <span class="px-2 py-1 text-sm num rounded-md bg-ink-100 text-ink-800 text-right min-w-[7rem]">{{ fmtShares(compute?.round?.newPreferredShares) }}</span>
+            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">new preferred</span>
+          </div>
+          <span class="pb-5 text-ink-500 text-base">+</span>
+          <div class="flex flex-col">
+            <span class="px-2 py-1 text-sm num rounded-md bg-ink-100 text-ink-800 text-right min-w-[5rem]">{{ fmtShares(compute?.round?.cnConvertedShares) }}</span>
+            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">CN conv.</span>
+          </div>
+          <span class="pb-5 text-ink-500 text-base">=</span>
+          <div class="flex flex-col items-end">
+            <span class="px-2.5 py-1 text-sm num rounded-md bg-accent-50 border border-accent-200 text-accent-700 font-semibold">{{ fmtShares(compute?.round?.postRoundFDS) }}</span>
+            <span class="mt-1 text-[10px] uppercase tracking-wider text-accent-700">post-round FDS</span>
+          </div>
+        </div>
+
+        <!-- Eq 4: Valuation = PPS × post-FDS -->
+        <div class="flex items-end gap-2.5 flex-wrap">
+          <div class="flex flex-col">
+            <span class="px-2 py-1 text-sm num rounded-md bg-ink-100 text-ink-800 text-right min-w-[6rem]">{{ fmtPricePerShare(compute?.round?.pricePerShare) }}</span>
+            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">PPS</span>
+          </div>
+          <span class="pb-5 text-ink-500 text-base">×</span>
+          <div class="flex flex-col">
+            <span class="px-2 py-1 text-sm num rounded-md bg-ink-100 text-ink-800 text-right min-w-[7rem]">{{ fmtShares(compute?.round?.postRoundFDS) }}</span>
+            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">post-FDS</span>
+          </div>
+          <span class="pb-5 text-ink-500 text-base">=</span>
+          <div class="flex flex-col items-end">
+            <span class="px-2.5 py-1 text-sm num rounded-md bg-accent-50 border border-accent-200 text-accent-700 font-semibold">{{ fmtUSD(compute?.round?.impliedPostFDSValuation) }}</span>
+            <span class="mt-1 text-[10px] uppercase tracking-wider text-accent-700">valuation at post-FDS</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pre-round FDS source / override hint -->
+      <div class="mt-4 pt-3 border-t border-ink-200 flex items-center gap-4 text-xs flex-wrap">
+        <span class="text-ink-500">
+          Pre-round FDS from cap table:
+          <button type="button" class="text-accent-600 hover:text-accent-700 font-medium num" @click="useComputedFDS">{{ fmtShares(fdsFromCapTable) }}</button>
+        </span>
+        <span v-if="usingOverride" class="text-amber-700 font-medium">override active</span>
+        <button v-if="form.pre_round_fds != null" type="button"
+          class="text-ink-500 hover:text-ink-900 inline-flex items-center gap-1"
+          @click="clearOverride">
+          <RotateCcw :size="11" /> use computed
+        </button>
+        <span
+          v-if="compute?.round?.deferred?.totalDollars"
+          class="ml-auto text-amber-700"
+        >
+          Deferred CNs: {{ fmtUSD(compute.round.deferred.totalDollars) }} ({{ fmtShares(compute.round.deferred.projectedSharesAtRoundPPS) }} at round PPS) — not added to post-FDS.
+        </span>
+      </div>
+
+      <!-- Notes -->
+      <label class="block mt-4">
+        <span class="block text-[11px] font-medium text-ink-500 uppercase tracking-wider mb-1">Notes</span>
+        <textarea v-model="form.notes" rows="2" class="w-full rounded-md border border-ink-300 bg-white px-2.5 py-1.5 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500" />
+      </label>
+    </div>
+
+    <!-- CN detail / Deferred / Warnings — full width below the equation strip -->
+    <div class="space-y-5 mb-6">
         <!-- Convertible-note conversion detail -->
         <div v-if="compute?.round.cnDetails?.length">
           <div class="flex items-center justify-between mb-2">
@@ -454,7 +504,6 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
             <li v-for="(w, i) in compute.round.warnings" :key="i">{{ w }}</li>
           </ul>
         </div>
-      </section>
     </div>
 
     <!-- Per-stakeholder dilution table — full width below -->
