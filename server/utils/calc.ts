@@ -137,7 +137,10 @@ export function computeRound(a: RoundInputs): RoundResult {
   return {
     preMoney: a.preMoney,
     newMoney: a.newMoney,
-    postMoney: a.preMoney + a.newMoney,
+    // Post-money includes CN principal+interest converting at this round, so
+    // it reflects total equity capital after the round (not strictly the
+    // term-sheet "pre + new" definition).
+    postMoney: a.preMoney + a.newMoney + cnConvertedDollars,
     preRoundFDS: a.preRoundFDS,
     pricePerShare,
     newPreferredShares,

@@ -46,8 +46,11 @@ export default defineEventHandler((event) => {
     if (sc.issue_price && sc.issue_price > currentPPS) currentPPS = sc.issue_price
   }
 
-  // Per-stakeholder convertible totals (principal + accrued interest only — projected
-  // share count is best computed downstream against a specific round PPS).
+  // Per-stakeholder convertible totals. We project each holder's CN $ into a
+  // share count at the current PPS so the cap table can show CNs as a synthetic
+  // share class. The actual round conversion happens at the round PPS in the
+  // compute endpoint — this is purely a "what does the cap table look like
+  // assuming CNs convert" projection.
   const cnByStakeholder = new Map<string, { dollars: number; count: number }>()
   let cnUnattributedDollars = 0
   let cnUnattributedCount = 0
@@ -65,13 +68,23 @@ export default defineEventHandler((event) => {
     cnByStakeholder.set(c.stakeholder_id, row)
   }
   const cn_by_stakeholder = Array.from(cnByStakeholder.entries()).map(([sid, v]) => ({
-    stakeholder_id: sid, dollars: v.dollars, count: v.count,
+    stakeholder_id: sid,
+    dollars: v.dollars,
+    shares: currentPPS > 0 ? v.dollars / currentPPS : 0,
+    count: v.count,
   }))
+  const cnTotalDollars = cn_by_stakeholder.reduce((a, c) => a + c.dollars, 0) + cnUnattributedDollars
+  const cnTotalShares = currentPPS > 0 ? cnTotalDollars / currentPPS : 0
 
   return {
     company, share_classes, stakeholders, holdings, grants, convertibles, pools,
     current_pps: currentPPS,
     cn_by_stakeholder,
-    cn_unattributed: { dollars: cnUnattributedDollars, count: cnUnattributedCount },
+    cn_unattributed: {
+      dollars: cnUnattributedDollars,
+      shares: currentPPS > 0 ? cnUnattributedDollars / currentPPS : 0,
+      count: cnUnattributedCount,
+    },
+    cn_totals: { dollars: cnTotalDollars, shares: cnTotalShares },
   }
 })

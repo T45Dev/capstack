@@ -69,10 +69,21 @@ const { data: compute, pending } = await useFetch(() => `/api/companies/${id.val
 const fdsFromCapTable = computed(() => (compute.value?.capTableBaseline?.fdsFromCapTable || 0) as number)
 const usingOverride = computed(() => form.pre_round_fds != null && form.pre_round_fds !== fdsFromCapTable.value)
 
-function useComputedFDS() {
-  form.pre_round_fds = fdsFromCapTable.value
-}
+// The pre-round FDS field shows the effective value (override-or-cap-table)
+// while letting the user type to override. Setting to null returns to the
+// cap-table value via the placeholder fallback.
+const preRoundFDSEffective = computed<number | null>({
+  get: () => form.pre_round_fds ?? fdsFromCapTable.value,
+  set: (v: number | null) => {
+    // If the user types the exact cap-table value, treat it as "no override".
+    form.pre_round_fds = v != null && v !== fdsFromCapTable.value ? v : null
+  },
+})
+
 function clearOverride() {
+  form.pre_round_fds = null
+}
+function useComputedFDS() {
   form.pre_round_fds = null
 }
 
@@ -296,16 +307,13 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
         <!-- Eq 1: PPS = pre-money ÷ pre-round FDS -->
         <div class="flex items-end gap-2.5 flex-wrap">
           <div class="flex flex-col">
-            <div class="flex items-center rounded-md border border-ink-300 bg-white focus-within:ring-2 focus-within:ring-accent-500 focus-within:border-accent-500">
-              <span class="pl-1.5 text-ink-500 text-sm">$</span>
-              <input v-model="form.pre_money" type="number" step="100000" class="w-32 pr-1.5 py-1 text-right text-sm num bg-transparent border-0 focus:outline-none focus:ring-0" />
-            </div>
-            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">pre-money</span>
+            <NumberInput v-model="form.pre_money" prefix="$" :input-class="'w-32'" />
+            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">pre-money valuation</span>
           </div>
           <span class="pb-5 text-ink-500 text-base">÷</span>
           <div class="flex flex-col">
-            <input v-model="form.pre_round_fds" type="number" step="1" :placeholder="String(fdsFromCapTable || 0)" class="w-32 px-2 py-1 text-right text-sm num rounded-md border border-ink-300 bg-white focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500" />
-            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">pre-round FDS</span>
+            <NumberInput v-model="preRoundFDSEffective" :input-class="'w-32'" />
+            <span class="mt-1 text-[10px] uppercase tracking-wider" :class="usingOverride ? 'text-amber-700' : 'text-ink-500'">pre-round FDS{{ usingOverride ? ' (override)' : ' (from cap table)' }}</span>
           </div>
           <span class="pb-5 text-ink-500 text-base">=</span>
           <div class="flex flex-col items-end">
@@ -314,22 +322,21 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
           </div>
         </div>
 
-        <!-- Eq 2: Post-money = pre-money + new money -->
+        <!-- Eq 2: Post-money = pre-money + new money + CN $ -->
         <div class="flex items-end gap-2.5 flex-wrap">
           <div class="flex flex-col">
-            <div class="flex items-center rounded-md border border-ink-300 bg-white focus-within:ring-2 focus-within:ring-accent-500 focus-within:border-accent-500">
-              <span class="pl-1.5 text-ink-500 text-sm">$</span>
-              <input v-model="form.pre_money" type="number" step="100000" class="w-32 pr-1.5 py-1 text-right text-sm num bg-transparent border-0 focus:outline-none focus:ring-0" />
-            </div>
-            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">pre-money</span>
+            <NumberInput v-model="form.pre_money" prefix="$" :input-class="'w-32'" />
+            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">pre-money valuation</span>
           </div>
           <span class="pb-5 text-ink-500 text-base">+</span>
           <div class="flex flex-col">
-            <div class="flex items-center rounded-md border border-ink-300 bg-white focus-within:ring-2 focus-within:ring-accent-500 focus-within:border-accent-500">
-              <span class="pl-1.5 text-ink-500 text-sm">$</span>
-              <input v-model="form.new_money" type="number" step="100000" class="w-32 pr-1.5 py-1 text-right text-sm num bg-transparent border-0 focus:outline-none focus:ring-0" />
-            </div>
+            <NumberInput v-model="form.new_money" prefix="$" :input-class="'w-32'" />
             <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">new money</span>
+          </div>
+          <span class="pb-5 text-ink-500 text-base">+</span>
+          <div class="flex flex-col">
+            <span class="px-2 py-1 text-sm num rounded-md bg-ink-100 text-ink-800 text-right min-w-[7rem]">{{ fmtUSD(compute?.round?.cnConvertedDollars) }}</span>
+            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">CN $ converting</span>
           </div>
           <span class="pb-5 text-ink-500 text-base">=</span>
           <div class="flex flex-col items-end">
@@ -341,8 +348,8 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
         <!-- Eq 3: Post-round FDS = pre-round FDS + new preferred + CN shares -->
         <div class="flex items-end gap-2.5 flex-wrap">
           <div class="flex flex-col">
-            <input v-model="form.pre_round_fds" type="number" step="1" :placeholder="String(fdsFromCapTable || 0)" class="w-32 px-2 py-1 text-right text-sm num rounded-md border border-ink-300 bg-white focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500" />
-            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">pre-round FDS</span>
+            <NumberInput v-model="preRoundFDSEffective" :input-class="'w-32'" />
+            <span class="mt-1 text-[10px] uppercase tracking-wider" :class="usingOverride ? 'text-amber-700' : 'text-ink-500'">pre-round FDS{{ usingOverride ? ' (override)' : ' (from cap table)' }}</span>
           </div>
           <span class="pb-5 text-ink-500 text-base">+</span>
           <div class="flex flex-col">
@@ -383,14 +390,13 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
       <!-- Pre-round FDS source / override hint -->
       <div class="mt-4 pt-3 border-t border-ink-200 flex items-center gap-4 text-xs flex-wrap">
         <span class="text-ink-500">
-          Pre-round FDS from cap table:
-          <button type="button" class="text-accent-600 hover:text-accent-700 font-medium num" @click="useComputedFDS">{{ fmtShares(fdsFromCapTable) }}</button>
+          Cap table FDS:
+          <span class="text-ink-800 font-medium num">{{ fmtShares(fdsFromCapTable) }}</span>
         </span>
-        <span v-if="usingOverride" class="text-amber-700 font-medium">override active</span>
-        <button v-if="form.pre_round_fds != null" type="button"
+        <button v-if="usingOverride" type="button"
           class="text-ink-500 hover:text-ink-900 inline-flex items-center gap-1"
           @click="clearOverride">
-          <RotateCcw :size="11" /> use computed
+          <RotateCcw :size="11" /> revert to cap table value
         </button>
         <span
           v-if="compute?.round?.deferred?.totalDollars"
