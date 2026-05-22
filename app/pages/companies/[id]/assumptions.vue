@@ -36,6 +36,7 @@ const { data: versions, refresh: refreshVersions } = await useFetch<AssumptionVe
 
 const form = reactive({
   round_name: 'Series B',
+  round_close_date: '' as string,
   new_money: 0,
   pre_money: 0,
   pre_round_fds: null as number | null,
@@ -46,6 +47,7 @@ const form = reactive({
 watch(assumptions, (a) => {
   if (!a) return
   form.round_name = a.round_name
+  form.round_close_date = (a as any).round_close_date || ''
   form.new_money = a.new_money
   form.pre_money = a.pre_money
   form.pre_round_fds = a.pre_round_fds
@@ -58,6 +60,7 @@ const computeBody = computed(() => ({
   preMoney: form.pre_money,
   preRoundFDS: form.pre_round_fds,
   cnBasis: form.cn_conversion_basis,
+  roundCloseDate: form.round_close_date || null,
 }))
 
 const { data: compute, pending } = await useFetch(() => `/api/companies/${id.value}/compute`, {
@@ -288,6 +291,15 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
           <select v-model="form.round_name" class="rounded-md border border-ink-300 bg-white px-2.5 py-1 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500">
             <option v-for="s in seriesShortcuts" :key="s" :value="s">{{ s }}</option>
           </select>
+        </label>
+        <label class="flex items-center gap-2">
+          <span class="text-[11px] font-medium text-ink-500 uppercase tracking-wider">Close date</span>
+          <input
+            v-model="form.round_close_date"
+            type="date"
+            class="rounded-md border border-ink-300 bg-white px-2.5 py-1 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500"
+            title="Used to dynamically accrue CN interest"
+          />
         </label>
         <label class="flex items-center gap-2">
           <span class="text-[11px] font-medium text-ink-500 uppercase tracking-wider">CN basis</span>
