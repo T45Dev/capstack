@@ -23,26 +23,25 @@ const holdUnits = useTableUnits('capstack:cap-table:holdings:units')
 // Share-classes section is collapsible — the holdings pivot is the main view.
 const scExpanded = ref(false)
 
-// Build pivoted rows: stakeholder × share class + outstanding options + CN.
-// CNs are projected to shares at the current PPS and folded into FDS so the
-// cap-table view reflects "as-converted" positions without needing a round.
+// Build pivoted rows: stakeholder × share class + outstanding options.
+// Convertible notes are NOT counted here — they're either already represented
+// in holdings via their destination share class (historical conversions) or
+// they live in the Convertible-notes ledger below + are modeled dynamically
+// on the Assumptions page. Showing them again here would double-count.
 interface PivotRow {
   id: string
   stakeholderId: string
   name: string
   totalShares: number
   optionShares: number
-  cnDollars: number
-  cnShares: number
   fds: number
   byClass: Record<string, number>
 }
 
 const pivot = computed<PivotRow[]>(() => {
   const map = new Map<string, PivotRow>()
-  const pps = currentPPS.value
   for (const s of data.value!.stakeholders) {
-    map.set(s.id, { id: s.id, stakeholderId: s.id, name: s.name, totalShares: 0, optionShares: 0, cnDollars: 0, cnShares: 0, fds: 0, byClass: {} })
+    map.set(s.id, { id: s.id, stakeholderId: s.id, name: s.name, totalShares: 0, optionShares: 0, fds: 0, byClass: {} })
   }
   for (const h of data.value!.holdings) {
     const row = map.get(h.stakeholder_id)
@@ -57,29 +56,8 @@ const pivot = computed<PivotRow[]>(() => {
     if (!row) continue
     row.optionShares += g.quantity
   }
-  for (const cn of (data.value!.cn_by_stakeholder || [])) {
-    const row = map.get(cn.stakeholder_id)
-    if (row) {
-      row.cnDollars += cn.dollars
-      row.cnShares += cn.shares
-    }
-  }
-  // CN-only holders not seeded above.
-  for (const c of data.value!.convertibles) {
-    if (c.status !== 'outstanding' || !c.stakeholder_id) continue
-    if (map.has(c.stakeholder_id)) continue
-    const sh = data.value!.stakeholders.find((s: any) => s.id === c.stakeholder_id)
-    const name = sh?.name || c.stakeholder_name
-    const total = (c.principal || 0) + (c.interest_accrued || 0)
-    map.set(c.stakeholder_id, {
-      id: c.stakeholder_id, stakeholderId: c.stakeholder_id, name,
-      totalShares: 0, optionShares: 0,
-      cnDollars: total, cnShares: pps > 0 ? total / pps : 0,
-      fds: 0, byClass: {},
-    })
-  }
-  for (const row of map.values()) row.fds = row.totalShares + row.optionShares + row.cnShares
-  const arr = Array.from(map.values()).filter(r => r.fds > 0 || r.cnDollars > 0)
+  for (const row of map.values()) row.fds = row.totalShares + row.optionShares
+  const arr = Array.from(map.values()).filter(r => r.fds > 0)
   if (query.value.trim()) {
     const q = query.value.toLowerCase()
     return arr.filter(r => r.name.toLowerCase().includes(q))
@@ -91,16 +69,12 @@ const totals = computed(() => {
   const byClass: Record<string, number> = {}
   let totalShares = 0
   let totalOptions = 0
-  let totalCNDollars = 0
-  let totalCNShares = 0
   for (const r of pivot.value) {
     for (const [k, v] of Object.entries(r.byClass)) byClass[k] = (byClass[k] || 0) + v
     totalShares += r.totalShares
     totalOptions += r.optionShares
-    totalCNDollars += r.cnDollars
-    totalCNShares += r.cnShares
   }
-  return { byClass, totalShares, totalOptions, totalCNDollars, totalCNShares, fds: totalShares + totalOptions + totalCNShares }
+  return { byClass, totalShares, totalOptions, fds: totalShares + totalOptions }
 })
 
 const poolAuthorized = computed(() => data.value!.pools.reduce((a: number, p: any) => a + (p.authorized || 0), 0))
@@ -171,10 +145,12 @@ const sortedShareClasses = computed(() => {
 })
 
 // ----- Holdings pivot table (sortable + resizable) -----
-// Each "share-quantity" metric (per share-class, Options, CN, FDS) unfolds into
-// 1-3 sub-columns based on which units the user has selected. Sub-columns of
-// the same metric share a `group` label that's used to render a two-row header
-// that visually distinguishes "CS / CS % / CS $" as one group.
+// Each "share-quantity" metric (per share-class, Options, FDS) unfolds into
+// 1-3 sub-columns based on which units the user has selected. Sub-columns
+// of the same metric share a `group` label that's used to render a two-row
+// header that visually distinguishes "CS / CS % / CS $" as one group.
+// Convertible notes don't appear here — see the Convertible notes card
+// below and the Assumptions page for CN math.
 interface HoldCol {
   key: string
   label: string             // full e.g. "CS %" (still used for accessibility / sorted-by-key)
@@ -207,13 +183,6 @@ const holdingsCols = computed<HoldCol[]>(() => {
     cols.push({
       key: `optionShares_${u}`, baseKey: 'optionShares', unit: u, group: 'Options',
       label: `Options${unitSuffix(u)}`,
-      width: u === 'shares' ? 110 : 90, sortable: true, align: 'right',
-    })
-  }
-  for (const u of holdUnits.selected.value) {
-    cols.push({
-      key: `cn_${u}`, baseKey: 'cn', unit: u, group: 'CN',
-      label: `CN${unitSuffix(u)}`,
       width: u === 'shares' ? 110 : 90, sortable: true, align: 'right',
     })
   }
@@ -262,7 +231,6 @@ watch(holdingsCols, (cols) => {
 function holdingBase(row: any, baseKey: string): number {
   if (baseKey === 'optionShares') return row.optionShares
   if (baseKey === 'fds') return row.fds
-  if (baseKey === 'cn') return row.cnShares  // unit variants project from the share count
   if (baseKey.startsWith('class_')) return row.byClass[baseKey.slice(6)] || 0
   return 0
 }
@@ -481,23 +449,6 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                   <td v-else-if="c.baseKey === 'authorized'"  class="px-2 py-0.5 text-right text-ink-600 border-b border-ink-200">{{ formatBy(c.unit!, poolAuthorized, fdsIncludingPool, currentPPS) }}</td>
                 </template>
               </tr>
-              <!-- Synthetic Convertibles row: shares projected at current PPS, $ shows ledger balance. -->
-              <tr v-if="totals.totalCNDollars > 0" class="bg-ink-100/60 font-medium">
-                <template v-for="c in shareClassTable.cols" :key="c.key">
-                  <td v-if="c.key === 'code'"  class="px-2 py-0.5 font-mono text-xs border-b border-ink-200 text-ink-700">CN</td>
-                  <td v-else-if="c.key === 'name'"  class="px-2 py-0.5 border-b border-ink-200 text-ink-700">
-                    Convertible notes
-                    <span class="text-[10px] text-ink-500 ml-1">projected at current PPS</span>
-                  </td>
-                  <td v-else-if="c.key === 'kind'"  class="px-2 py-0.5 text-[11px] uppercase tracking-wide text-ink-500 border-b border-ink-200">convertible</td>
-                  <td v-else-if="c.key === 'issue_price'"  class="px-2 py-0.5 border-b border-ink-200"></td>
-                  <td v-else-if="c.baseKey === 'issued'"  class="px-2 py-0.5 text-right border-b border-ink-200">
-                    <template v-if="c.unit === 'value'">{{ fmtUSD(totals.totalCNDollars) }}</template>
-                    <template v-else>{{ formatBy(c.unit!, totals.totalCNShares, fdsIncludingPool, currentPPS) }}</template>
-                  </td>
-                  <td v-else-if="c.baseKey === 'authorized'"  class="px-2 py-0.5 border-b border-ink-200"></td>
-                </template>
-              </tr>
               <tr class="font-semibold bg-ink-100 text-ink-900">
                 <template v-for="c in shareClassTable.cols" :key="c.key">
                   <td v-if="c.key === 'code'"  class="px-2 py-0.5">FDS</td>
@@ -581,16 +532,6 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               <tr v-for="r in sortedPivot" :key="r.stakeholderId" class="group">
                 <template v-for="c in holdingsTable.cols" :key="c.key">
                   <td v-if="c.key === 'name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-accent-50/40" :title="r.name">{{ r.name }}</td>
-                  <td v-else-if="c.baseKey === 'cn'" class="px-2.5 py-1.5 text-right border-b border-ink-200">
-                    <template v-if="c.unit === 'value'">
-                      <span v-if="r.cnDollars" class="text-ink-800">{{ fmtUSD(r.cnDollars) }}</span>
-                      <span v-else class="text-ink-400">—</span>
-                    </template>
-                    <template v-else>
-                      <span v-if="r.cnShares">{{ formatBy(c.unit!, r.cnShares, fdsIncludingPool, currentPPS) }}</span>
-                      <span v-else class="text-ink-400">—</span>
-                    </template>
-                  </td>
                   <td v-else class="px-2.5 py-1.5 text-right border-b border-ink-200" :class="c.baseKey === 'fds' ? 'font-medium text-ink-900' : ''">
                     <template v-if="holdingBase(r, c.baseKey!)">{{ formatBy(c.unit!, holdingBase(r, c.baseKey!), fdsIncludingPool, currentPPS) }}</template>
                     <span v-else class="text-ink-400">—</span>
@@ -600,10 +541,6 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               <tr class="text-ink-900 font-semibold num bg-ink-100">
                 <template v-for="c in holdingsTable.cols" :key="c.key">
                   <td v-if="c.key === 'name'" class="px-2.5 py-1.5 border-t-2 border-ink-300">Total</td>
-                  <td v-else-if="c.baseKey === 'cn'" class="px-2.5 py-1.5 text-right border-t-2 border-ink-300">
-                    <template v-if="c.unit === 'value'">{{ fmtUSD(totals.totalCNDollars) }}</template>
-                    <template v-else>{{ formatBy(c.unit!, totals.totalCNShares, fdsIncludingPool, currentPPS) }}</template>
-                  </td>
                   <td v-else-if="c.baseKey === 'fds'" class="px-2.5 py-1.5 text-right border-t-2 border-ink-300">{{ formatBy(c.unit!, totals.fds, fdsIncludingPool, currentPPS) }}</td>
                   <td v-else-if="c.baseKey === 'optionShares'" class="px-2.5 py-1.5 text-right border-t-2 border-ink-300">{{ formatBy(c.unit!, totals.totalOptions, fdsIncludingPool, currentPPS) }}</td>
                   <td v-else-if="c.baseKey?.startsWith('class_')" class="px-2.5 py-1.5 text-right border-t-2 border-ink-300">{{ formatBy(c.unit!, totals.byClass[c.baseKey.slice(6)] || 0, fdsIncludingPool, currentPPS) }}</td>
