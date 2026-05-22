@@ -162,6 +162,25 @@ function migrate(d: Database.Database): void {
       raw_meta TEXT,
       imported_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- Future / hypothetical option-pool events for the Option Pool Impact
+    -- timeline. Real grants and pool top-ups live in the grants / option_pools
+    -- tables and are merged into the timeline at query time. This table holds
+    -- only "ideas" -- planned events the user wants to model.
+    CREATE TABLE IF NOT EXISTS pool_events (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      event_date TEXT NOT NULL,           -- ISO yyyy-mm-dd
+      type TEXT NOT NULL,                 -- 'grant' | 'pool_topup'
+      name TEXT NOT NULL,                 -- e.g. "Future CEO" or "Q3 pool top-up"
+      kind TEXT,                          -- 'ISO' | 'NSO' | NULL (for top-ups)
+      shares INTEGER NOT NULL,            -- positive; type determines direction
+      vest_months INTEGER DEFAULT 48,
+      cliff_months INTEGER DEFAULT 12,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_pool_events_company ON pool_events(company_id, event_date);
   `)
 
   // ----- Idempotent column additions for upgrades on existing DBs -----

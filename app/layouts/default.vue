@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Layers, FileSpreadsheet, Sliders, Award, FlaskConical, Building2 } from 'lucide-vue-next'
+import { Layers, FileSpreadsheet, Sliders, Award, FlaskConical, Building2, TrendingDown } from 'lucide-vue-next'
 const route = useRoute()
 const config = useRuntimeConfig()
 
@@ -15,6 +15,7 @@ const tabs = computed(() => companyId.value ? [
   { to: `/companies/${companyId.value}/cap-table`, label: 'Cap table', icon: FileSpreadsheet },
   { to: `/companies/${companyId.value}/assumptions`, label: 'Assumptions', icon: Sliders },
   { to: `/companies/${companyId.value}/grants`, label: 'Grants', icon: Award },
+  { to: `/companies/${companyId.value}/pool`, label: 'Pool impact', icon: TrendingDown },
   { to: `/companies/${companyId.value}/scenarios`, label: 'Scenarios', icon: FlaskConical },
 ] : [])
 </script>
