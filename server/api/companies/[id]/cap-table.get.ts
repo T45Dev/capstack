@@ -30,18 +30,48 @@ export default defineEventHandler((event) => {
     SELECT id, stakeholder_id, stakeholder_name, principal, interest_accrued, interest_rate,
            issue_date, maturity_date, valuation_cap, conversion_discount, converts_at_round, status
     FROM convertibles WHERE company_id = ?
-  `).all(id)
+  `).all(id) as Array<{
+    id: string; stakeholder_id: string | null; stakeholder_name: string;
+    principal: number; interest_accrued: number; valuation_cap: number | null;
+    conversion_discount: number; converts_at_round: number; status: string;
+  }>
 
   const pools = db().prepare(`
     SELECT id, name, authorized, adopted_date FROM option_pools WHERE company_id = ?
   `).all(id)
 
-  // Current PPS = highest issue_price across preferred share classes (the most recent priced round).
-  // Falls back to highest issue_price overall, then 0.
+  // Current PPS = highest issue_price across share classes (most recent priced round).
   let currentPPS = 0
   for (const sc of share_classes) {
     if (sc.issue_price && sc.issue_price > currentPPS) currentPPS = sc.issue_price
   }
 
-  return { company, share_classes, stakeholders, holdings, grants, convertibles, pools, current_pps: currentPPS }
+  // Per-stakeholder convertible totals (principal + accrued interest only — projected
+  // share count is best computed downstream against a specific round PPS).
+  const cnByStakeholder = new Map<string, { dollars: number; count: number }>()
+  let cnUnattributedDollars = 0
+  let cnUnattributedCount = 0
+  for (const c of convertibles) {
+    if (c.status !== 'outstanding') continue
+    const total = (c.principal || 0) + (c.interest_accrued || 0)
+    if (!c.stakeholder_id) {
+      cnUnattributedDollars += total
+      cnUnattributedCount += 1
+      continue
+    }
+    const row = cnByStakeholder.get(c.stakeholder_id) || { dollars: 0, count: 0 }
+    row.dollars += total
+    row.count += 1
+    cnByStakeholder.set(c.stakeholder_id, row)
+  }
+  const cn_by_stakeholder = Array.from(cnByStakeholder.entries()).map(([sid, v]) => ({
+    stakeholder_id: sid, dollars: v.dollars, count: v.count,
+  }))
+
+  return {
+    company, share_classes, stakeholders, holdings, grants, convertibles, pools,
+    current_pps: currentPPS,
+    cn_by_stakeholder,
+    cn_unattributed: { dollars: cnUnattributedDollars, count: cnUnattributedCount },
+  }
 })

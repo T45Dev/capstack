@@ -282,16 +282,16 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
           <div v-if="compute" class="grid grid-cols-2 md:grid-cols-3 gap-3">
             <UiStat label="Price per share" :value="fmtPricePerShare(compute.round.pricePerShare)" emphasis />
             <UiStat label="Post-money" :value="fmtUSD(compute.round.postMoney)" emphasis />
-            <UiStat label="Post-round FDS" :value="fmtShares(compute.round.postRoundFDS)" emphasis />
-            <UiStat label="Pre-round FDS" :value="fmtShares(compute.round.preRoundFDS)" :hint="usingOverride ? 'override' : 'from cap table'" />
-            <UiStat label="New preferred shares" :value="fmtShares(compute.round.newPreferredShares)" />
-            <UiStat label="CN conversion shares" :value="fmtShares(compute.round.cnConvertedShares)" :hint="compute.round.cnConvertedDollars ? `from ${fmtUSD(compute.round.cnConvertedDollars)}` : ''" />
+            <UiStat label="Post-round FDS" :value="fmtShare(compute.round.postRoundFDS, compute.round.postRoundFDS, compute.round.pricePerShare)" emphasis />
+            <UiStat label="Pre-round FDS" :value="fmtShare(compute.round.preRoundFDS, compute.round.preRoundFDS, compute.round.pricePerShare)" :hint="usingOverride ? 'override' : 'from cap table'" />
+            <UiStat label="New preferred shares" :value="fmtShare(compute.round.newPreferredShares, compute.round.postRoundFDS, compute.round.pricePerShare)" />
+            <UiStat label="CN conversion shares" :value="fmtShare(compute.round.cnConvertedShares, compute.round.postRoundFDS, compute.round.pricePerShare)" :hint="compute.round.cnConvertedDollars ? `from ${fmtUSD(compute.round.cnConvertedDollars)}` : ''" />
             <UiStat label="Valuation at post-FDS" :value="fmtUSD(compute.round.impliedPostFDSValuation)" hint="PPS × post-FDS (incl. CN dilution)" class="md:col-span-2" />
             <UiStat
               v-if="compute.round.deferred?.totalDollars"
               label="Deferred CN obligation"
               :value="fmtUSD(compute.round.deferred.totalDollars)"
-              :hint="`${fmtShares(compute.round.deferred.projectedSharesAtRoundPPS)} shares at round PPS`"
+              :hint="`${fmtShare(compute.round.deferred.projectedSharesAtRoundPPS, compute.round.postRoundFDS, compute.round.pricePerShare)} at round PPS`"
               tone="warn"
             />
           </div>
@@ -332,7 +332,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     <td class="px-3 py-2 text-ink-900 border-b border-ink-200 truncate" :title="d.stakeholderName">{{ d.stakeholderName }}</td>
                     <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtUSD(d.dollars) }}</td>
                     <td class="px-3 py-2 text-right text-ink-700 border-b border-ink-200">{{ fmtPricePerShare(d.convPrice) }}</td>
-                    <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtShares(d.shares) }}</td>
+                    <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtShare(d.shares, compute.round.postRoundFDS, compute.round.pricePerShare) }}</td>
                     <td class="px-3 py-2 text-[11px] uppercase tracking-wide border-b border-ink-200" :class="{
                       'text-emerald-700': d.basisApplied === 'discount',
                       'text-amber-700': d.basisApplied === 'cap',
@@ -364,12 +364,12 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                 <tr v-for="d in compute.round.deferred.details" :key="d.id" class="border-t border-amber-200/60">
                   <td class="px-2 py-1.5 text-ink-900">{{ d.stakeholderName }}</td>
                   <td class="px-2 py-1.5 text-right">{{ fmtUSD(d.dollars) }}</td>
-                  <td class="px-2 py-1.5 text-right">{{ fmtShares(d.shares) }}</td>
+                  <td class="px-2 py-1.5 text-right">{{ fmtShare(d.shares, compute.round.postRoundFDS, compute.round.pricePerShare) }}</td>
                 </tr>
                 <tr class="border-t-2 border-amber-300 font-semibold text-ink-900">
                   <td class="px-2 py-1.5">Total</td>
                   <td class="px-2 py-1.5 text-right">{{ fmtUSD(compute.round.deferred.totalDollars) }}</td>
-                  <td class="px-2 py-1.5 text-right">{{ fmtShares(compute.round.deferred.projectedSharesAtRoundPPS) }}</td>
+                  <td class="px-2 py-1.5 text-right">{{ fmtShare(compute.round.deferred.projectedSharesAtRoundPPS, compute.round.postRoundFDS, compute.round.pricePerShare) }}</td>
                 </tr>
               </tbody>
             </table>

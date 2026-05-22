@@ -13,6 +13,8 @@ const { data: compute } = await useFetch(() => `/api/companies/${id.value}/compu
   default: () => null,
 })
 
+const { format: fmtShare } = useShareUnit()
+
 const isEmpty = computed(() => !capTable.value?.stakeholders?.length)
 
 const totalIssued = computed(() => {
@@ -28,6 +30,12 @@ const cnPrincipalTotal = computed(() => {
 const cnCount = computed(() => capTable.value?.convertibles?.length || 0)
 const cnConvertingNow = computed(() => capTable.value?.convertibles?.filter((c: any) => c.converts_at_round).length || 0)
 const cnDeferred = computed(() => cnCount.value - cnConvertingNow.value)
+
+const fdsAnchor = computed(() => {
+  const t = totalIssued.value + totalOutstandingGrants.value
+  return t > 0 ? t : 1
+})
+const ppsAnchor = computed(() => capTable.value?.current_pps || 0)
 
 const currentValuation = computed(() => {
   if (!capTable.value?.current_pps || !totalIssued.value) return 0
@@ -75,8 +83,8 @@ const currentValuation = computed(() => {
         <h2 class="text-[11px] font-semibold uppercase tracking-wider text-ink-500 mb-2">Current cap table</h2>
         <div class="flex flex-wrap gap-3">
           <UiStat label="Stakeholders" :value="capTable!.stakeholders.length" class="flex-1 min-w-[140px]" />
-          <UiStat label="Shares issued" :value="fmtShares(totalIssued)" class="flex-1 min-w-[140px]" />
-          <UiStat label="Options outstanding" :value="fmtShares(totalOutstandingGrants)" class="flex-1 min-w-[140px]" />
+          <UiStat label="Shares issued" :value="fmtShare(totalIssued, fdsAnchor, ppsAnchor)" class="flex-1 min-w-[140px]" />
+          <UiStat label="Options outstanding" :value="fmtShare(totalOutstandingGrants, fdsAnchor, ppsAnchor)" class="flex-1 min-w-[140px]" />
           <UiStat label="Latest PPS" :value="fmtPricePerShare(capTable!.current_pps)" hint="Highest priced round" class="flex-1 min-w-[140px]" />
           <UiStat label="Implied valuation" :value="fmtUSD(currentValuation)" hint="Latest PPS × FDS" emphasis class="flex-1 min-w-[160px]" />
         </div>
@@ -105,10 +113,10 @@ const currentValuation = computed(() => {
             <UiStat label="New money" :value="fmtUSD(compute.round.newMoney)" class="flex-1 min-w-[140px]" />
             <UiStat label="Post-money" :value="fmtUSD(compute.round.postMoney)" emphasis class="flex-1 min-w-[140px]" />
             <UiStat label="Round PPS" :value="fmtPricePerShare(compute.round.pricePerShare)" class="flex-1 min-w-[140px]" />
-            <UiStat label="Pre-round FDS" :value="fmtShares(compute.round.preRoundFDS)" class="flex-1 min-w-[140px]" />
-            <UiStat label="New preferred" :value="fmtShares(compute.round.newPreferredShares)" class="flex-1 min-w-[140px]" />
-            <UiStat label="CN conversion" :value="fmtShares(compute.round.cnConvertedShares)" class="flex-1 min-w-[140px]" />
-            <UiStat label="Post-round FDS" :value="fmtShares(compute.round.postRoundFDS)" emphasis class="flex-1 min-w-[140px]" />
+            <UiStat label="Pre-round FDS" :value="fmtShare(compute.round.preRoundFDS, compute.round.preRoundFDS, compute.round.pricePerShare)" class="flex-1 min-w-[140px]" />
+            <UiStat label="New preferred" :value="fmtShare(compute.round.newPreferredShares, compute.round.postRoundFDS, compute.round.pricePerShare)" class="flex-1 min-w-[140px]" />
+            <UiStat label="CN conversion" :value="fmtShare(compute.round.cnConvertedShares, compute.round.postRoundFDS, compute.round.pricePerShare)" class="flex-1 min-w-[140px]" />
+            <UiStat label="Post-round FDS" :value="fmtShare(compute.round.postRoundFDS, compute.round.postRoundFDS, compute.round.pricePerShare)" emphasis class="flex-1 min-w-[140px]" />
           </div>
           <div class="mt-3 text-xs text-ink-500">
             Tune raise, pre-money, and conversion basis on the
