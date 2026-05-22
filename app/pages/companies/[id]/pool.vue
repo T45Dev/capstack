@@ -15,9 +15,19 @@ import { fmtShares, fmtPct, fmtUSD, fmtDate } from '~/utils/format'
 const route = useRoute()
 const id = computed(() => route.params.id as string)
 
+const { data: company } = await useFetch(() => `/api/companies/${id.value}`, { watch: [id], default: () => null as any })
 const { data: capTable } = await useFetch(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => null as any })
 const { data: grantsData } = await useFetch(() => `/api/companies/${id.value}/grants`, { watch: [id], default: () => ({ grants: [], pools: [] } as any) })
 const { data: ideas, refresh: refreshIdeas } = await useFetch<any[]>(() => `/api/companies/${id.value}/pool-events`, { watch: [id], default: () => [] })
+
+// Sensible fallback date used when an event has no date in the source data.
+// Prefer the company's starting-round date (the closest "anchor" we have),
+// otherwise the company's created_at, finally today.
+const fallbackDate = computed(() => {
+  return company.value?.starting_round_date
+    || (company.value?.created_at || '').slice(0, 10)
+    || new Date().toISOString().slice(0, 10)
+})
 
 const mode = ref<'single' | 'vest'>('single')
 
@@ -50,10 +60,12 @@ interface TimelineEvent {
 const events = computed<TimelineEvent[]>(() => {
   const out: TimelineEvent[] = []
 
-  // Pool top-ups (option_pools rows). adopted_date may be null for legacy.
+  // Pool top-ups (option_pools rows). When the source has no adopted_date,
+  // anchor to the company's starting-round date so the event lands in a
+  // sensible spot on the timeline instead of 1970.
   for (const p of (grantsData.value?.pools || [])) {
     out.push({
-      id: `pool:${p.id}`, date: p.adopted_date || '1970-01-01', name: p.name || 'Option pool',
+      id: `pool:${p.id}`, date: p.adopted_date || fallbackDate.value, name: p.name || 'Option pool',
       type: 'pool_topup', kind: null, shares: p.authorized || 0, direction: 1, source: 'pool',
     })
   }
@@ -63,7 +75,7 @@ const events = computed<TimelineEvent[]>(() => {
     if (g.status !== 'outstanding' && g.status !== 'proposed') continue
     out.push({
       id: `grant:${g.id}`,
-      date: g.issue_date || g.vesting_start || '1970-01-01',
+      date: g.issue_date || g.vesting_start || fallbackDate.value,
       name: g.recipient_name,
       type: 'grant',
       kind: (g.recipient_type || '').toLowerCase() === 'employee' ? 'ISO' : 'NSO',
@@ -221,6 +233,13 @@ function syncFromValue() {
 watch(() => form.shares, () => { if (inputMode.value === 'shares') syncFromShares() })
 watch(() => form.pct,    () => { if (inputMode.value === 'pct')    syncFromPct() })
 watch(() => form.value,  () => { if (inputMode.value === 'value')  syncFromValue() })
+
+// Percent input as a 0-100 scale so NumberInput shows "1.235" for 1.235%
+// instead of the underlying 0.01235 decimal. Setter divides back to decimal.
+const pctPercent = computed<number | null>({
+  get: () => form.pct ? form.pct * 100 : 0,
+  set: (v) => { form.pct = (v || 0) / 100 },
+})
 
 function openModal(idea?: any) {
   if (idea) {
@@ -466,7 +485,7 @@ const chart = computed(() => {
 
     <!-- Idea modal -->
     <div v-if="showModal" class="fixed inset-0 z-40 bg-ink-900/40 backdrop-blur-sm grid place-items-center p-4" @click.self="showModal = false">
-      <div class="w-full max-w-lg rounded-lg border border-ink-300 bg-white p-5 shadow-card-hover">
+      <div class="w-full max-w-xl rounded-lg border border-ink-300 bg-white p-5 shadow-card-hover">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-base font-semibold text-ink-900">{{ editingIdea ? 'Edit idea' : 'Add idea' }}</h2>
           <button class="p-1.5 hover:bg-ink-200 rounded" @click="showModal = false"><X :size="14" /></button>
@@ -492,38 +511,29 @@ const chart = computed(() => {
           </label>
 
           <div class="col-span-2">
-            <div class="flex items-center gap-2 mb-1">
-              <span class="text-xs font-medium text-ink-700">Size — enter as:</span>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <span class="text-xs font-medium text-ink-700">Size — enter as</span>
               <div class="inline-flex rounded-md border border-ink-300 bg-white p-0.5 text-xs">
-                <button type="button" class="px-2 py-0.5 rounded-[3px]" :class="inputMode === 'shares' ? 'bg-accent-500 text-white' : 'text-ink-600'" @click="inputMode = 'shares'">Shares</button>
-                <button type="button" class="px-2 py-0.5 rounded-[3px]" :class="inputMode === 'pct' ? 'bg-accent-500 text-white' : 'text-ink-600'" @click="inputMode = 'pct'">%</button>
-                <button type="button" class="px-2 py-0.5 rounded-[3px]" :class="inputMode === 'value' ? 'bg-accent-500 text-white' : 'text-ink-600'" @click="inputMode = 'value'">$</button>
+                <button type="button" class="px-3 py-1 rounded-[3px] font-medium" :class="inputMode === 'shares' ? 'bg-accent-500 text-white shadow-sm' : 'text-ink-600 hover:text-ink-900'" @click="inputMode = 'shares'">Shares</button>
+                <button type="button" class="px-3 py-1 rounded-[3px] font-medium" :class="inputMode === 'pct' ? 'bg-accent-500 text-white shadow-sm' : 'text-ink-600 hover:text-ink-900'" @click="inputMode = 'pct'">%</button>
+                <button type="button" class="px-3 py-1 rounded-[3px] font-medium" :class="inputMode === 'value' ? 'bg-accent-500 text-white shadow-sm' : 'text-ink-600 hover:text-ink-900'" @click="inputMode = 'value'">$</button>
               </div>
             </div>
-            <div class="grid grid-cols-3 gap-3">
-              <div>
-                <span class="block text-[10px] uppercase tracking-wide text-ink-500 mb-0.5">Shares</span>
-                <NumberInput v-model="form.shares" :disabled="inputMode !== 'shares'" :input-class="inputMode === 'shares' ? '' : 'opacity-60'" />
-              </div>
-              <div>
-                <span class="block text-[10px] uppercase tracking-wide text-ink-500 mb-0.5">% of FDS</span>
-                <div class="flex items-center rounded-md border border-ink-300 bg-white">
-                  <input
-                    :disabled="inputMode !== 'pct'"
-                    :class="['flex-1 px-1.5 py-1 text-right text-sm num bg-transparent border-0 focus:outline-none focus:ring-0', inputMode === 'pct' ? '' : 'opacity-60']"
-                    type="number" step="0.01"
-                    :value="(form.pct * 100).toFixed(3)"
-                    @input="form.pct = (Number(($event.target as HTMLInputElement).value) || 0) / 100"
-                  />
-                  <span class="pr-1.5 text-xs text-ink-500">%</span>
-                </div>
-              </div>
-              <div>
-                <span class="block text-[10px] uppercase tracking-wide text-ink-500 mb-0.5">$ at current PPS</span>
-                <NumberInput v-model="form.value" prefix="$" :disabled="inputMode !== 'value'" :input-class="inputMode === 'value' ? '' : 'opacity-60'" />
-              </div>
+            <div class="grid grid-cols-3 gap-2.5">
+              <label class="block">
+                <span class="block text-[10px] uppercase tracking-wide text-ink-500 mb-1">Shares</span>
+                <NumberInput v-model="form.shares" :disabled="inputMode !== 'shares'" :digits="0" />
+              </label>
+              <label class="block">
+                <span class="block text-[10px] uppercase tracking-wide text-ink-500 mb-1">% of FDS</span>
+                <NumberInput v-model="pctPercent" suffix="%" :digits="3" :disabled="inputMode !== 'pct'" />
+              </label>
+              <label class="block">
+                <span class="block text-[10px] uppercase tracking-wide text-ink-500 mb-1">$ value</span>
+                <NumberInput v-model="form.value" prefix="$" :digits="0" :disabled="inputMode !== 'value'" />
+              </label>
             </div>
-            <p class="mt-1 text-[10px] text-ink-500">% denominator: current FDS incl. pool ({{ fmtShares(fdsIncludingPool) }}). $ uses current PPS ({{ fmtUSD(currentPPS) }}).</p>
+            <p class="mt-1.5 text-[10px] text-ink-500">% denominator: current FDS incl. pool ({{ fmtShares(fdsIncludingPool) }}). $ uses current PPS ({{ fmtUSD(currentPPS) }}).</p>
           </div>
 
           <template v-if="form.type === 'grant'">
