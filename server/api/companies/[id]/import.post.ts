@@ -33,11 +33,15 @@ export default defineEventHandler(async (event) => {
 
   const tx = db().transaction(() => {
     if (replace) {
-      db().prepare('DELETE FROM holdings WHERE company_id = ?').run(id)
-      db().prepare('DELETE FROM stakeholders WHERE company_id = ?').run(id)
-      db().prepare('DELETE FROM share_classes WHERE company_id = ?').run(id)
+      // Order matters: convertibles.stakeholder_id has a FK to stakeholders
+      // with default ON DELETE RESTRICT, so all referencing rows must go
+      // first. Same logic for holdings (which references both stakeholders
+      // and share_classes) and grants. Then we can remove the parents.
       db().prepare('DELETE FROM convertibles WHERE company_id = ?').run(id)
       db().prepare('DELETE FROM grants WHERE company_id = ?').run(id)
+      db().prepare('DELETE FROM holdings WHERE company_id = ?').run(id)
+      db().prepare('DELETE FROM share_classes WHERE company_id = ?').run(id)
+      db().prepare('DELETE FROM stakeholders WHERE company_id = ?').run(id)
       db().prepare('DELETE FROM option_pools WHERE company_id = ?').run(id)
     }
 
