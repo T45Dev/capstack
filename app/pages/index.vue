@@ -66,7 +66,7 @@ async function remove(id: string, name: string) {
   <div>
     <div class="flex items-center justify-between mb-6">
       <div>
-        <h1 class="text-2xl font-semibold tracking-tight text-ink-900">Companies</h1>
+        <h1 class="text-xl font-semibold tracking-tight text-ink-900">Companies</h1>
         <p class="text-sm text-ink-600 mt-1">Each workspace holds a Carta-sourced cap table, key assumptions, grants, and scenarios.</p>
       </div>
       <UiButton variant="primary" @click="showCreate = true">

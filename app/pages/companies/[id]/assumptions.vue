@@ -244,7 +244,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
   <div v-if="assumptions">
     <div class="flex items-end justify-between mb-5 gap-3 flex-wrap">
       <div>
-        <h1 class="text-2xl font-semibold tracking-tight text-ink-900">Key assumptions</h1>
+        <h1 class="text-xl font-semibold tracking-tight text-ink-900">Key assumptions</h1>
         <p class="text-sm text-ink-600 mt-1">
           Three primary inputs:
           <span class="text-ink-900 font-medium">pre-round FDS</span>,
@@ -370,7 +370,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
           </div>
           <div class="rounded-lg border border-ink-300 bg-white shadow-card overflow-hidden">
             <div class="overflow-x-auto">
-              <table class="w-full text-sm border-separate" style="border-spacing: 0; table-layout: fixed; min-width: 700px;">
+              <table class="w-full text-[13px] border-separate" style="border-spacing: 0; table-layout: fixed; min-width: 700px;">
                 <colgroup>
                   <col v-for="c in cnDetailTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
                 </colgroup>
@@ -379,7 +379,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     <th
                       v-for="c in cnDetailTable.cols"
                       :key="c.key"
-                      class="relative px-3 py-2 border-b border-ink-300 select-none font-semibold"
+                      class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold"
                       :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
                       @click="c.sortable ? cnDetailTable.toggleSort(c.key) : null"
                     >
@@ -395,11 +395,11 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                 <tbody class="num">
                   <tr v-for="d in sortedCnDetails" :key="d.id" class="hover:bg-accent-50/40 transition-colors">
                     <template v-for="c in cnDetailTable.cols" :key="c.key">
-                      <td v-if="c.key === 'stakeholderName'" class="px-3 py-2 text-ink-900 border-b border-ink-200 truncate" :title="d.stakeholderName">{{ d.stakeholderName }}</td>
-                      <td v-else-if="c.key === 'dollars'" class="px-3 py-2 text-right border-b border-ink-200">{{ fmtUSD(d.dollars) }}</td>
-                      <td v-else-if="c.key === 'convPrice'" class="px-3 py-2 text-right text-ink-700 border-b border-ink-200">{{ fmtPricePerShare(d.convPrice) }}</td>
-                      <td v-else-if="c.baseKey === 'shares'" class="px-3 py-2 text-right border-b border-ink-200">{{ formatBy(c.unit!, d.shares, compute.round.postRoundFDS, compute.round.pricePerShare) }}</td>
-                      <td v-else-if="c.key === 'basisApplied'" class="px-3 py-2 text-[11px] uppercase tracking-wide border-b border-ink-200" :class="{
+                      <td v-if="c.key === 'stakeholderName'" class="px-2.5 py-1.5 text-ink-900 border-b border-ink-200 truncate" :title="d.stakeholderName">{{ d.stakeholderName }}</td>
+                      <td v-else-if="c.key === 'dollars'" class="px-2.5 py-1.5 text-right border-b border-ink-200">{{ fmtUSD(d.dollars) }}</td>
+                      <td v-else-if="c.key === 'convPrice'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ fmtPricePerShare(d.convPrice) }}</td>
+                      <td v-else-if="c.baseKey === 'shares'" class="px-2.5 py-1.5 text-right border-b border-ink-200">{{ formatBy(c.unit!, d.shares, compute.round.postRoundFDS, compute.round.pricePerShare) }}</td>
+                      <td v-else-if="c.key === 'basisApplied'" class="px-2.5 py-1.5 text-[11px] uppercase tracking-wide border-b border-ink-200" :class="{
                         'text-emerald-700': d.basisApplied === 'discount',
                         'text-amber-700': d.basisApplied === 'cap',
                         'text-ink-600': d.basisApplied === 'round',
@@ -468,7 +468,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
       </div>
       <div class="rounded-lg border border-ink-300 bg-white shadow-card overflow-hidden">
         <div class="overflow-x-auto">
-          <table class="text-sm border-separate" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: dilutionWidth + 'px' }">
+          <table class="text-[13px] border-separate" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: dilutionWidth + 'px' }">
             <colgroup>
               <col v-for="col in dilutionTable.cols" :key="col.key" :style="{ width: col.width + 'px' }" />
             </colgroup>
@@ -477,7 +477,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                 <th
                   v-for="col in dilutionTable.cols"
                   :key="col.key"
-                  class="relative px-3 py-2 border-b border-ink-300 select-none font-semibold"
+                  class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold"
                   :class="[col.align === 'right' ? 'text-right' : 'text-left', col.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
                   @click="col.sortable ? dilutionTable.toggleSort(col.key) : null"
                 >
@@ -493,13 +493,13 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
             <tbody class="num">
               <tr v-for="r in sortedDilution" :key="r.stakeholderId" class="hover:bg-accent-50/40 transition-colors">
                 <template v-for="col in dilutionTable.cols" :key="col.key">
-                  <td v-if="col.key === 'name'" class="px-3 py-2 font-medium text-ink-900 truncate border-b border-ink-200" :title="r.name">{{ r.name }}</td>
-                  <td v-else-if="col.key === 'delta'" class="px-3 py-2 text-right border-b border-ink-200 font-medium" :class="r.delta < 0 ? 'text-red-600' : 'text-emerald-600'">
+                  <td v-if="col.key === 'name'" class="px-2.5 py-1.5 font-medium text-ink-900 truncate border-b border-ink-200" :title="r.name">{{ r.name }}</td>
+                  <td v-else-if="col.key === 'delta'" class="px-2.5 py-1.5 text-right border-b border-ink-200 font-medium" :class="r.delta < 0 ? 'text-red-600' : 'text-emerald-600'">
                     {{ (r.delta >= 0 ? '+' : '') + fmtPct(r.delta, 2) }}
                   </td>
-                  <td v-else-if="col.baseKey === 'preShares'" class="px-3 py-2 text-right border-b border-ink-200">{{ formatBy(col.unit!, r.preShares, compute.round.preRoundFDS, compute.round.pricePerShare) }}</td>
-                  <td v-else-if="col.baseKey === 'cnShares'" class="px-3 py-2 text-right border-b border-ink-200">{{ r.cnShares ? formatBy(col.unit!, r.cnShares, compute.round.postRoundFDS, compute.round.pricePerShare) : '—' }}</td>
-                  <td v-else-if="col.baseKey === 'postShares'" class="px-3 py-2 text-right font-medium border-b border-ink-200 text-ink-900">{{ formatBy(col.unit!, r.postShares, compute.round.postRoundFDS, compute.round.pricePerShare) }}</td>
+                  <td v-else-if="col.baseKey === 'preShares'" class="px-2.5 py-1.5 text-right border-b border-ink-200">{{ formatBy(col.unit!, r.preShares, compute.round.preRoundFDS, compute.round.pricePerShare) }}</td>
+                  <td v-else-if="col.baseKey === 'cnShares'" class="px-2.5 py-1.5 text-right border-b border-ink-200">{{ r.cnShares ? formatBy(col.unit!, r.cnShares, compute.round.postRoundFDS, compute.round.pricePerShare) : '—' }}</td>
+                  <td v-else-if="col.baseKey === 'postShares'" class="px-2.5 py-1.5 text-right font-medium border-b border-ink-200 text-ink-900">{{ formatBy(col.unit!, r.postShares, compute.round.postRoundFDS, compute.round.pricePerShare) }}</td>
                 </template>
               </tr>
             </tbody>

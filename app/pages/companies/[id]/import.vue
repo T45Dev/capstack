@@ -46,7 +46,7 @@ function done() {
 
 <template>
   <div class="max-w-2xl mx-auto">
-    <h1 class="text-2xl font-semibold tracking-tight text-ink-900">Import cap table</h1>
+    <h1 class="text-xl font-semibold tracking-tight text-ink-900">Import cap table</h1>
     <p class="text-sm text-ink-600 mt-1">
       Upload a Carta <code class="text-ink-900 bg-ink-200 px-1 rounded">.xlsx</code> pro-forma export for <span class="text-ink-900 font-medium">{{ company?.name }}</span>.
       CapStack parses the Detailed Cap Table, Summary Cap Table, and Convertible Notes sheets.

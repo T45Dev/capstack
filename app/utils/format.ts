@@ -46,3 +46,9 @@ export function fmtDate(s: string | null | undefined): string {
   if (isNaN(d.getTime())) return s
   return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
 }
+
+// Tax classification of an option grant. Employees get ISOs; everyone else
+// (board, advisor, consultant, SAB, ex-employee) gets NSOs.
+export function optionTypeOf(recipientType: string | null | undefined): 'ISO' | 'NSO' {
+  return (recipientType || '').trim().toLowerCase() === 'employee' ? 'ISO' : 'NSO'
+}
