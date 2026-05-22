@@ -17,6 +17,9 @@ export interface ConvertibleNote {
   conversionDiscount: number
   valuationCap?: number | null
   convertsAtRound?: boolean   // default true; false = deferred to a later event
+  conversionDate?: string | null
+  issueDate?: string | null
+  interestRate?: number
 }
 
 export type CNBasis = 'best' | 'discount' | 'cap' | 'round_price'
@@ -32,10 +35,15 @@ export interface RoundInputs {
 export interface CNDetail {
   id: string
   stakeholderName: string
+  principal: number
+  interestAccrued: number
   dollars: number          // principal + accrued interest
   convPrice: number        // price actually used to convert
   shares: number           // resulting shares
   basisApplied: 'round' | 'discount' | 'cap' | 'deferred'
+  conversionDate?: string | null
+  issueDate?: string | null
+  interestRate?: number
 }
 
 export interface DeferredCNSummary {
@@ -87,10 +95,15 @@ export function computeRound(a: RoundInputs): RoundResult {
       deferred.details.push({
         id: cn.id,
         stakeholderName: cn.stakeholderName,
+        principal: cn.principal || 0,
+        interestAccrued: cn.interestAccrued || 0,
         dollars: total,
         convPrice: pricePerShare,
         shares: projected,
         basisApplied: 'deferred',
+        conversionDate: cn.conversionDate ?? null,
+        issueDate: cn.issueDate ?? null,
+        interestRate: cn.interestRate,
       })
       continue
     }
@@ -123,10 +136,15 @@ export function computeRound(a: RoundInputs): RoundResult {
     cnDetails.push({
       id: cn.id,
       stakeholderName: cn.stakeholderName,
+      principal: cn.principal || 0,
+      interestAccrued: cn.interestAccrued || 0,
       dollars: total,
       convPrice: chosen.price,
       shares,
       basisApplied: chosen.label,
+      conversionDate: cn.conversionDate ?? null,
+      issueDate: cn.issueDate ?? null,
+      interestRate: cn.interestRate,
     })
   }
 

@@ -202,9 +202,11 @@ interface CnCol { key: string; label: string; width: number; sortable: boolean; 
 
 const cnDetailCols = computed<CnCol[]>(() => {
   const cols: CnCol[] = [
-    { key: 'stakeholderName', label: 'Holder', width: 200, sortable: true, align: 'left' },
-    { key: 'dollars', label: 'Dollars', width: 130, sortable: true, align: 'right' },
-    { key: 'convPrice', label: 'Conv. price', width: 130, sortable: true, align: 'right' },
+    { key: 'stakeholderName', label: 'Holder', width: 160, sortable: true, align: 'left' },
+    { key: 'conversionDate', label: 'Conv. date', width: 140, sortable: true, align: 'left' },
+    { key: 'principal', label: 'Principal', width: 120, sortable: true, align: 'right' },
+    { key: 'interestAccrued', label: 'Interest', width: 110, sortable: true, align: 'right' },
+    { key: 'convPrice', label: 'Conv. price', width: 110, sortable: true, align: 'right' },
   ]
   for (const u of cnDetailUnits.selected.value) {
     cols.push({
@@ -213,7 +215,7 @@ const cnDetailCols = computed<CnCol[]>(() => {
       width: u === 'shares' ? 130 : 110, sortable: true, align: 'right',
     })
   }
-  cols.push({ key: 'basisApplied', label: 'Basis', width: 100, sortable: true, align: 'left' })
+  cols.push({ key: 'basisApplied', label: 'Basis', width: 90, sortable: true, align: 'left' })
   return cols
 })
 
@@ -251,6 +253,17 @@ const sortedCnDetails = computed(() => {
 function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
   if (table.sort.key !== key) return null
   return table.sort.dir
+}
+
+// Patch a CN's conversion_date. Triggers a fresh compute via the watcher on
+// form, so the interest + shares update across the equation strip + tables.
+async function updateCnConversionDate(cnId: string, value: string) {
+  await $fetch(`/api/convertibles/${cnId}`, {
+    method: 'PATCH',
+    body: { conversion_date: value || null },
+  })
+  // Force the compute endpoint to re-fetch with the new data.
+  await refreshNuxtData()
 }
 </script>
 
@@ -291,15 +304,6 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
           <select v-model="form.round_name" class="rounded-md border border-ink-300 bg-white px-2.5 py-1 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500">
             <option v-for="s in seriesShortcuts" :key="s" :value="s">{{ s }}</option>
           </select>
-        </label>
-        <label class="flex items-center gap-2">
-          <span class="text-[11px] font-medium text-ink-500 uppercase tracking-wider">Close date</span>
-          <input
-            v-model="form.round_close_date"
-            type="date"
-            class="rounded-md border border-ink-300 bg-white px-2.5 py-1 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500"
-            title="Used to dynamically accrue CN interest"
-          />
         </label>
         <label class="flex items-center gap-2">
           <span class="text-[11px] font-medium text-ink-500 uppercase tracking-wider">CN basis</span>
@@ -425,103 +429,132 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
       </label>
     </div>
 
-    <!-- CN detail / Deferred / Warnings — full width below the equation strip -->
-    <div class="space-y-5 mb-6">
-        <!-- Convertible-note conversion detail -->
-        <div v-if="compute?.round.cnDetails?.length">
-          <div class="flex items-center justify-between mb-2">
-            <h2 class="text-[11px] font-semibold uppercase tracking-wider text-ink-500">
-              CN conversion detail
-              <span class="text-ink-400 font-normal normal-case ml-1">— notes converting at this round</span>
-            </h2>
-            <TableUnitsToggle storage-key="capstack:cn-detail:units" />
-          </div>
-          <div class="rounded-lg border border-ink-300 bg-white shadow-card overflow-hidden">
-            <div class="overflow-x-auto">
-              <table class="w-full text-[13px] border-separate" style="border-spacing: 0; table-layout: fixed; min-width: 700px;">
-                <colgroup>
-                  <col v-for="c in cnDetailTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
-                </colgroup>
-                <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
-                  <tr>
-                    <th
-                      v-for="c in cnDetailTable.cols"
-                      :key="c.key"
-                      class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold"
-                      :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
-                      @click="c.sortable ? cnDetailTable.toggleSort(c.key) : null"
-                    >
-                      <span class="inline-flex items-center gap-1" :class="c.align === 'right' ? 'flex-row-reverse' : ''">
-                        {{ c.label }}
-                        <ChevronUp v-if="sortIconFor(cnDetailTable, c.key) === 'asc'" :size="12" class="text-accent-600" />
-                        <ChevronDown v-if="sortIconFor(cnDetailTable, c.key) === 'desc'" :size="12" class="text-accent-600" />
-                      </span>
-                      <span class="resize-handle" @mousedown.prevent.stop="cnDetailTable.startResize($event, c.key)" @click.stop />
-                    </th>
-                  </tr>
-                </thead>
-                <tbody class="num">
-                  <tr v-for="d in sortedCnDetails" :key="d.id" class="hover:bg-accent-50/40 transition-colors">
-                    <template v-for="c in cnDetailTable.cols" :key="c.key">
-                      <td v-if="c.key === 'stakeholderName'" class="px-2.5 py-1.5 text-ink-900 border-b border-ink-200 truncate" :title="d.stakeholderName">{{ d.stakeholderName }}</td>
-                      <td v-else-if="c.key === 'dollars'" class="px-2.5 py-1.5 text-right border-b border-ink-200">{{ fmtUSD(d.dollars) }}</td>
-                      <td v-else-if="c.key === 'convPrice'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ fmtPricePerShare(d.convPrice) }}</td>
-                      <td v-else-if="c.baseKey === 'shares'" class="px-2.5 py-1.5 text-right border-b border-ink-200">{{ formatBy(c.unit!, d.shares, compute.round.postRoundFDS, compute.round.pricePerShare) }}</td>
-                      <td v-else-if="c.key === 'basisApplied'" class="px-2.5 py-1.5 text-[11px] uppercase tracking-wide border-b border-ink-200" :class="{
-                        'text-emerald-700': d.basisApplied === 'discount',
-                        'text-amber-700': d.basisApplied === 'cap',
-                        'text-ink-600': d.basisApplied === 'round',
-                      }">{{ d.basisApplied }}</td>
-                    </template>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <!-- Deferred -->
-        <div v-if="compute?.round.deferred?.details?.length">
-          <h2 class="text-[11px] font-semibold uppercase tracking-wider text-ink-500 mb-2">
-            Deferred CN obligations
-            <span class="text-ink-400 font-normal normal-case ml-1">— projected at the round PPS ({{ fmtPricePerShare(compute.round.pricePerShare) }})</span>
+    <!-- CN detail + Deferred side-by-side at xl: widths. Each row's conversion
+         date is editable inline; changing it triggers a fresh compute that
+         re-accrues interest (principal × rate × days/365) and recomputes
+         resulting shares. -->
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-5 mb-5">
+      <!-- Convertible-note conversion detail (notes converting at this round) -->
+      <div v-if="compute?.round.cnDetails?.length">
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="text-[11px] font-semibold uppercase tracking-wider text-ink-500">
+            CN conversion detail
+            <span class="text-ink-400 font-normal normal-case ml-1">— notes converting at this round</span>
           </h2>
-          <div class="rounded-lg border border-amber-200 bg-amber-50/50 p-4">
-            <table class="w-full text-sm">
-              <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide">
+          <TableUnitsToggle storage-key="capstack:cn-detail:units" />
+        </div>
+        <div class="rounded-lg border border-ink-300 bg-white shadow-card overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="text-[13px] border-separate" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: '780px' }">
+              <colgroup>
+                <col v-for="c in cnDetailTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
+              </colgroup>
+              <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
                 <tr>
-                  <th class="px-2 py-1 font-semibold">Holder</th>
-                  <th class="px-2 py-1 text-right font-semibold">Dollars</th>
-                  <th class="px-2 py-1 text-right font-semibold">Projected shares</th>
+                  <th
+                    v-for="c in cnDetailTable.cols"
+                    :key="c.key"
+                    class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold"
+                    :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
+                    @click="c.sortable ? cnDetailTable.toggleSort(c.key) : null"
+                  >
+                    <span class="inline-flex items-center gap-1" :class="c.align === 'right' ? 'flex-row-reverse' : ''">
+                      {{ c.label }}
+                      <ChevronUp v-if="sortIconFor(cnDetailTable, c.key) === 'asc'" :size="12" class="text-accent-600" />
+                      <ChevronDown v-if="sortIconFor(cnDetailTable, c.key) === 'desc'" :size="12" class="text-accent-600" />
+                    </span>
+                    <span class="resize-handle" @mousedown.prevent.stop="cnDetailTable.startResize($event, c.key)" @click.stop />
+                  </th>
                 </tr>
               </thead>
               <tbody class="num">
-                <tr v-for="d in compute.round.deferred.details" :key="d.id" class="border-t border-amber-200/60">
-                  <td class="px-2 py-1.5 text-ink-900">{{ d.stakeholderName }}</td>
-                  <td class="px-2 py-1.5 text-right">{{ fmtUSD(d.dollars) }}</td>
-                  <td class="px-2 py-1.5 text-right">{{ fmtShares(d.shares) }}</td>
-                </tr>
-                <tr class="border-t-2 border-amber-300 font-semibold text-ink-900">
-                  <td class="px-2 py-1.5">Total</td>
-                  <td class="px-2 py-1.5 text-right">{{ fmtUSD(compute.round.deferred.totalDollars) }}</td>
-                  <td class="px-2 py-1.5 text-right">{{ fmtShares(compute.round.deferred.projectedSharesAtRoundPPS) }}</td>
+                <tr v-for="d in sortedCnDetails" :key="d.id" class="hover:bg-accent-50/40">
+                  <template v-for="c in cnDetailTable.cols" :key="c.key">
+                    <td v-if="c.key === 'stakeholderName'" class="px-2.5 py-1 text-ink-900 border-b border-ink-200 truncate" :title="d.stakeholderName">{{ d.stakeholderName }}</td>
+                    <td v-else-if="c.key === 'conversionDate'" class="px-1.5 py-1 border-b border-ink-200">
+                      <input
+                        type="date"
+                        :value="d.conversionDate || ''"
+                        class="w-full rounded border px-1.5 py-0.5 text-xs text-ink-900 focus:outline-none focus:ring-2 focus:ring-accent-500"
+                        :class="d.conversionDate ? 'border-ink-300 bg-white' : 'border-amber-400 bg-amber-50'"
+                        :title="d.conversionDate ? '' : 'No conversion date — set one to accrue interest accurately'"
+                        @change="updateCnConversionDate(d.id, ($event.target as HTMLInputElement).value)"
+                      />
+                    </td>
+                    <td v-else-if="c.key === 'principal'" class="px-2.5 py-1 text-right text-ink-700 border-b border-ink-200">{{ fmtUSD(d.principal) }}</td>
+                    <td v-else-if="c.key === 'interestAccrued'" class="px-2.5 py-1 text-right text-ink-700 border-b border-ink-200">{{ fmtUSD(d.interestAccrued) }}</td>
+                    <td v-else-if="c.key === 'convPrice'" class="px-2.5 py-1 text-right text-ink-700 border-b border-ink-200">{{ fmtPricePerShare(d.convPrice) }}</td>
+                    <td v-else-if="c.baseKey === 'shares'" class="px-2.5 py-1 text-right border-b border-ink-200">{{ formatBy(c.unit!, d.shares, compute.round.postRoundFDS, compute.round.pricePerShare) }}</td>
+                    <td v-else-if="c.key === 'basisApplied'" class="px-2.5 py-1 text-[11px] uppercase tracking-wide border-b border-ink-200" :class="{
+                      'text-emerald-700': d.basisApplied === 'discount',
+                      'text-amber-700': d.basisApplied === 'cap',
+                      'text-ink-600': d.basisApplied === 'round',
+                    }">{{ d.basisApplied }}</td>
+                  </template>
                 </tr>
               </tbody>
             </table>
-            <p class="mt-3 text-xs text-ink-600">
-              Deferred notes do NOT add to post-round FDS or post-money. To include them as this-round conversions, flip "Converts at round?" on the
-              <NuxtLink :to="`/companies/${id}/cap-table`" class="text-accent-600 hover:text-accent-700 font-medium">Cap table</NuxtLink> page.
-            </p>
           </div>
         </div>
+      </div>
 
-        <!-- Warnings -->
-        <div v-if="compute?.round.warnings?.length" class="rounded-lg border border-amber-200 bg-amber-50 p-4">
-          <h3 class="text-xs font-semibold uppercase tracking-wide text-amber-700 mb-2">Warnings</h3>
-          <ul class="space-y-1 text-sm text-amber-900 list-disc pl-5">
-            <li v-for="(w, i) in compute.round.warnings" :key="i">{{ w }}</li>
-          </ul>
+      <!-- Deferred CN obligations -->
+      <div v-if="compute?.round.deferred?.details?.length">
+        <h2 class="text-[11px] font-semibold uppercase tracking-wider text-ink-500 mb-2">
+          Deferred CN obligations
+          <span class="text-ink-400 font-normal normal-case ml-1">— projected at round PPS ({{ fmtPricePerShare(compute.round.pricePerShare) }})</span>
+        </h2>
+        <div class="rounded-lg border border-amber-200 bg-amber-50/50 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-[13px] num" style="min-width: 460px;">
+              <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-amber-100/40">
+                <tr>
+                  <th class="px-2.5 py-1.5 font-semibold">Holder</th>
+                  <th class="px-2.5 py-1.5 font-semibold w-[140px]">Conv. date</th>
+                  <th class="px-2.5 py-1.5 text-right font-semibold">Dollars</th>
+                  <th class="px-2.5 py-1.5 text-right font-semibold">Projected shares</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="d in compute.round.deferred.details" :key="d.id" class="border-t border-amber-200/60">
+                  <td class="px-2.5 py-1 text-ink-900 truncate">{{ d.stakeholderName }}</td>
+                  <td class="px-1.5 py-1">
+                    <input
+                      type="date"
+                      :value="d.conversionDate || ''"
+                      class="w-full rounded border px-1.5 py-0.5 text-xs text-ink-900 focus:outline-none focus:ring-2 focus:ring-accent-500"
+                      :class="d.conversionDate ? 'border-amber-300 bg-white' : 'border-amber-500 bg-amber-50'"
+                      :title="d.conversionDate ? '' : 'No conversion date — set one to model when this note would actually convert'"
+                      @change="updateCnConversionDate(d.id, ($event.target as HTMLInputElement).value)"
+                    />
+                  </td>
+                  <td class="px-2.5 py-1 text-right">{{ fmtUSD(d.dollars) }}</td>
+                  <td class="px-2.5 py-1 text-right">{{ fmtShares(d.shares) }}</td>
+                </tr>
+                <tr class="border-t-2 border-amber-300 font-semibold text-ink-900 bg-amber-100/30">
+                  <td class="px-2.5 py-1.5">Total</td>
+                  <td></td>
+                  <td class="px-2.5 py-1.5 text-right">{{ fmtUSD(compute.round.deferred.totalDollars) }}</td>
+                  <td class="px-2.5 py-1.5 text-right">{{ fmtShares(compute.round.deferred.projectedSharesAtRoundPPS) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="px-3 py-2 text-xs text-ink-600 border-t border-amber-200/60">
+            Deferred notes do NOT add to post-round FDS or post-money. Flip "Converts at round?" on the
+            <NuxtLink :to="`/companies/${id}/cap-table`" class="text-accent-600 hover:text-accent-700 font-medium">Cap table</NuxtLink>
+            page to include them in this round.
+          </p>
         </div>
+      </div>
+    </div>
+
+    <!-- Warnings (full width below the CN block) -->
+    <div v-if="compute?.round.warnings?.length" class="rounded-lg border border-amber-200 bg-amber-50 p-4 mb-5">
+      <h3 class="text-xs font-semibold uppercase tracking-wide text-amber-700 mb-2">Warnings</h3>
+      <ul class="space-y-1 text-sm text-amber-900 list-disc pl-5">
+        <li v-for="(w, i) in compute.round.warnings" :key="i">{{ w }}</li>
+      </ul>
     </div>
 
     <!-- Per-stakeholder dilution table — full width below -->

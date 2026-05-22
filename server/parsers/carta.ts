@@ -37,6 +37,7 @@ export interface ParsedConvertible {
   interestRate: number
   issueDate?: string | null
   maturityDate?: string | null
+  conversionDate?: string | null
   valuationCap?: number | null
   conversionDiscount: number
 }
@@ -308,6 +309,7 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
       const cInterest = col(/^interest$|accrued\s*interest|interest\s*accrued/i)
       const cIssue = col(/issue\s*date|issued|effective\s*date/i)
       const cMaturity = col(/maturity\s*date|maturity/i)
+      const cConvDate = col(/conversion\s*date|converted\s*on|conv\.?\s*date/i)
       const cRate = col(/interest\s*rate|rate$/i)
       const cCap = col(/valuation\s*cap|^cap$/i)
       const cDiscount = col(/conversion\s*discount|^discount$/i)
@@ -336,6 +338,7 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
           interestRate: cRate > 0 ? asNumber(row.getCell(cRate).value) : 0,
           issueDate: cIssue > 0 ? asDate(row.getCell(cIssue).value) : null,
           maturityDate: cMaturity > 0 ? asDate(row.getCell(cMaturity).value) : null,
+          conversionDate: cConvDate > 0 ? asDate(row.getCell(cConvDate).value) : null,
           valuationCap: cCap > 0 ? asNumber(row.getCell(cCap).value) || null : null,
           conversionDiscount: cDiscount > 0 ? asNumber(row.getCell(cDiscount).value) : 0,
         })
@@ -346,6 +349,14 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
           `"${cnSheet.name}" sheet had a header row but 0 convertibles were parsed — `
           + 'check that rows have non-zero Principal and a Stakeholder Name.',
         )
+      } else {
+        const missing = result.convertibles.filter(c => !c.conversionDate).length
+        if (missing > 0) {
+          warnings.push(
+            `${missing} convertible note${missing === 1 ? '' : 's'} had no conversion date — set one in `
+            + 'the CN conversion detail table on the Assumptions page to drive interest accrual.',
+          )
+        }
       }
     }
   }

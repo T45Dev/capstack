@@ -97,8 +97,8 @@ export default defineEventHandler(async (event) => {
         INSERT INTO convertibles (
           id, company_id, stakeholder_id, external_id, stakeholder_name,
           principal, interest_accrued, interest_rate, issue_date, maturity_date,
-          valuation_cap, conversion_discount, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outstanding')
+          conversion_date, valuation_cap, conversion_discount, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outstanding')
       `)
       for (const cn of parsed.convertibles) {
         insCN.run(
@@ -112,6 +112,7 @@ export default defineEventHandler(async (event) => {
           cn.interestRate,
           cn.issueDate,
           cn.maturityDate,
+          cn.conversionDate || null,
           cn.valuationCap,
           cn.conversionDiscount,
         )
