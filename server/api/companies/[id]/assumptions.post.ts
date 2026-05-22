@@ -6,6 +6,7 @@ export default defineEventHandler(async (event) => {
   if (!id) throw createError({ statusCode: 400, message: 'id required' })
   const body = await readBody<{
     round_name?: string
+    round_close_date?: string | null
     new_money?: number
     pre_money?: number
     pre_round_fds?: number | null
@@ -21,11 +22,12 @@ export default defineEventHandler(async (event) => {
 
   db().prepare(`
     INSERT INTO assumptions (
-      company_id, round_name, new_money, pre_money, pre_round_fds,
+      company_id, round_name, round_close_date, new_money, pre_money, pre_round_fds,
       target_pool_pct, pool_top_up_shares, cn_conversion_basis, notes, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(company_id) DO UPDATE SET
       round_name = excluded.round_name,
+      round_close_date = excluded.round_close_date,
       new_money = excluded.new_money,
       pre_money = excluded.pre_money,
       pre_round_fds = excluded.pre_round_fds,
@@ -37,6 +39,7 @@ export default defineEventHandler(async (event) => {
   `).run(
     id,
     body.round_name || 'Series B',
+    body.round_close_date || null,
     body.new_money ?? 0,
     body.pre_money ?? 0,
     body.pre_round_fds ?? null,
@@ -52,6 +55,7 @@ export default defineEventHandler(async (event) => {
   if (prev) {
     const changed =
       (prev.round_name || '') !== (body.round_name || 'Series B') ||
+      (prev.round_close_date || null) !== (body.round_close_date || null) ||
       Number(prev.new_money ?? 0) !== Number(body.new_money ?? 0) ||
       Number(prev.pre_money ?? 0) !== Number(body.pre_money ?? 0) ||
       (prev.pre_round_fds ?? null) !== (body.pre_round_fds ?? null) ||

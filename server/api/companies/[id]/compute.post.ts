@@ -11,6 +11,7 @@ export default defineEventHandler(async (event) => {
     preMoney: number
     preRoundFDS: number | null
     cnBasis: CNBasis
+    roundCloseDate: string | null
   }>>(event)) || {}
 
   const stored = db().prepare('SELECT * FROM assumptions WHERE company_id = ?').get(id) as any || {}
@@ -27,17 +28,36 @@ export default defineEventHandler(async (event) => {
     ? Number(body.preRoundFDS)
     : (stored.pre_round_fds != null ? Number(stored.pre_round_fds) : fdsFromCapTable)
 
-  // Convertibles
+  // Convertibles. If the assumption has a round_close_date set AND the note has
+  // both an issue_date and a non-zero interest_rate, accrued interest is
+  // recomputed dynamically (principal × rate × days / 365) instead of using
+  // the snapshot value imported from Carta. Falls back to the static value
+  // when any input is missing — so a fresh import works without setting a
+  // close date.
   const cnRows = db().prepare(`
     SELECT id, stakeholder_id, stakeholder_name, principal, interest_accrued,
-           conversion_discount, valuation_cap, converts_at_round
+           interest_rate, issue_date, conversion_discount, valuation_cap, converts_at_round
     FROM convertibles WHERE company_id = ? AND status = 'outstanding'
   `).all(id) as any[]
+
+  const effectiveCloseDate = body.roundCloseDate !== undefined ? body.roundCloseDate : stored.round_close_date
+  const closeDateMs = effectiveCloseDate ? new Date(effectiveCloseDate).getTime() : NaN
+  function accruedInterestFor(c: any): number {
+    if (!isFinite(closeDateMs) || !c.issue_date || !c.interest_rate || c.interest_rate <= 0) {
+      return c.interest_accrued || 0
+    }
+    const issuedMs = new Date(c.issue_date).getTime()
+    if (!isFinite(issuedMs)) return c.interest_accrued || 0
+    const days = (closeDateMs - issuedMs) / (1000 * 60 * 60 * 24)
+    if (days <= 0) return c.interest_accrued || 0
+    return (c.principal || 0) * c.interest_rate * (days / 365)
+  }
+
   const convertibles: ConvertibleNote[] = cnRows.map(c => ({
     id: c.id,
     stakeholderName: c.stakeholder_name,
     principal: c.principal || 0,
-    interestAccrued: c.interest_accrued || 0,
+    interestAccrued: accruedInterestFor(c),
     conversionDiscount: c.conversion_discount || 0,
     valuationCap: c.valuation_cap,
     convertsAtRound: c.converts_at_round !== 0,
