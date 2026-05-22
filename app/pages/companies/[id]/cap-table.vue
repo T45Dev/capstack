@@ -20,6 +20,9 @@ const currentPPS = computed(() => data.value?.current_pps || 0)
 const scUnits = useTableUnits('capstack:cap-table:share-classes:units')
 const holdUnits = useTableUnits('capstack:cap-table:holdings:units')
 
+// Share-classes section is collapsible — the holdings pivot is the main view.
+const scExpanded = ref(false)
+
 // Build pivoted rows: stakeholder × share class + outstanding options + CN.
 // CNs are projected to shares at the current PPS and folded into FDS so the
 // cap-table view reflects "as-converted" positions without needing a round.
@@ -168,10 +171,24 @@ const sortedShareClasses = computed(() => {
 })
 
 // ----- Holdings pivot table (sortable + resizable) -----
-// Each "share-quantity" metric (per share-class, Options, FDS) unfolds into
-// 1-3 sub-columns based on which units the user has selected. CN ($) is a
-// dollar-only column and always renders the same way.
-interface HoldCol { key: string; label: string; width: number; sortable: boolean; align: 'left' | 'right'; baseKey?: string; unit?: 'shares' | 'pct' | 'value' }
+// Each "share-quantity" metric (per share-class, Options, CN, FDS) unfolds into
+// 1-3 sub-columns based on which units the user has selected. Sub-columns of
+// the same metric share a `group` label that's used to render a two-row header
+// that visually distinguishes "CS / CS % / CS $" as one group.
+interface HoldCol {
+  key: string
+  label: string             // full e.g. "CS %" (still used for accessibility / sorted-by-key)
+  group?: string            // metric group label, e.g. "CS"
+  width: number
+  sortable: boolean
+  align: 'left' | 'right'
+  baseKey?: string
+  unit?: 'shares' | 'pct' | 'value'
+}
+
+function unitColLabel(u: 'shares' | 'pct' | 'value'): string {
+  return u === 'shares' ? 'Shares' : u === 'pct' ? '%' : '$'
+}
 
 const holdingsCols = computed<HoldCol[]>(() => {
   const cols: HoldCol[] = [
@@ -180,36 +197,48 @@ const holdingsCols = computed<HoldCol[]>(() => {
   for (const sc of (data.value?.share_classes || [])) {
     for (const u of holdUnits.selected.value) {
       cols.push({
-        key: `class_${sc.id}_${u}`, baseKey: `class_${sc.id}`, unit: u,
+        key: `class_${sc.id}_${u}`, baseKey: `class_${sc.id}`, unit: u, group: sc.code,
         label: `${sc.code}${unitSuffix(u)}`,
-        width: u === 'shares' ? 110 : 95, sortable: true, align: 'right',
+        width: u === 'shares' ? 110 : 90, sortable: true, align: 'right',
       })
     }
   }
   for (const u of holdUnits.selected.value) {
     cols.push({
-      key: `optionShares_${u}`, baseKey: 'optionShares', unit: u,
+      key: `optionShares_${u}`, baseKey: 'optionShares', unit: u, group: 'Options',
       label: `Options${unitSuffix(u)}`,
-      width: u === 'shares' ? 110 : 95, sortable: true, align: 'right',
+      width: u === 'shares' ? 110 : 90, sortable: true, align: 'right',
     })
   }
-  // Convertibles. Shows projected shares at current PPS, % of FDS, or $ balance,
-  // depending on the toggle. Same column structure as a regular share class.
   for (const u of holdUnits.selected.value) {
     cols.push({
-      key: `cn_${u}`, baseKey: 'cn', unit: u,
+      key: `cn_${u}`, baseKey: 'cn', unit: u, group: 'CN',
       label: `CN${unitSuffix(u)}`,
-      width: u === 'shares' ? 110 : 95, sortable: true, align: 'right',
+      width: u === 'shares' ? 110 : 90, sortable: true, align: 'right',
     })
   }
   for (const u of holdUnits.selected.value) {
     cols.push({
-      key: `fds_${u}`, baseKey: 'fds', unit: u,
+      key: `fds_${u}`, baseKey: 'fds', unit: u, group: 'FDS',
       label: `FDS${unitSuffix(u)}`,
-      width: u === 'shares' ? 130 : 105, sortable: true, align: 'right',
+      width: u === 'shares' ? 130 : 100, sortable: true, align: 'right',
     })
   }
   return cols
+})
+
+// Collapse consecutive columns with the same `group` into a single spanning
+// header. The first column (Stakeholder, no group) is excluded; it gets a
+// rowspan=2 header so it occupies both header rows.
+const holdingsGroups = computed(() => {
+  const groups: Array<{ group: string; colspan: number; firstKey: string }> = []
+  for (const col of holdingsTable.cols) {
+    if (!col.group) continue
+    const last = groups[groups.length - 1]
+    if (last && last.group === col.group) last.colspan++
+    else groups.push({ group: col.group, colspan: 1, firstKey: col.key })
+  }
+  return groups
 })
 
 const holdingsTable = useSortableTable({
@@ -390,29 +419,40 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
     </UiEmpty>
 
     <div v-else class="space-y-6">
-      <!-- Share classes -->
-      <UiCard title="Share classes" :subtitle="`${data.share_classes.length} classes — click headers to sort, drag edges to resize`" :padded="false">
+      <!-- Share classes — compact, collapsible (the holdings pivot is the main view). -->
+      <UiCard :title="`Share classes (${data.share_classes.length})`" :padded="false">
         <template #header>
-          <TableUnitsToggle storage-key="capstack:cap-table:share-classes:units" />
+          <div class="flex items-center gap-2">
+            <TableUnitsToggle v-if="scExpanded" storage-key="capstack:cap-table:share-classes:units" />
+            <button
+              type="button"
+              class="text-xs text-ink-500 hover:text-ink-900 inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-ink-100"
+              @click="scExpanded = !scExpanded"
+            >
+              <ChevronUp v-if="scExpanded" :size="12" />
+              <ChevronDown v-else :size="12" />
+              {{ scExpanded ? 'collapse' : 'expand' }}
+            </button>
+          </div>
         </template>
-        <div class="overflow-x-auto">
-          <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
+        <div v-if="scExpanded" class="overflow-x-auto">
+          <table class="text-xs border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
               <col v-for="c in shareClassTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
             </colgroup>
-            <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
+            <thead class="text-left text-ink-500 text-[10px] uppercase tracking-wide bg-ink-100">
               <tr>
                 <th
                   v-for="c in shareClassTable.cols"
                   :key="c.key"
-                  class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold"
+                  class="relative px-2 py-1 border-b border-ink-300 select-none font-semibold"
                   :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
                   @click="c.sortable ? shareClassTable.toggleSort(c.key) : null"
                 >
                   <span class="inline-flex items-center gap-1" :class="c.align === 'right' ? 'flex-row-reverse' : ''">
                     {{ c.label }}
-                    <ChevronUp v-if="sortIconFor(shareClassTable, c.key) === 'asc'" :size="12" class="text-accent-600" />
-                    <ChevronDown v-if="sortIconFor(shareClassTable, c.key) === 'desc'" :size="12" class="text-accent-600" />
+                    <ChevronUp v-if="sortIconFor(shareClassTable, c.key) === 'asc'" :size="11" class="text-accent-600" />
+                    <ChevronDown v-if="sortIconFor(shareClassTable, c.key) === 'desc'" :size="11" class="text-accent-600" />
                   </span>
                   <span class="resize-handle" @mousedown.prevent.stop="shareClassTable.startResize($event, c.key)" @click.stop />
                 </th>
@@ -421,51 +461,51 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
             <tbody class="num">
               <tr v-for="sc in sortedShareClasses" :key="sc.id" class="hover:bg-accent-50/40 transition-colors">
                 <template v-for="c in shareClassTable.cols" :key="c.key">
-                  <td v-if="c.key === 'code'"  class="px-2.5 py-1.5 font-mono text-xs border-b border-ink-200 text-ink-800">{{ sc.code }}</td>
-                  <td v-else-if="c.key === 'name'"  class="px-2.5 py-1.5 border-b border-ink-200 text-ink-900 truncate" :title="sc.name">{{ sc.name }}</td>
-                  <td v-else-if="c.key === 'kind'"  class="px-2.5 py-1.5 text-[11px] uppercase tracking-wide text-ink-500 border-b border-ink-200">{{ sc.kind }}</td>
-                  <td v-else-if="c.key === 'issue_price'"  class="px-2.5 py-1.5 text-right text-ink-600 border-b border-ink-200">{{ fmtPricePerShare(sc.issue_price) }}</td>
-                  <td v-else-if="c.baseKey === 'issued'"  class="px-2.5 py-1.5 text-right border-b border-ink-200">{{ formatBy(c.unit!, sc.issued, fdsIncludingPool, sc.issue_price || currentPPS) }}</td>
-                  <td v-else-if="c.baseKey === 'authorized'"  class="px-2.5 py-1.5 text-right text-ink-600 border-b border-ink-200">{{ sc.authorized ? formatBy(c.unit!, sc.authorized, fdsIncludingPool, sc.issue_price || currentPPS) : '—' }}</td>
+                  <td v-if="c.key === 'code'"  class="px-2 py-0.5 font-mono text-xs border-b border-ink-200 text-ink-800">{{ sc.code }}</td>
+                  <td v-else-if="c.key === 'name'"  class="px-2 py-0.5 border-b border-ink-200 text-ink-900 truncate" :title="sc.name">{{ sc.name }}</td>
+                  <td v-else-if="c.key === 'kind'"  class="px-2 py-0.5 text-[11px] uppercase tracking-wide text-ink-500 border-b border-ink-200">{{ sc.kind }}</td>
+                  <td v-else-if="c.key === 'issue_price'"  class="px-2 py-0.5 text-right text-ink-600 border-b border-ink-200">{{ fmtPricePerShare(sc.issue_price) }}</td>
+                  <td v-else-if="c.baseKey === 'issued'"  class="px-2 py-0.5 text-right border-b border-ink-200">{{ formatBy(c.unit!, sc.issued, fdsIncludingPool, sc.issue_price || currentPPS) }}</td>
+                  <td v-else-if="c.baseKey === 'authorized'"  class="px-2 py-0.5 text-right text-ink-600 border-b border-ink-200">{{ sc.authorized ? formatBy(c.unit!, sc.authorized, fdsIncludingPool, sc.issue_price || currentPPS) : '—' }}</td>
                 </template>
               </tr>
               <tr class="bg-ink-100/60 font-medium">
                 <template v-for="(c, idx) in shareClassTable.cols" :key="c.key">
-                  <td v-if="c.key === 'code'"  class="px-2.5 py-1.5 border-b border-ink-200 text-ink-700">Pool</td>
-                  <td v-else-if="c.key === 'name'"  class="px-2.5 py-1.5 border-b border-ink-200 text-ink-700">Option pool authorized</td>
-                  <td v-else-if="c.key === 'kind'"  class="px-2.5 py-1.5 border-b border-ink-200"></td>
-                  <td v-else-if="c.key === 'issue_price'"  class="px-2.5 py-1.5 border-b border-ink-200"></td>
-                  <td v-else-if="c.baseKey === 'issued'"  class="px-2.5 py-1.5 text-right border-b border-ink-200">
+                  <td v-if="c.key === 'code'"  class="px-2 py-0.5 border-b border-ink-200 text-ink-700">Pool</td>
+                  <td v-else-if="c.key === 'name'"  class="px-2 py-0.5 border-b border-ink-200 text-ink-700">Option pool authorized</td>
+                  <td v-else-if="c.key === 'kind'"  class="px-2 py-0.5 border-b border-ink-200"></td>
+                  <td v-else-if="c.key === 'issue_price'"  class="px-2 py-0.5 border-b border-ink-200"></td>
+                  <td v-else-if="c.baseKey === 'issued'"  class="px-2 py-0.5 text-right border-b border-ink-200">
                     {{ formatBy(c.unit!, totals.totalOptions, fdsIncludingPool, currentPPS) }}<span class="text-[10px] text-ink-500 ml-1">attributed</span>
                   </td>
-                  <td v-else-if="c.baseKey === 'authorized'"  class="px-2.5 py-1.5 text-right text-ink-600 border-b border-ink-200">{{ formatBy(c.unit!, poolAuthorized, fdsIncludingPool, currentPPS) }}</td>
+                  <td v-else-if="c.baseKey === 'authorized'"  class="px-2 py-0.5 text-right text-ink-600 border-b border-ink-200">{{ formatBy(c.unit!, poolAuthorized, fdsIncludingPool, currentPPS) }}</td>
                 </template>
               </tr>
               <!-- Synthetic Convertibles row: shares projected at current PPS, $ shows ledger balance. -->
               <tr v-if="totals.totalCNDollars > 0" class="bg-ink-100/60 font-medium">
                 <template v-for="c in shareClassTable.cols" :key="c.key">
-                  <td v-if="c.key === 'code'"  class="px-2.5 py-1.5 font-mono text-xs border-b border-ink-200 text-ink-700">CN</td>
-                  <td v-else-if="c.key === 'name'"  class="px-2.5 py-1.5 border-b border-ink-200 text-ink-700">
+                  <td v-if="c.key === 'code'"  class="px-2 py-0.5 font-mono text-xs border-b border-ink-200 text-ink-700">CN</td>
+                  <td v-else-if="c.key === 'name'"  class="px-2 py-0.5 border-b border-ink-200 text-ink-700">
                     Convertible notes
                     <span class="text-[10px] text-ink-500 ml-1">projected at current PPS</span>
                   </td>
-                  <td v-else-if="c.key === 'kind'"  class="px-2.5 py-1.5 text-[11px] uppercase tracking-wide text-ink-500 border-b border-ink-200">convertible</td>
-                  <td v-else-if="c.key === 'issue_price'"  class="px-2.5 py-1.5 border-b border-ink-200"></td>
-                  <td v-else-if="c.baseKey === 'issued'"  class="px-2.5 py-1.5 text-right border-b border-ink-200">
+                  <td v-else-if="c.key === 'kind'"  class="px-2 py-0.5 text-[11px] uppercase tracking-wide text-ink-500 border-b border-ink-200">convertible</td>
+                  <td v-else-if="c.key === 'issue_price'"  class="px-2 py-0.5 border-b border-ink-200"></td>
+                  <td v-else-if="c.baseKey === 'issued'"  class="px-2 py-0.5 text-right border-b border-ink-200">
                     <template v-if="c.unit === 'value'">{{ fmtUSD(totals.totalCNDollars) }}</template>
                     <template v-else>{{ formatBy(c.unit!, totals.totalCNShares, fdsIncludingPool, currentPPS) }}</template>
                   </td>
-                  <td v-else-if="c.baseKey === 'authorized'"  class="px-2.5 py-1.5 border-b border-ink-200"></td>
+                  <td v-else-if="c.baseKey === 'authorized'"  class="px-2 py-0.5 border-b border-ink-200"></td>
                 </template>
               </tr>
               <tr class="font-semibold bg-ink-100 text-ink-900">
                 <template v-for="c in shareClassTable.cols" :key="c.key">
-                  <td v-if="c.key === 'code'"  class="px-2.5 py-1.5">FDS</td>
-                  <td v-else-if="c.key === 'name'"  class="px-2.5 py-1.5">Fully-diluted shares</td>
-                  <td v-else-if="c.key === 'kind'"  class="px-2.5 py-1.5"></td>
-                  <td v-else-if="c.key === 'issue_price'"  class="px-2.5 py-1.5"></td>
-                  <td v-else-if="c.baseKey === 'issued'"  class="px-2.5 py-1.5 text-right">{{ formatBy(c.unit!, fdsIncludingPool, fdsIncludingPool, currentPPS) }}</td>
-                  <td v-else-if="c.baseKey === 'authorized'"  class="px-2.5 py-1.5 text-right">—</td>
+                  <td v-if="c.key === 'code'"  class="px-2 py-0.5">FDS</td>
+                  <td v-else-if="c.key === 'name'"  class="px-2 py-0.5">Fully-diluted shares</td>
+                  <td v-else-if="c.key === 'kind'"  class="px-2 py-0.5"></td>
+                  <td v-else-if="c.key === 'issue_price'"  class="px-2 py-0.5"></td>
+                  <td v-else-if="c.baseKey === 'issued'"  class="px-2 py-0.5 text-right">{{ formatBy(c.unit!, fdsIncludingPool, fdsIncludingPool, currentPPS) }}</td>
+                  <td v-else-if="c.baseKey === 'authorized'"  class="px-2 py-0.5 text-right">—</td>
                 </template>
               </tr>
             </tbody>
@@ -484,16 +524,52 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               <col v-for="c in holdingsTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
             </colgroup>
             <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
+              <!-- Row 1: group labels spanning their sub-columns (CS, CS1, Options, CN, FDS, ...).
+                   Stakeholder column uses rowspan=2. -->
               <tr>
                 <th
-                  v-for="c in holdingsTable.cols"
+                  rowspan="2"
+                  class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold text-left align-bottom bg-ink-100"
+                  :class="[holdingsTable.cols[0]?.sortable ? 'cursor-pointer hover:text-ink-900' : '', 'sticky-col']"
+                  @click="holdingsTable.cols[0] && holdingsTable.toggleSort(holdingsTable.cols[0].key)"
+                >
+                  <span class="inline-flex items-center gap-1">
+                    {{ holdingsTable.cols[0]?.label }}
+                    <ChevronUp v-if="holdingsTable.cols[0] && sortIconFor(holdingsTable, holdingsTable.cols[0].key) === 'asc'" :size="12" class="text-accent-600" />
+                    <ChevronDown v-if="holdingsTable.cols[0] && sortIconFor(holdingsTable, holdingsTable.cols[0].key) === 'desc'" :size="12" class="text-accent-600" />
+                  </span>
+                  <span class="resize-handle" v-if="holdingsTable.cols[0]" @mousedown.prevent.stop="holdingsTable.startResize($event, holdingsTable.cols[0].key)" @click.stop />
+                </th>
+                <th
+                  v-for="(g, gi) in holdingsGroups"
+                  :key="g.firstKey"
+                  :colspan="g.colspan"
+                  class="px-2.5 py-1 text-center border-b border-ink-300 text-ink-700 font-semibold"
+                  :class="gi % 2 === 0 ? 'bg-ink-100' : 'bg-ink-100/60'"
+                >{{ g.group }}</th>
+              </tr>
+              <!-- Row 2: per-unit labels (Shares / % / $). Sort + resize live here. -->
+              <tr>
+                <th
+                  v-for="(c, idx) in holdingsTable.cols.slice(1)"
                   :key="c.key"
-                  class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold"
-                  :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
+                  class="relative px-2.5 py-1 border-b border-ink-300 select-none text-[10px] font-medium"
+                  :class="[
+                    c.align === 'right' ? 'text-right' : 'text-left',
+                    c.sortable ? 'cursor-pointer hover:text-ink-900' : '',
+                    // Tinted background matching the group row.
+                    (() => {
+                      let gi = -1; let lastG = ''
+                      for (const col of holdingsTable.cols.slice(1, idx + 2)) {
+                        if (col.group && col.group !== lastG) { gi++; lastG = col.group }
+                      }
+                      return gi % 2 === 0 ? 'bg-ink-100' : 'bg-ink-100/60'
+                    })(),
+                  ]"
                   @click="c.sortable ? holdingsTable.toggleSort(c.key) : null"
                 >
                   <span class="inline-flex items-center gap-1" :class="c.align === 'right' ? 'flex-row-reverse' : ''">
-                    {{ c.label }}
+                    {{ c.unit ? unitColLabel(c.unit) : c.label }}
                     <ChevronUp v-if="sortIconFor(holdingsTable, c.key) === 'asc'" :size="12" class="text-accent-600" />
                     <ChevronDown v-if="sortIconFor(holdingsTable, c.key) === 'desc'" :size="12" class="text-accent-600" />
                   </span>
@@ -502,9 +578,9 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               </tr>
             </thead>
             <tbody class="num">
-              <tr v-for="r in sortedPivot" :key="r.stakeholderId" class="hover:bg-accent-50/40 transition-colors">
+              <tr v-for="r in sortedPivot" :key="r.stakeholderId" class="group">
                 <template v-for="c in holdingsTable.cols" :key="c.key">
-                  <td v-if="c.key === 'name'" class="px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate" :title="r.name">{{ r.name }}</td>
+                  <td v-if="c.key === 'name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-accent-50/40" :title="r.name">{{ r.name }}</td>
                   <td v-else-if="c.baseKey === 'cn'" class="px-2.5 py-1.5 text-right border-b border-ink-200">
                     <template v-if="c.unit === 'value'">
                       <span v-if="r.cnDollars" class="text-ink-800">{{ fmtUSD(r.cnDollars) }}</span>
