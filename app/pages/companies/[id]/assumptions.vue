@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Save, RefreshCw, RotateCcw, ChevronUp, ChevronDown, BookmarkPlus, History, Trash2, Upload, X } from 'lucide-vue-next'
-import { fmtUSD, fmtPct, fmtShares, fmtPricePerShare, fmtDate, normalizeDate } from '~/utils/format'
+import { Save, RefreshCw, RotateCcw, BookmarkPlus, History, Trash2, Upload, X } from 'lucide-vue-next'
+import { fmtUSD, fmtShares, fmtPricePerShare, fmtDate } from '~/utils/format'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -86,9 +86,6 @@ const preRoundFDSEffective = computed<number | null>({
 function clearOverride() {
   form.pre_round_fds = null
 }
-function useComputedFDS() {
-  form.pre_round_fds = null
-}
 
 const saving = ref(false)
 const savedAt = ref<string | null>(null)
@@ -130,76 +127,6 @@ const seriesShortcuts = [
   'Pre-seed', 'Seed', 'Series Seed', 'Series A', 'Series A-1', 'Series A-2', 'Series A-3', 'Series A-4',
   'Series B', 'Series B-1', 'Series B-2', 'Series C', 'Series D', 'Bridge',
 ]
-
-// ---------- Per-stakeholder dilution table ----------
-// Pre / CN / Post each unfold into 1-3 sub-columns per the per-table toggle.
-const dilUnits = useTableUnits('capstack:dilution:units')
-
-interface DilCol { key: string; label: string; width: number; sortable: boolean; align: 'left' | 'right'; baseKey?: string; unit?: 'shares' | 'pct' | 'value' }
-
-const dilutionCols = computed<DilCol[]>(() => {
-  const cols: DilCol[] = [
-    { key: 'name', label: 'Stakeholder', width: 260, sortable: true, align: 'left' },
-  ]
-  const groups: Array<{ base: string; label: string }> = [
-    { base: 'preShares',  label: 'Pre' },
-    { base: 'cnShares',   label: 'CN conv.' },
-    { base: 'postShares', label: 'Post' },
-  ]
-  for (const g of groups) {
-    for (const u of dilUnits.selected.value) {
-      cols.push({
-        key: `${g.base}_${u}`, baseKey: g.base, unit: u,
-        label: `${g.label}${unitSuffix(u)}`,
-        width: u === 'shares' ? 140 : 110, sortable: true, align: 'right',
-      })
-    }
-  }
-  cols.push({ key: 'delta', label: 'Δ %', width: 100, sortable: true, align: 'right' })
-  return cols
-})
-
-const dilutionTable = useSortableTable({
-  key: 'capstack:dilution',
-  defaultSort: { key: 'postShares_shares', dir: 'desc' },
-  columns: dilutionCols.value as any,
-})
-
-watch(dilutionCols, (cols) => {
-  const widthMap: Record<string, number> = {}
-  for (const c of dilutionTable.cols) widthMap[c.key] = c.width
-  const next = cols.map(c => ({ ...c, width: widthMap[c.key] ?? c.width }))
-  dilutionTable.cols.splice(0, dilutionTable.cols.length, ...(next as any))
-  if (!dilutionTable.cols.find(c => c.key === dilutionTable.sort.key)) {
-    dilutionTable.sort.key = 'postShares_shares'
-  }
-}, { immediate: true })
-
-const sortedDilution = computed(() => {
-  const rows = (compute.value?.dilution || []).map((r: any) => ({
-    ...r,
-    delta: r.postPct - r.prePct,
-  }))
-  const k = dilutionTable.sort.key
-  const sign = dilutionTable.sort.dir === 'asc' ? 1 : -1
-  const baseKey = k === 'name' || k === 'delta' ? k : k.replace(/_(shares|pct|value)$/, '')
-  return [...rows].sort((a, b) => {
-    const av = (a as any)[baseKey], bv = (b as any)[baseKey]
-    if (av == null && bv == null) return 0
-    if (av == null) return 1
-    if (bv == null) return -1
-    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sign
-    return String(av).localeCompare(String(bv), 'en', { numeric: true }) * sign
-  })
-})
-
-const dilutionWidth = computed(() => dilutionTable.cols.reduce((s, c) => s + c.width, 0))
-
-function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
-  if (table.sort.key !== key) return null
-  return table.sort.dir
-}
-
 </script>
 
 <template>
@@ -380,56 +307,12 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
       </ul>
     </div>
 
-    <!-- Per-stakeholder dilution table — full width below -->
-    <div v-if="compute?.dilution?.length" class="mt-6">
-      <div class="flex items-center justify-between mb-2">
-        <h2 class="text-[11px] font-semibold uppercase tracking-wider text-ink-500">
-          Per-stakeholder dilution
-          <span class="text-ink-400 font-normal normal-case ml-1">— {{ compute.dilution.length }} stakeholders. Click headers to sort, drag edges to resize.</span>
-        </h2>
-        <TableUnitsToggle storage-key="capstack:dilution:units" />
-      </div>
-      <div class="rounded-lg border border-ink-300 bg-white shadow-card overflow-hidden">
-        <div class="overflow-x-auto">
-          <table class="text-[13px] border-separate" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: dilutionWidth + 'px' }">
-            <colgroup>
-              <col v-for="col in dilutionTable.cols" :key="col.key" :style="{ width: col.width + 'px' }" />
-            </colgroup>
-            <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
-              <tr>
-                <th
-                  v-for="col in dilutionTable.cols"
-                  :key="col.key"
-                  class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold"
-                  :class="[col.align === 'right' ? 'text-right' : 'text-left', col.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
-                  @click="col.sortable ? dilutionTable.toggleSort(col.key) : null"
-                >
-                  <span class="inline-flex items-center gap-1" :class="col.align === 'right' ? 'flex-row-reverse' : ''">
-                    {{ col.label }}
-                    <ChevronUp v-if="sortIconFor(dilutionTable, col.key) === 'asc'" :size="12" class="text-accent-600" />
-                    <ChevronDown v-if="sortIconFor(dilutionTable, col.key) === 'desc'" :size="12" class="text-accent-600" />
-                  </span>
-                  <span class="resize-handle" @mousedown.prevent.stop="dilutionTable.startResize($event, col.key)" @click.stop />
-                </th>
-              </tr>
-            </thead>
-            <tbody class="num">
-              <tr v-for="r in sortedDilution" :key="r.stakeholderId" class="hover:bg-accent-50/40 transition-colors">
-                <template v-for="col in dilutionTable.cols" :key="col.key">
-                  <td v-if="col.key === 'name'" class="px-2.5 py-1.5 font-medium text-ink-900 truncate border-b border-ink-200" :title="r.name">{{ r.name }}</td>
-                  <td v-else-if="col.key === 'delta'" class="px-2.5 py-1.5 text-right border-b border-ink-200 font-medium" :class="r.delta < 0 ? 'text-red-600' : 'text-emerald-600'">
-                    {{ (r.delta >= 0 ? '+' : '') + fmtPct(r.delta, 2) }}
-                  </td>
-                  <td v-else-if="col.baseKey === 'preShares'" class="px-2.5 py-1.5 text-right border-b border-ink-200">{{ formatBy(col.unit!, r.preShares, compute.round.preRoundFDS, compute.round.pricePerShare) }}</td>
-                  <td v-else-if="col.baseKey === 'cnShares'" class="px-2.5 py-1.5 text-right border-b border-ink-200">{{ r.cnShares ? formatBy(col.unit!, r.cnShares, compute.round.postRoundFDS, compute.round.pricePerShare) : '—' }}</td>
-                  <td v-else-if="col.baseKey === 'postShares'" class="px-2.5 py-1.5 text-right font-medium border-b border-ink-200 text-ink-900">{{ formatBy(col.unit!, r.postShares, compute.round.postRoundFDS, compute.round.pricePerShare) }}</td>
-                </template>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+    <!-- Per-stakeholder dilution has moved to its own page (spec §5.5). -->
+    <p v-if="compute?.dilution?.length" class="mt-2 text-xs text-ink-500">
+      Per-stakeholder dilution now lives on the
+      <NuxtLink :to="`/companies/${id}/dilution`" class="text-accent-600 hover:text-accent-700 font-medium">Overall Dilution</NuxtLink>
+      page. It reflects whatever round inputs are saved here.
+    </p>
 
     <!-- Versions drawer -->
     <div v-if="showVersions" class="fixed inset-0 z-40 bg-ink-900/40 backdrop-blur-sm" @click.self="showVersions = false">
