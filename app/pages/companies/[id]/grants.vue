@@ -24,6 +24,8 @@ interface Grant {
 interface Pool { id: string; name: string; authorized: number }
 
 const { data, refresh } = await useFetch<{ grants: Grant[]; pools: Pool[] }>(() => `/api/companies/${id.value}/grants`, { watch: [id], default: () => ({ grants: [], pools: [] } as any) })
+// Pull cap-table so the toggle's % / $ views have an FDS denominator and a PPS.
+const { data: capTable } = await useFetch(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => null as any })
 
 const outstanding = computed(() => data.value!.grants.filter(g => g.status === 'outstanding'))
 const proposed = computed(() => data.value!.grants.filter(g => g.status === 'proposed'))
@@ -32,6 +34,14 @@ const totalOutstanding = computed(() => outstanding.value.reduce((a, g) => a + g
 const totalProposed = computed(() => proposed.value.reduce((a, g) => a + g.quantity, 0))
 const poolAuthorized = computed(() => data.value!.pools.reduce((a, p) => a + p.authorized, 0))
 const poolAvailable = computed(() => Math.max(0, poolAuthorized.value - totalOutstanding.value - totalProposed.value))
+
+// FDS denominator for the % toggle. Holdings + outstanding options + available pool.
+const fdsAnchor = computed(() => {
+  if (!capTable.value) return 1
+  const heldShares = (capTable.value.holdings || []).reduce((a: number, h: any) => a + (h.shares || 0), 0)
+  return heldShares + totalOutstanding.value + poolAvailable.value
+})
+const ppsAnchor = computed(() => capTable.value?.current_pps || 0)
 
 const { format: fmtShare, compareValue } = useShareUnit()
 
@@ -199,10 +209,10 @@ function exportBoardApproval() {
 
     <!-- Pool stats -->
     <div class="flex flex-wrap gap-3 mb-6">
-      <UiStat label="Pool authorized" :value="fmtShares(poolAuthorized)" class="flex-1 min-w-[150px]" />
-      <UiStat label="Outstanding" :value="fmtShares(totalOutstanding)" class="flex-1 min-w-[150px]" />
-      <UiStat label="Proposed" :value="fmtShares(totalProposed)" class="flex-1 min-w-[150px]" />
-      <UiStat label="Available" :value="fmtShares(poolAvailable)" emphasis class="flex-1 min-w-[150px]" />
+      <UiStat label="Pool authorized" :value="fmtShare(poolAuthorized, fdsAnchor, ppsAnchor)" class="flex-1 min-w-[150px]" />
+      <UiStat label="Outstanding" :value="fmtShare(totalOutstanding, fdsAnchor, ppsAnchor)" class="flex-1 min-w-[150px]" />
+      <UiStat label="Proposed" :value="fmtShare(totalProposed, fdsAnchor, ppsAnchor)" class="flex-1 min-w-[150px]" />
+      <UiStat label="Available" :value="fmtShare(poolAvailable, fdsAnchor, ppsAnchor)" emphasis class="flex-1 min-w-[150px]" />
     </div>
 
     <!-- Outstanding + Proposed side by side on wide screens, stacked on narrow -->

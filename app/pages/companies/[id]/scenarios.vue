@@ -223,10 +223,10 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
               <UiStat label="New money" :value="fmtUSD(result.round.newMoney)" />
               <UiStat label="Post-money" :value="fmtUSD(result.round.postMoney)" emphasis />
               <UiStat label="Round PPS" :value="fmtPricePerShare(result.round.pricePerShare)" emphasis />
-              <UiStat label="Pre-round FDS" :value="fmtShares(result.round.preRoundFDS)" />
-              <UiStat label="Pool top-up" :value="fmtShares(result.round.newPoolShares)" />
-              <UiStat label="New preferred" :value="fmtShares(result.round.newPreferredShares)" />
-              <UiStat label="Post-round FDS" :value="fmtShares(result.round.postRoundFDS)" emphasis />
+              <UiStat label="Pre-round FDS" :value="fmtShare(result.round.preRoundFDS, result.round.preRoundFDS, result.round.pricePerShare)" />
+              <UiStat label="Pool top-up" :value="fmtShare(result.round.newPoolShares, result.round.postRoundFDS, result.round.pricePerShare)" />
+              <UiStat label="New preferred" :value="fmtShare(result.round.newPreferredShares, result.round.postRoundFDS, result.round.pricePerShare)" />
+              <UiStat label="Post-round FDS" :value="fmtShare(result.round.postRoundFDS, result.round.postRoundFDS, result.round.pricePerShare)" emphasis />
             </div>
           </div>
 
