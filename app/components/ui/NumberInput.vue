@@ -15,10 +15,13 @@ interface Props {
   step?: number | string
   placeholder?: string
   disabled?: boolean
+  // Maximum fractional digits shown when not focused. Defaults to 0 — most
+  // CapStack numbers are whole shares / whole dollars.
+  digits?: number
   // Tailwind classes applied to the input element itself.
   inputClass?: string
 }
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { digits: 0 })
 const emit = defineEmits<{ (e: 'update:modelValue', v: number | null): void }>()
 
 const focused = ref(false)
@@ -26,8 +29,7 @@ const text = ref('')
 
 function fmt(v: number | null | undefined): string {
   if (v == null || !isFinite(v)) return ''
-  // No fractional part by default — these are integer-ish amounts (shares, $).
-  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format(v)
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: props.digits }).format(v)
 }
 
 // Keep the displayed text in sync when the bound value changes externally.
@@ -68,7 +70,12 @@ function onInput(e: Event) {
 </script>
 
 <template>
-  <div class="flex items-center rounded-md border border-ink-300 bg-white focus-within:ring-2 focus-within:ring-accent-500 focus-within:border-accent-500">
+  <div
+    class="flex items-center rounded-md border focus-within:ring-2 focus-within:ring-accent-500"
+    :class="disabled
+      ? 'border-ink-200 bg-ink-100 cursor-not-allowed'
+      : 'border-ink-300 bg-white focus-within:border-accent-500'"
+  >
     <span v-if="prefix" class="pl-1.5 text-ink-500 text-sm pointer-events-none">{{ prefix }}</span>
     <input
       type="text"
@@ -76,7 +83,12 @@ function onInput(e: Event) {
       :value="text"
       :placeholder="placeholder"
       :disabled="disabled"
-      :class="['flex-1 py-1 text-right text-sm num bg-transparent border-0 focus:outline-none focus:ring-0', prefix ? 'pr-1.5 pl-1' : 'px-1.5', inputClass]"
+      :class="[
+        'flex-1 py-1 text-right text-sm num bg-transparent border-0 focus:outline-none focus:ring-0',
+        prefix ? 'pr-1.5 pl-1' : 'px-1.5',
+        disabled ? 'text-ink-500 cursor-not-allowed' : '',
+        inputClass,
+      ]"
       @focus="onFocus"
       @blur="onBlur"
       @input="onInput"
