@@ -118,39 +118,62 @@ const seriesShortcuts = [
 ]
 
 // ---------- Per-stakeholder dilution table ----------
-const { format: fmtShare, compareValue, unit } = useShareUnit()
+// Pre / CN / Post each unfold into 1-3 sub-columns per the per-table toggle.
+const dilUnits = useTableUnits('capstack:dilution:units')
+
+interface DilCol { key: string; label: string; width: number; sortable: boolean; align: 'left' | 'right'; baseKey?: string; unit?: 'shares' | 'pct' | 'value' }
+
+const dilutionCols = computed<DilCol[]>(() => {
+  const cols: DilCol[] = [
+    { key: 'name', label: 'Stakeholder', width: 260, sortable: true, align: 'left' },
+  ]
+  const groups: Array<{ base: string; label: string }> = [
+    { base: 'preShares',  label: 'Pre' },
+    { base: 'cnShares',   label: 'CN conv.' },
+    { base: 'postShares', label: 'Post' },
+  ]
+  for (const g of groups) {
+    for (const u of dilUnits.selected.value) {
+      cols.push({
+        key: `${g.base}_${u}`, baseKey: g.base, unit: u,
+        label: `${g.label}${unitSuffix(u)}`,
+        width: u === 'shares' ? 140 : 110, sortable: true, align: 'right',
+      })
+    }
+  }
+  cols.push({ key: 'delta', label: 'Δ %', width: 100, sortable: true, align: 'right' })
+  return cols
+})
 
 const dilutionTable = useSortableTable({
   key: 'capstack:dilution',
-  defaultSort: { key: 'postShares', dir: 'desc' },
-  columns: [
-    { key: 'name', label: 'Stakeholder', width: 260, sortable: true, align: 'left' },
-    { key: 'preShares', label: 'Pre shares', width: 140, sortable: true, align: 'right' },
-    { key: 'cnShares', label: 'CN conv.', width: 130, sortable: true, align: 'right' },
-    { key: 'postShares', label: 'Post shares', width: 150, sortable: true, align: 'right' },
-    { key: 'prePct', label: 'Pre %', width: 100, sortable: true, align: 'right' },
-    { key: 'postPct', label: 'Post %', width: 100, sortable: true, align: 'right' },
-    { key: 'delta', label: 'Δ', width: 100, sortable: true, align: 'right' },
-  ],
+  defaultSort: { key: 'postShares_shares', dir: 'desc' },
+  columns: dilutionCols.value as any,
 })
 
+watch(dilutionCols, (cols) => {
+  const widthMap: Record<string, number> = {}
+  for (const c of dilutionTable.cols) widthMap[c.key] = c.width
+  const next = cols.map(c => ({ ...c, width: widthMap[c.key] ?? c.width }))
+  dilutionTable.cols.splice(0, dilutionTable.cols.length, ...(next as any))
+  if (!dilutionTable.cols.find(c => c.key === dilutionTable.sort.key)) {
+    dilutionTable.sort.key = 'postShares_shares'
+  }
+}, { immediate: true })
+
 const sortedDilution = computed(() => {
-  const denom = compute.value?.round?.postRoundFDS || 0
-  const preDenom = compute.value?.round?.preRoundFDS || 0
-  const pps = compute.value?.round?.pricePerShare || 0
   const rows = (compute.value?.dilution || []).map((r: any) => ({
     ...r,
     delta: r.postPct - r.prePct,
   }))
   const k = dilutionTable.sort.key
   const sign = dilutionTable.sort.dir === 'asc' ? 1 : -1
+  const baseKey = k === 'name' || k === 'delta' ? k : k.replace(/_(shares|pct|value)$/, '')
   return [...rows].sort((a, b) => {
-    let av: number | string, bv: number | string
-    if (k === 'name') { av = a.name; bv = b.name }
-    else if (k === 'preShares') { av = compareValue(a.preShares, preDenom, pps); bv = compareValue(b.preShares, preDenom, pps) }
-    else if (k === 'cnShares') { av = compareValue(a.cnShares, denom, pps); bv = compareValue(b.cnShares, denom, pps) }
-    else if (k === 'postShares') { av = compareValue(a.postShares, denom, pps); bv = compareValue(b.postShares, denom, pps) }
-    else { av = (a as any)[k] ?? 0; bv = (b as any)[k] ?? 0 }
+    const av = (a as any)[baseKey], bv = (b as any)[baseKey]
+    if (av == null && bv == null) return 0
+    if (av == null) return 1
+    if (bv == null) return -1
     if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sign
     return String(av).localeCompare(String(bv), 'en', { numeric: true }) * sign
   })
@@ -159,18 +182,57 @@ const sortedDilution = computed(() => {
 const dilutionWidth = computed(() => dilutionTable.cols.reduce((s, c) => s + c.width, 0))
 
 // ---------- CN detail table ----------
-const cnDetailTable = useSortableTable({
-  key: 'capstack:cn-detail',
-  defaultSort: { key: 'shares', dir: 'desc' },
-  columns: [
+const cnDetailUnits = useTableUnits('capstack:cn-detail:units')
+
+interface CnCol { key: string; label: string; width: number; sortable: boolean; align: 'left' | 'right'; baseKey?: string; unit?: 'shares' | 'pct' | 'value' }
+
+const cnDetailCols = computed<CnCol[]>(() => {
+  const cols: CnCol[] = [
     { key: 'stakeholderName', label: 'Holder', width: 200, sortable: true, align: 'left' },
     { key: 'dollars', label: 'Dollars', width: 130, sortable: true, align: 'right' },
     { key: 'convPrice', label: 'Conv. price', width: 130, sortable: true, align: 'right' },
-    { key: 'shares', label: 'Shares', width: 130, sortable: true, align: 'right' },
-    { key: 'basisApplied', label: 'Basis', width: 100, sortable: true, align: 'left' },
-  ],
+  ]
+  for (const u of cnDetailUnits.selected.value) {
+    cols.push({
+      key: `shares_${u}`, baseKey: 'shares', unit: u,
+      label: `Resulting${unitSuffix(u)}`,
+      width: u === 'shares' ? 130 : 110, sortable: true, align: 'right',
+    })
+  }
+  cols.push({ key: 'basisApplied', label: 'Basis', width: 100, sortable: true, align: 'left' })
+  return cols
 })
-const sortedCnDetails = computed(() => cnDetailTable.applySort(compute.value?.round?.cnDetails || []))
+
+const cnDetailTable = useSortableTable({
+  key: 'capstack:cn-detail',
+  defaultSort: { key: 'shares_shares', dir: 'desc' },
+  columns: cnDetailCols.value as any,
+})
+
+watch(cnDetailCols, (cols) => {
+  const widthMap: Record<string, number> = {}
+  for (const c of cnDetailTable.cols) widthMap[c.key] = c.width
+  const next = cols.map(c => ({ ...c, width: widthMap[c.key] ?? c.width }))
+  cnDetailTable.cols.splice(0, cnDetailTable.cols.length, ...(next as any))
+  if (!cnDetailTable.cols.find(c => c.key === cnDetailTable.sort.key)) {
+    cnDetailTable.sort.key = 'shares_shares'
+  }
+}, { immediate: true })
+
+const sortedCnDetails = computed(() => {
+  const rows = compute.value?.round?.cnDetails || []
+  const k = cnDetailTable.sort.key
+  const sign = cnDetailTable.sort.dir === 'asc' ? 1 : -1
+  const baseKey = k.replace(/_(shares|pct|value)$/, '')
+  return [...rows].sort((a: any, b: any) => {
+    const av = a[baseKey], bv = b[baseKey]
+    if (av == null && bv == null) return 0
+    if (av == null) return 1
+    if (bv == null) return -1
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sign
+    return String(av).localeCompare(String(bv), 'en', { numeric: true }) * sign
+  })
+})
 
 function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
   if (table.sort.key !== key) return null
@@ -282,16 +344,16 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
           <div v-if="compute" class="grid grid-cols-2 md:grid-cols-3 gap-3">
             <UiStat label="Price per share" :value="fmtPricePerShare(compute.round.pricePerShare)" emphasis />
             <UiStat label="Post-money" :value="fmtUSD(compute.round.postMoney)" emphasis />
-            <UiStat label="Post-round FDS" :value="fmtShare(compute.round.postRoundFDS, compute.round.postRoundFDS, compute.round.pricePerShare)" emphasis />
-            <UiStat label="Pre-round FDS" :value="fmtShare(compute.round.preRoundFDS, compute.round.preRoundFDS, compute.round.pricePerShare)" :hint="usingOverride ? 'override' : 'from cap table'" />
-            <UiStat label="New preferred shares" :value="fmtShare(compute.round.newPreferredShares, compute.round.postRoundFDS, compute.round.pricePerShare)" />
-            <UiStat label="CN conversion shares" :value="fmtShare(compute.round.cnConvertedShares, compute.round.postRoundFDS, compute.round.pricePerShare)" :hint="compute.round.cnConvertedDollars ? `from ${fmtUSD(compute.round.cnConvertedDollars)}` : ''" />
+            <UiStat label="Post-round FDS" :value="fmtShares(compute.round.postRoundFDS)" emphasis />
+            <UiStat label="Pre-round FDS" :value="fmtShares(compute.round.preRoundFDS)" :hint="usingOverride ? 'override' : 'from cap table'" />
+            <UiStat label="New preferred shares" :value="fmtShares(compute.round.newPreferredShares)" />
+            <UiStat label="CN conversion shares" :value="fmtShares(compute.round.cnConvertedShares)" :hint="compute.round.cnConvertedDollars ? `from ${fmtUSD(compute.round.cnConvertedDollars)}` : ''" />
             <UiStat label="Valuation at post-FDS" :value="fmtUSD(compute.round.impliedPostFDSValuation)" hint="PPS × post-FDS (incl. CN dilution)" class="md:col-span-2" />
             <UiStat
               v-if="compute.round.deferred?.totalDollars"
               label="Deferred CN obligation"
               :value="fmtUSD(compute.round.deferred.totalDollars)"
-              :hint="`${fmtShare(compute.round.deferred.projectedSharesAtRoundPPS, compute.round.postRoundFDS, compute.round.pricePerShare)} at round PPS`"
+              :hint="`${fmtShares(compute.round.deferred.projectedSharesAtRoundPPS)} at round PPS`"
               tone="warn"
             />
           </div>
@@ -299,10 +361,13 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
 
         <!-- Convertible-note conversion detail -->
         <div v-if="compute?.round.cnDetails?.length">
-          <h2 class="text-[11px] font-semibold uppercase tracking-wider text-ink-500 mb-2">
-            CN conversion detail
-            <span class="text-ink-400 font-normal normal-case ml-1">— notes converting at this round</span>
-          </h2>
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="text-[11px] font-semibold uppercase tracking-wider text-ink-500">
+              CN conversion detail
+              <span class="text-ink-400 font-normal normal-case ml-1">— notes converting at this round</span>
+            </h2>
+            <TableUnitsToggle storage-key="capstack:cn-detail:units" />
+          </div>
           <div class="rounded-lg border border-ink-300 bg-white shadow-card overflow-hidden">
             <div class="overflow-x-auto">
               <table class="w-full text-sm border-separate" style="border-spacing: 0; table-layout: fixed; min-width: 700px;">
@@ -329,15 +394,17 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                 </thead>
                 <tbody class="num">
                   <tr v-for="d in sortedCnDetails" :key="d.id" class="hover:bg-accent-50/40 transition-colors">
-                    <td class="px-3 py-2 text-ink-900 border-b border-ink-200 truncate" :title="d.stakeholderName">{{ d.stakeholderName }}</td>
-                    <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtUSD(d.dollars) }}</td>
-                    <td class="px-3 py-2 text-right text-ink-700 border-b border-ink-200">{{ fmtPricePerShare(d.convPrice) }}</td>
-                    <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtShare(d.shares, compute.round.postRoundFDS, compute.round.pricePerShare) }}</td>
-                    <td class="px-3 py-2 text-[11px] uppercase tracking-wide border-b border-ink-200" :class="{
-                      'text-emerald-700': d.basisApplied === 'discount',
-                      'text-amber-700': d.basisApplied === 'cap',
-                      'text-ink-600': d.basisApplied === 'round',
-                    }">{{ d.basisApplied }}</td>
+                    <template v-for="c in cnDetailTable.cols" :key="c.key">
+                      <td v-if="c.key === 'stakeholderName'" class="px-3 py-2 text-ink-900 border-b border-ink-200 truncate" :title="d.stakeholderName">{{ d.stakeholderName }}</td>
+                      <td v-else-if="c.key === 'dollars'" class="px-3 py-2 text-right border-b border-ink-200">{{ fmtUSD(d.dollars) }}</td>
+                      <td v-else-if="c.key === 'convPrice'" class="px-3 py-2 text-right text-ink-700 border-b border-ink-200">{{ fmtPricePerShare(d.convPrice) }}</td>
+                      <td v-else-if="c.baseKey === 'shares'" class="px-3 py-2 text-right border-b border-ink-200">{{ formatBy(c.unit!, d.shares, compute.round.postRoundFDS, compute.round.pricePerShare) }}</td>
+                      <td v-else-if="c.key === 'basisApplied'" class="px-3 py-2 text-[11px] uppercase tracking-wide border-b border-ink-200" :class="{
+                        'text-emerald-700': d.basisApplied === 'discount',
+                        'text-amber-700': d.basisApplied === 'cap',
+                        'text-ink-600': d.basisApplied === 'round',
+                      }">{{ d.basisApplied }}</td>
+                    </template>
                   </tr>
                 </tbody>
               </table>
@@ -364,12 +431,12 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                 <tr v-for="d in compute.round.deferred.details" :key="d.id" class="border-t border-amber-200/60">
                   <td class="px-2 py-1.5 text-ink-900">{{ d.stakeholderName }}</td>
                   <td class="px-2 py-1.5 text-right">{{ fmtUSD(d.dollars) }}</td>
-                  <td class="px-2 py-1.5 text-right">{{ fmtShare(d.shares, compute.round.postRoundFDS, compute.round.pricePerShare) }}</td>
+                  <td class="px-2 py-1.5 text-right">{{ fmtShares(d.shares) }}</td>
                 </tr>
                 <tr class="border-t-2 border-amber-300 font-semibold text-ink-900">
                   <td class="px-2 py-1.5">Total</td>
                   <td class="px-2 py-1.5 text-right">{{ fmtUSD(compute.round.deferred.totalDollars) }}</td>
-                  <td class="px-2 py-1.5 text-right">{{ fmtShare(compute.round.deferred.projectedSharesAtRoundPPS, compute.round.postRoundFDS, compute.round.pricePerShare) }}</td>
+                  <td class="px-2 py-1.5 text-right">{{ fmtShares(compute.round.deferred.projectedSharesAtRoundPPS) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -397,7 +464,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
           Per-stakeholder dilution
           <span class="text-ink-400 font-normal normal-case ml-1">— {{ compute.dilution.length }} stakeholders. Click headers to sort, drag edges to resize.</span>
         </h2>
-        <span class="text-xs text-ink-500">Unit: <span class="text-ink-900 font-medium">{{ unit === 'shares' ? 'shares' : unit === 'pct' ? '% of FDS' : '$ value' }}</span></span>
+        <TableUnitsToggle storage-key="capstack:dilution:units" />
       </div>
       <div class="rounded-lg border border-ink-300 bg-white shadow-card overflow-hidden">
         <div class="overflow-x-auto">
@@ -425,15 +492,15 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
             </thead>
             <tbody class="num">
               <tr v-for="r in sortedDilution" :key="r.stakeholderId" class="hover:bg-accent-50/40 transition-colors">
-                <td class="px-3 py-2 font-medium text-ink-900 truncate border-b border-ink-200" :title="r.name">{{ r.name }}</td>
-                <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtShare(r.preShares, compute.round.preRoundFDS, compute.round.pricePerShare) }}</td>
-                <td class="px-3 py-2 text-right border-b border-ink-200">{{ r.cnShares ? fmtShare(r.cnShares, compute.round.postRoundFDS, compute.round.pricePerShare) : '—' }}</td>
-                <td class="px-3 py-2 text-right font-medium border-b border-ink-200 text-ink-900">{{ fmtShare(r.postShares, compute.round.postRoundFDS, compute.round.pricePerShare) }}</td>
-                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtPct(r.prePct, 2) }}</td>
-                <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtPct(r.postPct, 2) }}</td>
-                <td class="px-3 py-2 text-right border-b border-ink-200 font-medium" :class="r.delta < 0 ? 'text-red-600' : 'text-emerald-600'">
-                  {{ (r.delta >= 0 ? '+' : '') + fmtPct(r.delta, 2) }}
-                </td>
+                <template v-for="col in dilutionTable.cols" :key="col.key">
+                  <td v-if="col.key === 'name'" class="px-3 py-2 font-medium text-ink-900 truncate border-b border-ink-200" :title="r.name">{{ r.name }}</td>
+                  <td v-else-if="col.key === 'delta'" class="px-3 py-2 text-right border-b border-ink-200 font-medium" :class="r.delta < 0 ? 'text-red-600' : 'text-emerald-600'">
+                    {{ (r.delta >= 0 ? '+' : '') + fmtPct(r.delta, 2) }}
+                  </td>
+                  <td v-else-if="col.baseKey === 'preShares'" class="px-3 py-2 text-right border-b border-ink-200">{{ formatBy(col.unit!, r.preShares, compute.round.preRoundFDS, compute.round.pricePerShare) }}</td>
+                  <td v-else-if="col.baseKey === 'cnShares'" class="px-3 py-2 text-right border-b border-ink-200">{{ r.cnShares ? formatBy(col.unit!, r.cnShares, compute.round.postRoundFDS, compute.round.pricePerShare) : '—' }}</td>
+                  <td v-else-if="col.baseKey === 'postShares'" class="px-3 py-2 text-right font-medium border-b border-ink-200 text-ink-900">{{ formatBy(col.unit!, r.postShares, compute.round.postRoundFDS, compute.round.pricePerShare) }}</td>
+                </template>
               </tr>
             </tbody>
           </table>

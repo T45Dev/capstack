@@ -14,9 +14,11 @@ interface Convertible { id: string; stakeholder_name: string; principal: number;
 const { data, refresh } = await useFetch<{ share_classes: ShareClassRow[]; stakeholders: Stakeholder[]; holdings: Holding[]; grants: Grant[]; convertibles: Convertible[]; pools: any[]; current_pps: number }>(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => ({ share_classes: [], stakeholders: [], holdings: [], grants: [], convertibles: [], pools: [], current_pps: 0 } as any) })
 
 const query = ref('')
-const { format: fmtShare, compareValue, unit } = useShareUnit()
-
 const currentPPS = computed(() => data.value?.current_pps || 0)
+
+// Per-table unit visibility.
+const scUnits = useTableUnits('capstack:cap-table:share-classes:units')
+const holdUnits = useTableUnits('capstack:cap-table:holdings:units')
 
 // Build pivoted rows: stakeholder × share class + outstanding options
 interface PivotRow {
@@ -97,31 +99,60 @@ const poolAvailable = computed(() => Math.max(0, poolAuthorized.value - totals.v
 const fdsIncludingPool = computed(() => totals.value.fds + poolAvailable.value)
 
 // ----- Share classes table (sortable + resizable) -----
-const shareClassTable = useSortableTable({
-  key: 'capstack:cap-table:share-classes',
-  defaultSort: { key: 'seniority', dir: 'asc' },
-  columns: [
+// "Issued" + "Authorized" each unfold into up to 3 sub-columns
+// (shares / % / $) depending on which units the user has toggled on.
+interface ScCol { key: string; label: string; width: number; sortable: boolean; align: 'left' | 'right'; baseKey?: string; unit?: 'shares' | 'pct' | 'value' }
+
+const shareClassCols = computed<ScCol[]>(() => {
+  const cols: ScCol[] = [
     { key: 'code', label: 'Code', width: 90, sortable: true, align: 'left' },
     { key: 'name', label: 'Name', width: 220, sortable: true, align: 'left' },
     { key: 'kind', label: 'Kind', width: 100, sortable: true, align: 'left' },
-    { key: 'issued', label: 'Issued', width: 150, sortable: true, align: 'right' },
-    { key: 'authorized', label: 'Authorized', width: 140, sortable: true, align: 'right' },
-    { key: 'issue_price', label: 'PPS', width: 110, sortable: true, align: 'right' },
-    { key: 'pct', label: '% FDS', width: 90, sortable: true, align: 'right' },
-  ],
+  ]
+  for (const u of scUnits.selected.value) {
+    cols.push({
+      key: `issued_${u}`, baseKey: 'issued', unit: u,
+      label: `Issued${unitSuffix(u)}`, width: 130, sortable: true, align: 'right',
+    })
+  }
+  for (const u of scUnits.selected.value) {
+    cols.push({
+      key: `authorized_${u}`, baseKey: 'authorized', unit: u,
+      label: `Authorized${unitSuffix(u)}`, width: 130, sortable: true, align: 'right',
+    })
+  }
+  cols.push({ key: 'issue_price', label: 'PPS', width: 110, sortable: true, align: 'right' })
+  return cols
 })
+
+const shareClassTable = useSortableTable({
+  key: 'capstack:cap-table:share-classes',
+  defaultSort: { key: 'seniority', dir: 'asc' },
+  columns: shareClassCols.value as any,
+})
+
+// Rebuild columns on toggle change, preserving any widths the user has adjusted.
+watch(shareClassCols, (cols) => {
+  const widthMap: Record<string, number> = {}
+  for (const c of shareClassTable.cols) widthMap[c.key] = c.width
+  const next = cols.map(c => ({ ...c, width: widthMap[c.key] ?? c.width }))
+  shareClassTable.cols.splice(0, shareClassTable.cols.length, ...(next as any))
+}, { immediate: true })
 
 const sortedShareClasses = computed(() => {
   const rows = (data.value?.share_classes || []).map((sc: any) => ({
     ...sc,
     issued: totals.value.byClass[sc.id] || 0,
-    pct: fdsIncludingPool.value > 0 ? (totals.value.byClass[sc.id] || 0) / fdsIncludingPool.value : 0,
     seniority: sc.seniority || 0,
   }))
   const k = shareClassTable.sort.key
   const sign = shareClassTable.sort.dir === 'asc' ? 1 : -1
+  // Unit-variant sort keys all collapse to the same underlying base value.
+  const baseKey = k.startsWith('issued_') ? 'issued'
+    : k.startsWith('authorized_') ? 'authorized'
+    : k
   return [...rows].sort((a, b) => {
-    const av = (a as any)[k], bv = (b as any)[k]
+    const av = (a as any)[baseKey], bv = (b as any)[baseKey]
     if (av == null && bv == null) return 0
     if (av == null) return 1
     if (bv == null) return -1
@@ -131,53 +162,81 @@ const sortedShareClasses = computed(() => {
 })
 
 // ----- Holdings pivot table (sortable + resizable) -----
-// Columns are dynamic — one per share class + options + cn $ + fds.
-const holdingsCols = computed(() => {
-  const cols: Array<{ key: string; label: string; width: number; sortable: boolean; align: 'left' | 'right' }> = [
+// Each "share-quantity" metric (per share-class, Options, FDS) unfolds into
+// 1-3 sub-columns based on which units the user has selected. CN ($) is a
+// dollar-only column and always renders the same way.
+interface HoldCol { key: string; label: string; width: number; sortable: boolean; align: 'left' | 'right'; baseKey?: string; unit?: 'shares' | 'pct' | 'value' }
+
+const holdingsCols = computed<HoldCol[]>(() => {
+  const cols: HoldCol[] = [
     { key: 'name', label: 'Stakeholder', width: 220, sortable: true, align: 'left' },
   ]
   for (const sc of (data.value?.share_classes || [])) {
-    cols.push({ key: `class_${sc.id}`, label: sc.code, width: 110, sortable: true, align: 'right' })
+    for (const u of holdUnits.selected.value) {
+      cols.push({
+        key: `class_${sc.id}_${u}`, baseKey: `class_${sc.id}`, unit: u,
+        label: `${sc.code}${unitSuffix(u)}`,
+        width: u === 'shares' ? 110 : 95, sortable: true, align: 'right',
+      })
+    }
   }
-  cols.push({ key: 'optionShares', label: 'Options', width: 110, sortable: true, align: 'right' })
+  for (const u of holdUnits.selected.value) {
+    cols.push({
+      key: `optionShares_${u}`, baseKey: 'optionShares', unit: u,
+      label: `Options${unitSuffix(u)}`,
+      width: u === 'shares' ? 110 : 95, sortable: true, align: 'right',
+    })
+  }
   cols.push({ key: 'cnDollars', label: 'CN ($)', width: 110, sortable: true, align: 'right' })
-  cols.push({ key: 'fds', label: 'FDS', width: 130, sortable: true, align: 'right' })
+  for (const u of holdUnits.selected.value) {
+    cols.push({
+      key: `fds_${u}`, baseKey: 'fds', unit: u,
+      label: `FDS${unitSuffix(u)}`,
+      width: u === 'shares' ? 130 : 105, sortable: true, align: 'right',
+    })
+  }
   return cols
 })
 
 const holdingsTable = useSortableTable({
   key: 'capstack:cap-table:holdings',
-  defaultSort: { key: 'fds', dir: 'desc' },
+  defaultSort: { key: 'fds_shares', dir: 'desc' },
   columns: holdingsCols.value as any,
 })
 
-// Keep table cols in sync when share classes change
-// Rebuild table columns in the correct order whenever share classes change,
-// preserving any widths the user has already adjusted.
+// Rebuild on share-class or toggle change, preserving widths where possible.
 watch(holdingsCols, (cols) => {
   const widthMap: Record<string, number> = {}
   for (const c of holdingsTable.cols) widthMap[c.key] = c.width
   const next = cols.map(c => ({ ...c, width: widthMap[c.key] ?? c.width }))
   holdingsTable.cols.splice(0, holdingsTable.cols.length, ...(next as any))
+  // If the sorted column was removed by a toggle change, fall back to FDS shares.
+  if (!holdingsTable.cols.find(c => c.key === holdingsTable.sort.key)) {
+    holdingsTable.sort.key = 'fds_shares'
+  }
 }, { immediate: true })
 
+function holdingBase(row: any, baseKey: string): number {
+  if (baseKey === 'optionShares') return row.optionShares
+  if (baseKey === 'fds') return row.fds
+  if (baseKey === 'cnDollars') return row.cnDollars
+  if (baseKey.startsWith('class_')) return row.byClass[baseKey.slice(6)] || 0
+  return 0
+}
+
 const sortedPivot = computed(() => {
-  const denom = fdsIncludingPool.value
-  const pps = currentPPS.value
   const k = holdingsTable.sort.key
   const sign = holdingsTable.sort.dir === 'asc' ? 1 : -1
+  // All unit variants of a metric sort identically (they're linear transforms
+  // of the same base value), so collapse to the base key for sorting.
+  const baseKey = k === 'name' || k === 'cnDollars'
+    ? k
+    : k.replace(/_(shares|pct|value)$/, '')
 
   return [...pivot.value].sort((a, b) => {
     let av: number | string, bv: number | string
-    if (k === 'name') { av = a.name; bv = b.name }
-    else if (k === 'optionShares') { av = compareValue(a.optionShares, denom, pps); bv = compareValue(b.optionShares, denom, pps) }
-    else if (k === 'cnDollars') { av = a.cnDollars; bv = b.cnDollars }
-    else if (k === 'fds') { av = compareValue(a.fds, denom, pps); bv = compareValue(b.fds, denom, pps) }
-    else if (k.startsWith('class_')) {
-      const scId = k.slice(6)
-      av = compareValue(a.byClass[scId] || 0, denom, pps)
-      bv = compareValue(b.byClass[scId] || 0, denom, pps)
-    } else { av = 0; bv = 0 }
+    if (baseKey === 'name') { av = a.name; bv = b.name }
+    else { av = holdingBase(a, baseKey); bv = holdingBase(b, baseKey) }
     if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sign
     return String(av).localeCompare(String(bv), 'en', { numeric: true }) * sign
   })
@@ -298,8 +357,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
       <div>
         <h1 class="text-2xl font-semibold tracking-tight text-ink-900">Cap table</h1>
         <p class="text-sm text-ink-600 mt-1">
-          Stakeholders × share classes. Display unit:
-          <span class="font-medium text-ink-900">{{ unit === 'shares' ? 'shares' : (unit === 'pct' ? '% of FDS' : `$ at ${fmtPricePerShare(currentPPS)}`) }}</span>.
+          Stakeholders × share classes. Toggle Shares / % FDS / $ per table — % uses FDS (incl. pool); $ uses the latest PPS ({{ fmtPricePerShare(currentPPS) }}).
         </p>
       </div>
       <div class="flex items-center gap-2 flex-wrap">
@@ -324,6 +382,9 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
     <div v-else class="space-y-6">
       <!-- Share classes -->
       <UiCard title="Share classes" :subtitle="`${data.share_classes.length} classes — click headers to sort, drag edges to resize`" :padded="false">
+        <template #header>
+          <TableUnitsToggle storage-key="capstack:cap-table:share-classes:units" />
+        </template>
         <div class="overflow-x-auto">
           <table class="text-sm border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
@@ -349,29 +410,36 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
             </thead>
             <tbody class="num">
               <tr v-for="sc in sortedShareClasses" :key="sc.id" class="hover:bg-accent-50/40 transition-colors">
-                <td class="px-3 py-2 font-mono text-xs border-b border-ink-200 text-ink-800">{{ sc.code }}</td>
-                <td class="px-3 py-2 border-b border-ink-200 text-ink-900 truncate" :title="sc.name">{{ sc.name }}</td>
-                <td class="px-3 py-2 text-[11px] uppercase tracking-wide text-ink-500 border-b border-ink-200">{{ sc.kind }}</td>
-                <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtShare(sc.issued, fdsIncludingPool, sc.issue_price || currentPPS) }}</td>
-                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ sc.authorized ? fmtShare(sc.authorized, fdsIncludingPool, sc.issue_price || currentPPS) : '—' }}</td>
-                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtPricePerShare(sc.issue_price) }}</td>
-                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtPct(sc.pct, 2) }}</td>
+                <template v-for="c in shareClassTable.cols" :key="c.key">
+                  <td v-if="c.key === 'code'"  class="px-3 py-2 font-mono text-xs border-b border-ink-200 text-ink-800">{{ sc.code }}</td>
+                  <td v-else-if="c.key === 'name'"  class="px-3 py-2 border-b border-ink-200 text-ink-900 truncate" :title="sc.name">{{ sc.name }}</td>
+                  <td v-else-if="c.key === 'kind'"  class="px-3 py-2 text-[11px] uppercase tracking-wide text-ink-500 border-b border-ink-200">{{ sc.kind }}</td>
+                  <td v-else-if="c.key === 'issue_price'"  class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtPricePerShare(sc.issue_price) }}</td>
+                  <td v-else-if="c.baseKey === 'issued'"  class="px-3 py-2 text-right border-b border-ink-200">{{ formatBy(c.unit!, sc.issued, fdsIncludingPool, sc.issue_price || currentPPS) }}</td>
+                  <td v-else-if="c.baseKey === 'authorized'"  class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ sc.authorized ? formatBy(c.unit!, sc.authorized, fdsIncludingPool, sc.issue_price || currentPPS) : '—' }}</td>
+                </template>
               </tr>
               <tr class="bg-ink-100/60 font-medium">
-                <td class="px-3 py-2 border-b border-ink-200 text-ink-700">Pool</td>
-                <td class="px-3 py-2 border-b border-ink-200 text-ink-700">Option pool authorized</td>
-                <td class="px-3 py-2 border-b border-ink-200"></td>
-                <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtShare(totals.totalOptions, fdsIncludingPool, currentPPS) }}<span class="text-[10px] text-ink-500 ml-1">attributed</span></td>
-                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtShare(poolAuthorized, fdsIncludingPool, currentPPS) }}</td>
-                <td class="px-3 py-2 border-b border-ink-200"></td>
-                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fdsIncludingPool ? fmtPct((totals.totalOptions + poolAvailable) / fdsIncludingPool, 2) : '—' }}</td>
+                <template v-for="(c, idx) in shareClassTable.cols" :key="c.key">
+                  <td v-if="c.key === 'code'"  class="px-3 py-2 border-b border-ink-200 text-ink-700">Pool</td>
+                  <td v-else-if="c.key === 'name'"  class="px-3 py-2 border-b border-ink-200 text-ink-700">Option pool authorized</td>
+                  <td v-else-if="c.key === 'kind'"  class="px-3 py-2 border-b border-ink-200"></td>
+                  <td v-else-if="c.key === 'issue_price'"  class="px-3 py-2 border-b border-ink-200"></td>
+                  <td v-else-if="c.baseKey === 'issued'"  class="px-3 py-2 text-right border-b border-ink-200">
+                    {{ formatBy(c.unit!, totals.totalOptions, fdsIncludingPool, currentPPS) }}<span class="text-[10px] text-ink-500 ml-1">attributed</span>
+                  </td>
+                  <td v-else-if="c.baseKey === 'authorized'"  class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ formatBy(c.unit!, poolAuthorized, fdsIncludingPool, currentPPS) }}</td>
+                </template>
               </tr>
               <tr class="font-semibold bg-ink-100 text-ink-900">
-                <td class="px-3 py-2" colspan="3">Fully-diluted shares</td>
-                <td class="px-3 py-2 text-right">{{ fmtShare(fdsIncludingPool, fdsIncludingPool, currentPPS) }}</td>
-                <td class="px-3 py-2"></td>
-                <td class="px-3 py-2"></td>
-                <td class="px-3 py-2 text-right">{{ fmtPct(1, 0) }}</td>
+                <template v-for="c in shareClassTable.cols" :key="c.key">
+                  <td v-if="c.key === 'code'"  class="px-3 py-2">FDS</td>
+                  <td v-else-if="c.key === 'name'"  class="px-3 py-2">Fully-diluted shares</td>
+                  <td v-else-if="c.key === 'kind'"  class="px-3 py-2"></td>
+                  <td v-else-if="c.key === 'issue_price'"  class="px-3 py-2"></td>
+                  <td v-else-if="c.baseKey === 'issued'"  class="px-3 py-2 text-right">{{ formatBy(c.unit!, fdsIncludingPool, fdsIncludingPool, currentPPS) }}</td>
+                  <td v-else-if="c.baseKey === 'authorized'"  class="px-3 py-2 text-right">—</td>
+                </template>
               </tr>
             </tbody>
           </table>
@@ -380,6 +448,9 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
 
       <!-- Stakeholder holdings -->
       <UiCard title="Stakeholder holdings" :subtitle="`${pivot.length} positions`" :padded="false">
+        <template #header>
+          <TableUnitsToggle storage-key="capstack:cap-table:holdings:units" />
+        </template>
         <div class="overflow-x-auto">
           <table class="text-sm border-separate" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: holdingsWidth + 'px' }">
             <colgroup>
@@ -405,27 +476,26 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
             </thead>
             <tbody class="num">
               <tr v-for="r in sortedPivot" :key="r.stakeholderId" class="hover:bg-accent-50/40 transition-colors">
-                <td class="px-3 py-2 font-medium text-ink-900 border-b border-ink-200 truncate" :title="r.name">{{ r.name }}</td>
-                <td v-for="sc in data.share_classes" :key="sc.id" class="px-3 py-2 text-right border-b border-ink-200">
-                  <span v-if="r.byClass[sc.id]">{{ fmtShare(r.byClass[sc.id], fdsIncludingPool, currentPPS) }}</span>
-                  <span v-else class="text-ink-400">—</span>
-                </td>
-                <td class="px-3 py-2 text-right border-b border-ink-200">
-                  <span v-if="r.optionShares">{{ fmtShare(r.optionShares, fdsIncludingPool, currentPPS) }}</span>
-                  <span v-else class="text-ink-400">—</span>
-                </td>
-                <td class="px-3 py-2 text-right border-b border-ink-200">
-                  <span v-if="r.cnDollars" class="text-ink-800">{{ fmtUSD(r.cnDollars) }}</span>
-                  <span v-else class="text-ink-400">—</span>
-                </td>
-                <td class="px-3 py-2 text-right font-medium border-b border-ink-200 text-ink-900">{{ fmtShare(r.fds, fdsIncludingPool, currentPPS) }}</td>
+                <template v-for="c in holdingsTable.cols" :key="c.key">
+                  <td v-if="c.key === 'name'" class="px-3 py-2 font-medium text-ink-900 border-b border-ink-200 truncate" :title="r.name">{{ r.name }}</td>
+                  <td v-else-if="c.key === 'cnDollars'" class="px-3 py-2 text-right border-b border-ink-200">
+                    <span v-if="r.cnDollars" class="text-ink-800">{{ fmtUSD(r.cnDollars) }}</span>
+                    <span v-else class="text-ink-400">—</span>
+                  </td>
+                  <td v-else class="px-3 py-2 text-right border-b border-ink-200" :class="c.baseKey === 'fds' ? 'font-medium text-ink-900' : ''">
+                    <template v-if="holdingBase(r, c.baseKey!)">{{ formatBy(c.unit!, holdingBase(r, c.baseKey!), fdsIncludingPool, currentPPS) }}</template>
+                    <span v-else class="text-ink-400">—</span>
+                  </td>
+                </template>
               </tr>
               <tr class="text-ink-900 font-semibold num bg-ink-100">
-                <td class="px-3 py-2 border-t-2 border-ink-300">Total</td>
-                <td v-for="sc in data.share_classes" :key="sc.id" class="px-3 py-2 text-right border-t-2 border-ink-300">{{ fmtShare(totals.byClass[sc.id] || 0, fdsIncludingPool, currentPPS) }}</td>
-                <td class="px-3 py-2 text-right border-t-2 border-ink-300">{{ fmtShare(totals.totalOptions, fdsIncludingPool, currentPPS) }}</td>
-                <td class="px-3 py-2 text-right border-t-2 border-ink-300">{{ fmtUSD(totals.totalCNDollars) }}</td>
-                <td class="px-3 py-2 text-right border-t-2 border-ink-300">{{ fmtShare(totals.fds, fdsIncludingPool, currentPPS) }}</td>
+                <template v-for="c in holdingsTable.cols" :key="c.key">
+                  <td v-if="c.key === 'name'" class="px-3 py-2 border-t-2 border-ink-300">Total</td>
+                  <td v-else-if="c.key === 'cnDollars'" class="px-3 py-2 text-right border-t-2 border-ink-300">{{ fmtUSD(totals.totalCNDollars) }}</td>
+                  <td v-else-if="c.baseKey === 'fds'" class="px-3 py-2 text-right border-t-2 border-ink-300">{{ formatBy(c.unit!, totals.fds, fdsIncludingPool, currentPPS) }}</td>
+                  <td v-else-if="c.baseKey === 'optionShares'" class="px-3 py-2 text-right border-t-2 border-ink-300">{{ formatBy(c.unit!, totals.totalOptions, fdsIncludingPool, currentPPS) }}</td>
+                  <td v-else-if="c.baseKey?.startsWith('class_')" class="px-3 py-2 text-right border-t-2 border-ink-300">{{ formatBy(c.unit!, totals.byClass[c.baseKey.slice(6)] || 0, fdsIncludingPool, currentPPS) }}</td>
+                </template>
               </tr>
             </tbody>
           </table>

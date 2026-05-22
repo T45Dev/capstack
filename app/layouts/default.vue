@@ -40,9 +40,6 @@ const tabs = computed(() => companyId.value ? [
         </div>
 
         <div class="flex-1" />
-        <ClientOnly>
-          <ShareUnitToggle />
-        </ClientOnly>
         <div class="text-xs text-ink-500">v{{ config.public.version }}</div>
       </div>
 

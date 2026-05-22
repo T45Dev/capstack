@@ -20,7 +20,7 @@ interface Scenario {
 const { data: scenarios, refresh } = await useFetch<Scenario[]>(() => `/api/companies/${id.value}/scenarios`, { watch: [id], default: () => [] })
 const { data: assumptions } = await useFetch(() => `/api/companies/${id.value}/assumptions`, { watch: [id] })
 
-const { format: fmtShare, compareValue, unit } = useShareUnit()
+const payoutUnits = useTableUnits('capstack:scenarios:payouts:units')
 
 const showCreate = ref(false)
 const form = reactive({
@@ -102,60 +102,63 @@ const { data: result } = await useFetch(() => selected.value ? `/api/scenarios/$
   default: () => null,
 })
 
-// Sortable exit-payout table
+// Sortable exit-payout table — Post shares unfolds per per-table toggle.
+interface PoutCol { key: string; label: string; width: number; sortable: boolean; align: 'left' | 'right'; baseKey?: string; unit?: 'shares' | 'pct' | 'value'; exitIdx?: number }
+
+const payoutCols = computed<PoutCol[]>(() => {
+  const cols: PoutCol[] = [
+    { key: 'name', label: 'Stakeholder', width: 220, sortable: true, align: 'left' },
+  ]
+  for (const u of payoutUnits.selected.value) {
+    cols.push({
+      key: `postShares_${u}`, baseKey: 'postShares', unit: u,
+      label: `Post${unitSuffix(u)}`,
+      width: u === 'shares' ? 140 : 110, sortable: true, align: 'right',
+    })
+  }
+  const exits = result.value?.exitValues || []
+  exits.forEach((ev: number, i: number) => {
+    cols.push({ key: `ev_${i}`, exitIdx: i, label: `Exit @ ${fmtUSD(ev)}`, width: 160, sortable: true, align: 'right' })
+  })
+  return cols
+})
+
 const payoutTable = useSortableTable({
   key: 'capstack:scenarios:payouts',
-  defaultSort: { key: 'postShares', dir: 'desc' },
-  columns: [
-    { key: 'name', label: 'Stakeholder', width: 220, sortable: true, align: 'left' },
-    { key: 'postShares', label: 'Post shares', width: 140, sortable: true, align: 'right' },
-    { key: 'postPct', label: '% Post-FDS', width: 110, sortable: true, align: 'right' },
-  ],
+  defaultSort: { key: 'postShares_shares', dir: 'desc' },
+  columns: payoutCols.value as any,
 })
+
+watch(payoutCols, (cols) => {
+  const widthMap: Record<string, number> = {}
+  for (const c of payoutTable.cols) widthMap[c.key] = c.width
+  const next = cols.map(c => ({ ...c, width: widthMap[c.key] ?? c.width }))
+  payoutTable.cols.splice(0, payoutTable.cols.length, ...(next as any))
+  if (!payoutTable.cols.find(c => c.key === payoutTable.sort.key)) payoutTable.sort.key = 'postShares_shares'
+}, { immediate: true })
 
 const sortedPayouts = computed(() => {
   const rows = result.value?.dilution || []
-  const postFDS = result.value?.round?.postRoundFDS || 0
-  const pps = result.value?.round?.pricePerShare || 0
   const k = payoutTable.sort.key
   const sign = payoutTable.sort.dir === 'asc' ? 1 : -1
-
-  if (k === 'name' || k === 'postPct') {
-    return [...rows].sort((a: any, b: any) => {
-      const av = a[k] ?? 0
-      const bv = b[k] ?? 0
-      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sign
-      return String(av).localeCompare(String(bv), 'en', { numeric: true }) * sign
-    })
-  }
-  if (k === 'postShares') {
-    return [...rows].sort((a: any, b: any) => (compareValue(a.postShares, postFDS, pps) - compareValue(b.postShares, postFDS, pps)) * sign)
-  }
-  // exit columns ev_0, ev_1, ev_2
   const m = /^ev_(\d+)$/.exec(k)
   if (m) {
     const idx = Number(m[1])
     return [...rows].sort((a: any, b: any) => ((a.exits?.[idx] || 0) - (b.exits?.[idx] || 0)) * sign)
   }
-  return rows
+  const baseKey = k === 'name' ? 'name' : k.replace(/_(shares|pct|value)$/, '')
+  return [...rows].sort((a: any, b: any) => {
+    const av = a[baseKey] ?? 0
+    const bv = b[baseKey] ?? 0
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sign
+    return String(av).localeCompare(String(bv), 'en', { numeric: true }) * sign
+  })
 })
 
 function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
   if (table.sort.key !== key) return null
   return table.sort.dir
 }
-
-// Add exit-value columns dynamically once result loads
-watch(result, (r) => {
-  if (!r) return
-  const exits = r.exitValues || []
-  // Drop any old ev_* columns
-  const keep = payoutTable.cols.filter(c => !c.key.startsWith('ev_'))
-  payoutTable.cols.splice(0, payoutTable.cols.length, ...keep)
-  exits.forEach((ev: number, i: number) => {
-    payoutTable.cols.push({ key: `ev_${i}`, label: `Exit @ ${fmtUSD(ev)}`, width: 160, sortable: true, align: 'right' })
-  })
-}, { immediate: true })
 
 const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width, 0))
 </script>
@@ -223,19 +226,22 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
               <UiStat label="New money" :value="fmtUSD(result.round.newMoney)" />
               <UiStat label="Post-money" :value="fmtUSD(result.round.postMoney)" emphasis />
               <UiStat label="Round PPS" :value="fmtPricePerShare(result.round.pricePerShare)" emphasis />
-              <UiStat label="Pre-round FDS" :value="fmtShare(result.round.preRoundFDS, result.round.preRoundFDS, result.round.pricePerShare)" />
-              <UiStat label="Pool top-up" :value="fmtShare(result.round.newPoolShares, result.round.postRoundFDS, result.round.pricePerShare)" />
-              <UiStat label="New preferred" :value="fmtShare(result.round.newPreferredShares, result.round.postRoundFDS, result.round.pricePerShare)" />
-              <UiStat label="Post-round FDS" :value="fmtShare(result.round.postRoundFDS, result.round.postRoundFDS, result.round.pricePerShare)" emphasis />
+              <UiStat label="Pre-round FDS" :value="fmtShares(result.round.preRoundFDS)" />
+              <UiStat label="Pool top-up" :value="fmtShares(result.round.newPoolShares)" />
+              <UiStat label="New preferred" :value="fmtShares(result.round.newPreferredShares)" />
+              <UiStat label="Post-round FDS" :value="fmtShares(result.round.postRoundFDS)" emphasis />
             </div>
           </div>
 
           <!-- Exit payout table -->
           <div>
-            <h3 class="text-[11px] font-semibold uppercase tracking-wider text-ink-500 mb-2">
-              Exit payouts
-              <span class="text-ink-400 font-normal normal-case ml-1">— per stakeholder, by exit valuation. Click headers to sort, drag edges to resize.</span>
-            </h3>
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="text-[11px] font-semibold uppercase tracking-wider text-ink-500">
+                Exit payouts
+                <span class="text-ink-400 font-normal normal-case ml-1">— per stakeholder, by exit valuation. Click headers to sort, drag edges to resize.</span>
+              </h3>
+              <TableUnitsToggle storage-key="capstack:scenarios:payouts:units" />
+            </div>
             <div class="rounded-lg border border-ink-300 bg-white shadow-card overflow-hidden">
               <div class="overflow-x-auto">
                 <table class="text-sm border-separate" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: payoutWidth + 'px' }">
@@ -262,10 +268,11 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
                   </thead>
                   <tbody class="num">
                     <tr v-for="r in sortedPayouts" :key="r.stakeholderId" class="hover:bg-accent-50/40 transition-colors">
-                      <td class="px-3 py-2 font-medium text-ink-900 border-b border-ink-200 truncate" :title="r.name">{{ r.name }}</td>
-                      <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtShare(r.postShares, result.round.postRoundFDS, result.round.pricePerShare) }}</td>
-                      <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtPct(r.postPct, 2) }}</td>
-                      <td v-for="(ev, i) in r.exits" :key="i" class="px-3 py-2 text-right border-b border-ink-200 text-ink-800">{{ fmtUSD(ev) }}</td>
+                      <template v-for="c in payoutTable.cols" :key="c.key">
+                        <td v-if="c.key === 'name'" class="px-3 py-2 font-medium text-ink-900 border-b border-ink-200 truncate" :title="r.name">{{ r.name }}</td>
+                        <td v-else-if="c.baseKey === 'postShares'" class="px-3 py-2 text-right border-b border-ink-200">{{ formatBy(c.unit!, r.postShares, result.round.postRoundFDS, result.round.pricePerShare) }}</td>
+                        <td v-else-if="c.exitIdx != null" class="px-3 py-2 text-right border-b border-ink-200 text-ink-800">{{ fmtUSD(r.exits?.[c.exitIdx] || 0) }}</td>
+                      </template>
                     </tr>
                   </tbody>
                 </table>

@@ -43,43 +43,83 @@ const fdsAnchor = computed(() => {
 })
 const ppsAnchor = computed(() => capTable.value?.current_pps || 0)
 
-const { format: fmtShare, compareValue } = useShareUnit()
+// Per-table unit toggles
+const outUnits  = useTableUnits('capstack:grants:outstanding:units')
+const propUnits = useTableUnits('capstack:grants:proposed:units')
 
-// Sortable tables
-const outstandingTable = useSortableTable({
-  key: 'capstack:grants:outstanding',
-  defaultSort: { key: 'quantity', dir: 'desc' },
-  columns: [
+interface GrCol { key: string; label: string; width: number; sortable: boolean; align: 'left' | 'right'; baseKey?: string; unit?: 'shares' | 'pct' | 'value' }
+
+const outstandingCols = computed<GrCol[]>(() => {
+  const cols: GrCol[] = [
     { key: 'recipient_name', label: 'Recipient', width: 200, sortable: true, align: 'left' },
     { key: 'recipient_type', label: 'Type', width: 110, sortable: true, align: 'left' },
     { key: 'round', label: 'Round', width: 140, sortable: true, align: 'left' },
-    { key: 'quantity', label: 'Quantity', width: 120, sortable: true, align: 'right' },
-    { key: 'strike', label: 'Strike', width: 100, sortable: true, align: 'right' },
-    { key: 'issue_date', label: 'Issued', width: 120, sortable: true, align: 'left' },
-    { key: 'vest', label: 'Vest', width: 140, sortable: true, align: 'right' },
-    { key: 'actions', label: '', width: 80, sortable: false, align: 'right' },
-  ],
+  ]
+  for (const u of outUnits.selected.value) {
+    cols.push({
+      key: `quantity_${u}`, baseKey: 'quantity', unit: u,
+      label: `Quantity${unitSuffix(u)}`,
+      width: u === 'shares' ? 120 : 100, sortable: true, align: 'right',
+    })
+  }
+  cols.push({ key: 'strike', label: 'Strike', width: 100, sortable: true, align: 'right' })
+  cols.push({ key: 'issue_date', label: 'Issued', width: 120, sortable: true, align: 'left' })
+  cols.push({ key: 'vest', label: 'Vest', width: 140, sortable: true, align: 'right' })
+  cols.push({ key: 'actions', label: '', width: 80, sortable: false, align: 'right' })
+  return cols
 })
-const proposedTable = useSortableTable({
-  key: 'capstack:grants:proposed',
-  defaultSort: { key: 'quantity', dir: 'desc' },
-  columns: [
+
+const proposedCols = computed<GrCol[]>(() => {
+  const cols: GrCol[] = [
     { key: 'recipient_name', label: 'Recipient', width: 200, sortable: true, align: 'left' },
     { key: 'recipient_type', label: 'Type', width: 110, sortable: true, align: 'left' },
     { key: 'approval_status', label: 'Approval', width: 120, sortable: true, align: 'left' },
-    { key: 'quantity', label: 'Quantity', width: 120, sortable: true, align: 'right' },
-    { key: 'poolPct', label: '% of available', width: 130, sortable: true, align: 'right' },
-    { key: 'actions', label: '', width: 200, sortable: false, align: 'right' },
-  ],
+  ]
+  for (const u of propUnits.selected.value) {
+    cols.push({
+      key: `quantity_${u}`, baseKey: 'quantity', unit: u,
+      label: `Quantity${unitSuffix(u)}`,
+      width: u === 'shares' ? 120 : 100, sortable: true, align: 'right',
+    })
+  }
+  cols.push({ key: 'poolPct', label: '% of available', width: 130, sortable: true, align: 'right' })
+  cols.push({ key: 'actions', label: '', width: 200, sortable: false, align: 'right' })
+  return cols
 })
+
+const outstandingTable = useSortableTable({
+  key: 'capstack:grants:outstanding',
+  defaultSort: { key: 'quantity_shares', dir: 'desc' },
+  columns: outstandingCols.value as any,
+})
+const proposedTable = useSortableTable({
+  key: 'capstack:grants:proposed',
+  defaultSort: { key: 'quantity_shares', dir: 'desc' },
+  columns: proposedCols.value as any,
+})
+
+watch(outstandingCols, (cols) => {
+  const widthMap: Record<string, number> = {}
+  for (const c of outstandingTable.cols) widthMap[c.key] = c.width
+  const next = cols.map(c => ({ ...c, width: widthMap[c.key] ?? c.width }))
+  outstandingTable.cols.splice(0, outstandingTable.cols.length, ...(next as any))
+  if (!outstandingTable.cols.find(c => c.key === outstandingTable.sort.key)) outstandingTable.sort.key = 'quantity_shares'
+}, { immediate: true })
+watch(proposedCols, (cols) => {
+  const widthMap: Record<string, number> = {}
+  for (const c of proposedTable.cols) widthMap[c.key] = c.width
+  const next = cols.map(c => ({ ...c, width: widthMap[c.key] ?? c.width }))
+  proposedTable.cols.splice(0, proposedTable.cols.length, ...(next as any))
+  if (!proposedTable.cols.find(c => c.key === proposedTable.sort.key)) proposedTable.sort.key = 'quantity_shares'
+}, { immediate: true })
 
 const sortedOutstanding = computed(() => {
   const rows = outstanding.value.map(g => ({ ...g }))
   const k = outstandingTable.sort.key
   const sign = outstandingTable.sort.dir === 'asc' ? 1 : -1
+  const baseKey = k.replace(/_(shares|pct|value)$/, '')
   return [...rows].sort((a, b) => {
-    const av: any = k === 'quantity' ? compareValue(a.quantity, poolAuthorized.value, a.strike || 0) : (a as any)[k]
-    const bv: any = k === 'quantity' ? compareValue(b.quantity, poolAuthorized.value, b.strike || 0) : (b as any)[k]
+    const av = (a as any)[baseKey], bv = (b as any)[baseKey]
     if (av == null && bv == null) return 0
     if (av == null) return 1
     if (bv == null) return -1
@@ -89,7 +129,17 @@ const sortedOutstanding = computed(() => {
 })
 const sortedProposed = computed(() => {
   const rows = proposed.value.map(g => ({ ...g, poolPct: poolAvailable.value ? g.quantity / poolAvailable.value : 0 }))
-  return proposedTable.applySort(rows)
+  const k = proposedTable.sort.key
+  const sign = proposedTable.sort.dir === 'asc' ? 1 : -1
+  const baseKey = k.replace(/_(shares|pct|value)$/, '')
+  return [...rows].sort((a, b) => {
+    const av = (a as any)[baseKey], bv = (b as any)[baseKey]
+    if (av == null && bv == null) return 0
+    if (av == null) return 1
+    if (bv == null) return -1
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sign
+    return String(av).localeCompare(String(bv), 'en', { numeric: true }) * sign
+  })
 })
 
 function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
@@ -209,15 +259,18 @@ function exportBoardApproval() {
 
     <!-- Pool stats -->
     <div class="flex flex-wrap gap-3 mb-6">
-      <UiStat label="Pool authorized" :value="fmtShare(poolAuthorized, fdsAnchor, ppsAnchor)" class="flex-1 min-w-[150px]" />
-      <UiStat label="Outstanding" :value="fmtShare(totalOutstanding, fdsAnchor, ppsAnchor)" class="flex-1 min-w-[150px]" />
-      <UiStat label="Proposed" :value="fmtShare(totalProposed, fdsAnchor, ppsAnchor)" class="flex-1 min-w-[150px]" />
-      <UiStat label="Available" :value="fmtShare(poolAvailable, fdsAnchor, ppsAnchor)" emphasis class="flex-1 min-w-[150px]" />
+      <UiStat label="Pool authorized" :value="fmtShares(poolAuthorized)" class="flex-1 min-w-[150px]" />
+      <UiStat label="Outstanding" :value="fmtShares(totalOutstanding)" class="flex-1 min-w-[150px]" />
+      <UiStat label="Proposed" :value="fmtShares(totalProposed)" class="flex-1 min-w-[150px]" />
+      <UiStat label="Available" :value="fmtShares(poolAvailable)" emphasis class="flex-1 min-w-[150px]" />
     </div>
 
-    <!-- Outstanding + Proposed side by side on wide screens, stacked on narrow -->
-    <div class="grid grid-cols-1 2xl:grid-cols-2 gap-5">
+    <!-- Outstanding + Proposed side by side from typical laptop widths upward. -->
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
       <UiCard :title="`Outstanding (${outstanding.length})`" subtitle="Live grants on the cap table" :padded="false">
+        <template #header>
+          <TableUnitsToggle storage-key="capstack:grants:outstanding:units" />
+        </template>
         <div v-if="!outstanding.length" class="text-sm text-ink-500 px-4 py-6 text-center">No outstanding grants.</div>
         <div v-else class="overflow-x-auto">
           <table class="text-sm border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
@@ -244,20 +297,22 @@ function exportBoardApproval() {
             </thead>
             <tbody class="num">
               <tr v-for="g in sortedOutstanding" :key="g.id" class="hover:bg-accent-50/40 transition-colors">
-                <td class="px-3 py-2 font-medium text-ink-900 border-b border-ink-200 truncate" :title="g.recipient_name">
-                  {{ g.recipient_name }}
-                  <span v-if="!g.linked_stakeholder" class="ml-1 text-[10px] uppercase tracking-wide text-amber-700">unlinked</span>
-                </td>
-                <td class="px-3 py-2 text-ink-700 border-b border-ink-200">{{ g.recipient_type || '—' }}</td>
-                <td class="px-3 py-2 text-ink-700 border-b border-ink-200 truncate">{{ g.round || '—' }}</td>
-                <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtShare(g.quantity, poolAuthorized, g.strike || 0) }}</td>
-                <td class="px-3 py-2 text-right text-ink-700 border-b border-ink-200">{{ fmtPricePerShare(g.strike) }}</td>
-                <td class="px-3 py-2 text-ink-600 border-b border-ink-200">{{ fmtDate(g.issue_date) }}</td>
-                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ g.vest_months ? `${g.vest_months}m / ${g.cliff_months}m` : '—' }}</td>
-                <td class="px-3 py-2 text-right border-b border-ink-200 whitespace-nowrap">
-                  <button class="text-ink-500 hover:text-accent-600 px-1.5 py-1 rounded" @click="startEdit(g)" title="Edit"><Edit3 :size="14" /></button>
-                  <button class="text-ink-500 hover:text-amber-600 px-1.5 py-1 rounded" @click="cancel(g)" title="Cancel"><Trash2 :size="14" /></button>
-                </td>
+                <template v-for="c in outstandingTable.cols" :key="c.key">
+                  <td v-if="c.key === 'recipient_name'" class="px-3 py-2 font-medium text-ink-900 border-b border-ink-200 truncate" :title="g.recipient_name">
+                    {{ g.recipient_name }}
+                    <span v-if="!g.linked_stakeholder" class="ml-1 text-[10px] uppercase tracking-wide text-amber-700">unlinked</span>
+                  </td>
+                  <td v-else-if="c.key === 'recipient_type'" class="px-3 py-2 text-ink-700 border-b border-ink-200">{{ g.recipient_type || '—' }}</td>
+                  <td v-else-if="c.key === 'round'" class="px-3 py-2 text-ink-700 border-b border-ink-200 truncate">{{ g.round || '—' }}</td>
+                  <td v-else-if="c.baseKey === 'quantity'" class="px-3 py-2 text-right border-b border-ink-200">{{ formatBy(c.unit!, g.quantity, fdsAnchor, ppsAnchor) }}</td>
+                  <td v-else-if="c.key === 'strike'" class="px-3 py-2 text-right text-ink-700 border-b border-ink-200">{{ fmtPricePerShare(g.strike) }}</td>
+                  <td v-else-if="c.key === 'issue_date'" class="px-3 py-2 text-ink-600 border-b border-ink-200">{{ fmtDate(g.issue_date) }}</td>
+                  <td v-else-if="c.key === 'vest'" class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ g.vest_months ? `${g.vest_months}m / ${g.cliff_months}m` : '—' }}</td>
+                  <td v-else-if="c.key === 'actions'" class="px-3 py-2 text-right border-b border-ink-200 whitespace-nowrap">
+                    <button class="text-ink-500 hover:text-accent-600 px-1.5 py-1 rounded" @click="startEdit(g)" title="Edit"><Edit3 :size="14" /></button>
+                    <button class="text-ink-500 hover:text-amber-600 px-1.5 py-1 rounded" @click="cancel(g)" title="Cancel"><Trash2 :size="14" /></button>
+                  </td>
+                </template>
               </tr>
             </tbody>
           </table>
@@ -265,6 +320,9 @@ function exportBoardApproval() {
       </UiCard>
 
       <UiCard :title="`Proposed (${proposed.length})`" subtitle="Draft grants — promote to make them live" :padded="false">
+        <template #header>
+          <TableUnitsToggle storage-key="capstack:grants:proposed:units" />
+        </template>
         <div v-if="!proposed.length" class="text-sm text-ink-500 px-4 py-6 text-center">No proposed grants. Click "Propose grant" to draft one.</div>
         <div v-else class="overflow-x-auto">
           <table class="text-sm border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
@@ -291,27 +349,29 @@ function exportBoardApproval() {
             </thead>
             <tbody class="num">
               <tr v-for="g in sortedProposed" :key="g.id" class="hover:bg-accent-50/40 transition-colors">
-                <td class="px-3 py-2 font-medium text-ink-900 border-b border-ink-200 truncate" :title="g.recipient_name">{{ g.recipient_name }}</td>
-                <td class="px-3 py-2 text-ink-700 border-b border-ink-200">{{ g.recipient_type || '—' }}</td>
-                <td class="px-3 py-2 border-b border-ink-200">
-                  <button
-                    class="text-xs px-2 py-1 rounded-md border transition-colors font-medium"
-                    :class="g.approval_status === 'Approved'
-                      ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-                      : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'"
-                    @click="toggleApproval(g)"
-                    :title="g.approval_status === 'Approved' ? 'Click to mark Pending' : 'Click to mark Approved'"
-                  >
-                    {{ g.approval_status || 'Pending' }}
-                  </button>
-                </td>
-                <td class="px-3 py-2 text-right border-b border-ink-200">{{ fmtShare(g.quantity, poolAvailable, g.strike || 0) }}</td>
-                <td class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtPct(g.poolPct, 1) }}</td>
-                <td class="px-3 py-2 text-right border-b border-ink-200 whitespace-nowrap space-x-1">
-                  <UiButton size="sm" @click="startEdit(g)"><Edit3 :size="12" /> Edit</UiButton>
-                  <UiButton size="sm" variant="primary" @click="promote(g)">Promote</UiButton>
-                  <UiButton size="sm" variant="ghost" @click="destroy(g)"><Trash2 :size="12" /></UiButton>
-                </td>
+                <template v-for="c in proposedTable.cols" :key="c.key">
+                  <td v-if="c.key === 'recipient_name'" class="px-3 py-2 font-medium text-ink-900 border-b border-ink-200 truncate" :title="g.recipient_name">{{ g.recipient_name }}</td>
+                  <td v-else-if="c.key === 'recipient_type'" class="px-3 py-2 text-ink-700 border-b border-ink-200">{{ g.recipient_type || '—' }}</td>
+                  <td v-else-if="c.key === 'approval_status'" class="px-3 py-2 border-b border-ink-200">
+                    <button
+                      class="text-xs px-2 py-1 rounded-md border transition-colors font-medium"
+                      :class="g.approval_status === 'Approved'
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                        : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'"
+                      @click="toggleApproval(g)"
+                      :title="g.approval_status === 'Approved' ? 'Click to mark Pending' : 'Click to mark Approved'"
+                    >
+                      {{ g.approval_status || 'Pending' }}
+                    </button>
+                  </td>
+                  <td v-else-if="c.baseKey === 'quantity'" class="px-3 py-2 text-right border-b border-ink-200">{{ formatBy(c.unit!, g.quantity, fdsAnchor, ppsAnchor) }}</td>
+                  <td v-else-if="c.key === 'poolPct'" class="px-3 py-2 text-right text-ink-600 border-b border-ink-200">{{ fmtPct(g.poolPct, 1) }}</td>
+                  <td v-else-if="c.key === 'actions'" class="px-3 py-2 text-right border-b border-ink-200 whitespace-nowrap space-x-1">
+                    <UiButton size="sm" @click="startEdit(g)"><Edit3 :size="12" /> Edit</UiButton>
+                    <UiButton size="sm" variant="primary" @click="promote(g)">Promote</UiButton>
+                    <UiButton size="sm" variant="ghost" @click="destroy(g)"><Trash2 :size="12" /></UiButton>
+                  </td>
+                </template>
               </tr>
             </tbody>
           </table>
