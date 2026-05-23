@@ -26,7 +26,6 @@ interface RoundColumn {
   name: string | null
   kind: 'formation' | 'closed' | 'open'
   parent_round_code: string | null
-  pre_money_is_user_set: boolean
   close_date: string | null
   seniority: number
   share_class_code: string | null
@@ -93,6 +92,11 @@ function toggleExpand(code: string) {
 function groupHasChildren(code: string): boolean {
   return (roundGroups.value.find(g => g.parent.code === code)?.children.length || 0) > 0
 }
+
+// Soft amber tint marks every cell that's a user-input field, so the operator
+// can tell at a glance which numbers they own vs which are derived from the
+// ledger import. Focus state clears the tint and switches to the accent ring.
+const inputCellClass = 'w-full bg-amber-50 border border-amber-300 hover:border-amber-500 focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-accent-500 rounded px-1 py-0.5 text-right text-[12px] text-ink-900 num'
 
 // Roll-up math: when a group is collapsed, the parent column shows aggregate
 // values across parent + children. When expanded, parent + children render
@@ -591,7 +595,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     <input
                       type="date"
                       :value="rc.col.close_date || ''"
-                      class="w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-accent-500 focus:outline-none rounded px-1 py-0.5 text-right text-[12px] text-ink-700 cursor-pointer"
+                      :class="inputCellClass + ' cursor-pointer'"
                       @change="updateRoundCloseDate(rc.col.round_id, ($event.target as HTMLInputElement).value)"
                     />
                   </template>
@@ -609,8 +613,8 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     prefix="$"
                     :model-value="rc.col.pre_money"
                     placeholder="—"
-                    :input-class="`w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-accent-500 focus:outline-none rounded px-1 py-0.5 text-right text-[12px] ${rc.col.pre_money_is_user_set ? 'text-ink-900 font-medium' : 'text-ink-500 italic'}`"
-                    :title="rc.col.pre_money_is_user_set ? 'User-set pre-money' : 'Derived from share_price × prior FDS — type to override'"
+                    :input-class="inputCellClass"
+                    title="Pre-money valuation — user input"
                     @update:model-value="(v) => updateRoundPreMoney(rc.col.round_id, v == null ? '' : String(v))"
                   />
                 </td>
@@ -627,7 +631,8 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     prefix="$"
                     :model-value="rc.col.new_money || null"
                     placeholder="—"
-                    input-class="w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-accent-500 focus:outline-none rounded px-1 py-0.5 text-right text-[12px] text-ink-700"
+                    :input-class="inputCellClass"
+                    title="New money — user input"
                     @update:model-value="(v) => updateRoundNewMoney(rc.col.round_id, v == null ? '' : String(v))"
                   />
                 </td>
@@ -696,7 +701,8 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     variant="bare"
                     :model-value="rc.col.option_pool_issued || null"
                     placeholder="—"
-                    input-class="w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-accent-500 focus:outline-none rounded px-1 py-0.5 text-right text-[12px] text-ink-700"
+                    :input-class="inputCellClass"
+                    title="Option pool issued — user input"
                     @update:model-value="(v) => updateRoundPoolIssued(rc.col.round_id, v == null ? '' : String(v))"
                   />
                 </td>
