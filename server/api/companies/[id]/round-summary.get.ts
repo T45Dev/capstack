@@ -39,12 +39,28 @@ export default defineEventHandler((event) => {
   const rounds = db().prepare(`
     SELECT id, code, name, kind, close_date, share_class_code, share_price,
            new_money, debt_canceled, seniority
-    FROM rounds WHERE company_id = ? ORDER BY seniority ASC
+    FROM rounds WHERE company_id = ?
   `).all(id) as Array<{
     id: string; code: string; name: string | null; kind: 'formation' | 'closed';
     close_date: string | null; share_class_code: string | null;
     share_price: number | null; new_money: number; debt_canceled: number; seniority: number;
   }>
+
+  // Chronological order is driven by close_date (ISO strings sort
+  // lexically). Rounds whose date is null fall to the end of the dated
+  // group; ties — and date-less rounds — break on the import-order
+  // seniority. The Open Round's stored date is honoured even though the
+  // response suppresses it for display, so toggling the open/closed flag
+  // doesn't shuffle the timeline.
+  rounds.sort((a, b) => {
+    if (a.close_date && b.close_date) {
+      if (a.close_date !== b.close_date) return a.close_date.localeCompare(b.close_date)
+      return a.seniority - b.seniority
+    }
+    if (a.close_date) return -1
+    if (b.close_date) return 1
+    return a.seniority - b.seniority
+  })
 
   // Share-class lookup so we can sum holdings by round code.
   const classByCode = new Map<string, { id: string; kind: string }>()
@@ -215,7 +231,11 @@ export default defineEventHandler((event) => {
       code: r.code,
       name: r.name,
       kind: effectiveKind,
-      close_date: r.close_date,
+      // Open rounds don't have a close date — the stored value (typically the
+      // max Issue Date from the parsed ledger) is only meaningful once the
+      // round actually closes, so suppress it here. The DB row still holds
+      // the original value for when the round transitions back to closed.
+      close_date: effectiveKind === 'open' ? null : r.close_date,
       seniority: r.seniority,
       share_class_code: r.share_class_code,
       share_price: r.share_price,

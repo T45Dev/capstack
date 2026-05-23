@@ -35,8 +35,22 @@ interface RoundColumn {
   total_shares_fds: number
   cumulated_financing: number
 }
-const { data: roundSummary } = await useFetch<{ rounds: RoundColumn[] }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
+const { data: roundSummary, refresh: refreshRoundSummary } = await useFetch<{ rounds: RoundColumn[] }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
 const roundCols = computed<RoundColumn[]>(() => roundSummary.value?.rounds || [])
+
+// Inline edit of a round's close date (Closing date row, Summary card).
+// Open rounds don't get an input; the synthesized 'open' row_id has no DB
+// backing and is skipped. Re-import from Carta resets to the ledger-derived
+// default.
+async function updateRoundCloseDate(roundId: string, value: string) {
+  if (!roundId || roundId === 'open') return
+  try {
+    await $fetch(`/api/rounds/${roundId}`, { method: 'PATCH', body: { close_date: value || null } })
+    await refreshRoundSummary()
+  } catch (e) {
+    console.error('Failed to update round close date', e)
+  }
+}
 
 const query = ref('')
 const currentPPS = computed(() => data.value?.current_pps || 0)
@@ -387,11 +401,24 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               </tr>
             </thead>
             <tbody class="num">
-              <!-- Round-level money math (top group) -->
+              <!-- Round-level money math (top group). Closing date is an
+                   inline date input on every persisted round; the synthesized
+                   open column (round_id === 'open') has no DB row to PATCH so
+                   it falls through to a dash. -->
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Closing date of funding</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
-                  {{ r.close_date || (r.kind === 'open' ? 'TBD' : '—') }}
+                  <template v-if="r.kind === 'open'">
+                    <span class="text-ink-400">—</span>
+                  </template>
+                  <template v-else>
+                    <input
+                      type="date"
+                      :value="r.close_date || ''"
+                      class="w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-accent-500 focus:outline-none rounded px-1 py-0.5 text-right text-[12px] text-ink-700 cursor-pointer"
+                      @change="updateRoundCloseDate(r.round_id, ($event.target as HTMLInputElement).value)"
+                    />
+                  </template>
                 </td>
               </tr>
               <tr>
