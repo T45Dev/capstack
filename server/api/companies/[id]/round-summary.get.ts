@@ -1,45 +1,33 @@
 import { db } from '~~/server/utils/db'
 
-// Per-round Summary Cap Table data — feeds the top card on the Cap Table page.
-// One entry per share class (= "round" in the user's vocabulary), plus the
-// Open Round when assumptions.round_name doesn't match any existing round.
-// Each round has its own pre-money valuation (a user input on the Summary
-// card) and its own share price (from the Carta ledger).
+// Per-round Summary Cap Table — feeds the top card on the Cap Table page.
+// One entry per row in the `rounds` table, plus the Open Round when
+// assumptions.round_name doesn't match any existing round (so the operator
+// can model a future round before adding it manually).
 //
-// CNs are a separate concept — they live on the Convertible Notes page and
-// each CN is attributed to a destination share class. Their dollars roll up
-// into that round's "Notes Financing" column here; the resulting shares are
-// already represented in the round's holdings (they came out of CN
-// conversion at the round's PPS) so "Notes Converted" is informational only,
-// not added separately to cumulative FDS.
+// Rounds are USER-driven now: the operator types each round in via the
+// Summary card. The Carta import doesn't seed rounds anymore. CNs live
+// separately on the Convertible Notes page; each CN's destination
+// (`destination_class_code`, despite the legacy name) points at a round's
+// `code` here. Their dollars roll up into that round's notes_financing.
 
 interface RoundColumn {
   round_id: string                // 'open' for the synthesized open-round column
-  code: string                    // "CS" / "SS" / "SA1" / "PB1" / "OPEN"
-  name: string | null             // friendly display, e.g. "Series A-1"
+  code: string
+  name: string | null
   kind: 'formation' | 'closed' | 'open'
-  // Parent funding round (derived from share-class prefix). Subrounds with
-  // the same group_code roll up into one column on the Summary card by
-  // default; pre-money is stored on the group's primary subround.
-  group_code: string              // "CS" / "SS" / "SA" / "PB" / "OPEN"
-  group_name: string              // "Formation" / "Series Seed" / "Series A" / "Series B"
-  is_group_primary: boolean       // true on the round that owns the group's pre-money
-  group_pre_money: number | null  // group's pre-money (same on every member; null if unset)
   close_date: string | null
-  seniority: number               // chronological order; open round always last
+  seniority: number
   share_class_code: string | null
-  share_price: number | null      // ledger Original Issue Price; for OPEN: pre_money / pre_FDS
-  new_money: number               // ledger Cash Contributed sum; for OPEN: assumptions.new_money
-  notes_financing: number         // sum of CN principal+interest attributed to this round
-  pre_money: number | null        // user-typed on the group primary; null if blank
-  post_money: number              // pre_money + new_money + notes_financing
-  // Share contributions added at this round (NOT cumulative). For
-  // CN-driven classes (SA2/SA3/PB2 in ANT) the holdings ARE the CN-converted
-  // shares — preferred_issued and notes_converted refer to the same shares
-  // from different lenses, not additive.
-  common: number
+  share_price: number | null
+  new_money: number
+  notes_financing: number         // sum of CN principal+interest with destination = this round's code
+  pre_money: number | null
+  post_money: number              // pre + new + notes
+  // Per-round share contributions (user-typed; not derived from holdings).
+  common: number                  // currently always 0 in the response — user types into preferred_issued
   preferred_issued: number
-  notes_converted: number
+  notes_converted: number         // informational: notes_financing / share_price
   option_pool_issued: number
   // Cumulative totals through and including this round:
   total_shares_fds: number
@@ -55,20 +43,18 @@ export default defineEventHandler((event) => {
 
   const rounds = db().prepare(`
     SELECT id, code, name, kind, close_date, share_class_code, share_price,
-           new_money, debt_canceled, option_pool_issued, pre_money, seniority
+           new_money, debt_canceled, option_pool_issued, pre_money,
+           preferred_issued, common, seniority
     FROM rounds WHERE company_id = ?
   `).all(id) as Array<{
     id: string; code: string; name: string | null; kind: 'formation' | 'closed';
     close_date: string | null; share_class_code: string | null;
     share_price: number | null; new_money: number; debt_canceled: number;
-    option_pool_issued: number; pre_money: number | null; seniority: number;
+    option_pool_issued: number; pre_money: number | null;
+    preferred_issued: number; common: number; seniority: number;
   }>
 
   const assumptions = db().prepare('SELECT * FROM assumptions WHERE company_id = ?').get(id) as any || {}
-
-  // Resolve which round (if any) Assumptions points at as "open". Match by
-  // code (case-insensitive) or by substring of the round's friendly name.
-  // No special parent/child guard here — every round is a peer.
   const openRoundName = (assumptions.round_name && String(assumptions.round_name).trim()) || ''
   const openRoundLc = openRoundName.toLowerCase()
   function isOpenRound(r: { code: string; name: string | null }): boolean {
@@ -78,8 +64,9 @@ export default defineEventHandler((event) => {
     return false
   }
 
-  // Sort by close_date (open rounds treated as date-less so they fall to the
-  // end). Seniority breaks ties. Editing a close date in the UI re-sorts.
+  // Sort by close_date (ISO strings sort lexically). Open rounds — and any
+  // round without a close_date set — fall to the end of the timeline.
+  // Seniority breaks ties.
   rounds.sort((a, b) => {
     const ad = isOpenRound(a) ? null : a.close_date
     const bd = isOpenRound(b) ? null : b.close_date
@@ -93,56 +80,9 @@ export default defineEventHandler((event) => {
   })
   const openIdx = rounds.findIndex(isOpenRound)
 
-  // Derive the parent funding round each subround belongs to. Heuristic:
-  //   - code "CS" -> Formation
-  //   - All other share-class codes: strip trailing digits to get the group
-  //     prefix ("SA1" -> "SA", "PB2" -> "PB", "SS" -> "SS")
-  // The group name comes from stripping "-N Preferred (XYZ)" off the
-  // round's friendly Carta name ("Series A-1 Preferred (SA1)" -> "Series A").
-  function groupCodeOf(code: string, kind: string): string {
-    if (kind === 'formation') return 'CS'
-    const stripped = code.replace(/\d+$/, '')
-    return stripped || code
-  }
-  function groupNameOf(r: { code: string; name: string | null; kind: string }): string {
-    if (r.kind === 'formation') return 'Formation'
-    const raw = (r.name || r.code).trim()
-    const stripped = raw
-      .replace(/-\d+\s+Preferred\s*\([A-Z][A-Z0-9-]+\)\s*$/i, '')
-      .replace(/\s+Preferred\s*\([A-Z][A-Z0-9-]+\)\s*$/i, '')
-      .replace(/\s*\([A-Z][A-Z0-9-]+\)\s*$/i, '')
-    return stripped || r.code
-  }
-
-  // Identify the primary subround per group: lowest seniority within each
-  // group is the one that owns the group's pre-money. All other subrounds
-  // in the group inherit by reading the primary's pre_money on display.
-  const primaryByGroup = new Map<string, string>() // group_code -> primary round id
-  const preMoneyByGroup = new Map<string, number | null>() // group_code -> pre_money
-  // Walk in seniority order to pick the primary (lowest seniority wins).
-  const byGroupSenSorted = [...rounds].sort((a, b) => a.seniority - b.seniority)
-  for (const r of byGroupSenSorted) {
-    const gc = groupCodeOf(r.code, r.kind)
-    if (!primaryByGroup.has(gc)) {
-      primaryByGroup.set(gc, r.id)
-      preMoneyByGroup.set(gc, (r.pre_money != null && r.pre_money !== 0) ? r.pre_money : null)
-    }
-  }
-
-  // Share-class lookup so we can sum holdings by round code.
-  const classByCode = new Map<string, { id: string; kind: string }>()
-  for (const sc of (db().prepare(
-    'SELECT id, code, kind FROM share_classes WHERE company_id = ?',
-  ).all(id) as any[])) classByCode.set(String(sc.code).toUpperCase(), sc)
-
-  const holdingsByClass = new Map<string, number>()
-  for (const h of (db().prepare(
-    'SELECT share_class_id, SUM(shares) AS shares FROM holdings WHERE company_id = ? GROUP BY share_class_id',
-  ).all(id) as any[])) holdingsByClass.set(h.share_class_id, h.shares || 0)
-
-  // CNs — sum per attributed round. Each CN's destination_class_code points
-  // at a share class. The "-N" tranche suffix Carta sometimes appends is
-  // stripped during import; we still defensively strip here.
+  // CNs — sum per attributed round. destination_class_code stores the
+  // round's code (it's a legacy field name from when it pointed at share
+  // classes; the column hosts round codes now).
   const cnRows = db().prepare(`
     SELECT principal, interest_accrued, interest_rate, issue_date, conversion_date,
            destination_class_code, converts_at_round
@@ -165,9 +105,6 @@ export default defineEventHandler((event) => {
     return (c.principal || 0) * c.interest_rate * (days / 365)
   }
 
-  // Bucket CNs by attributed round code (uppercase). The literal 'OPEN'
-  // bucket catches CNs the user routed to "Open round" via the CN page
-  // sentinel (destination_class_code = null, converts_at_round = 1).
   const cnByCode = new Map<string, { dollars: number }>()
   for (const c of cnRows) {
     const total = (c.principal || 0) + accruedInterestFor(c)
@@ -179,7 +116,6 @@ export default defineEventHandler((event) => {
     cnByCode.set(bucket, cur)
   }
 
-  // ----- Assemble per-round columns -----
   const cols: RoundColumn[] = []
   let cumulativeFDS = 0
   let cumulativeFinancing = 0
@@ -189,56 +125,38 @@ export default defineEventHandler((event) => {
     if (!r) continue
     const effectiveKind: 'formation' | 'closed' | 'open' = i === openIdx ? 'open' : r.kind
 
-    // Preferred issued = total holdings in this share class. Includes any
-    // CN-at-round-PPS conversions that landed here (we can't distinguish
-    // them without per-investor tracking).
-    let preferredIssued = 0
-    if (r.share_class_code) {
-      const sc = classByCode.get(r.share_class_code.toUpperCase())
-      if (sc) preferredIssued = holdingsByClass.get(sc.id) || 0
-    }
+    // All share counts are user-typed; we don't derive from holdings.
+    // preferred_issued, common, option_pool_issued live directly on the
+    // rounds table — the user enters them via the Summary card.
+    const preferredIssued = Number(r.preferred_issued) || 0
+    const common = Number(r.common) || 0
+    const poolIssued = Number(r.option_pool_issued) || 0
 
-    // Common shares — only at Formation.
-    let common = 0
-    if (effectiveKind === 'formation') {
-      const csClass = Array.from(classByCode.values()).find(c => c.kind === 'common')
-      if (csClass) common = holdingsByClass.get(csClass.id) || 0
-    }
-
-    // Notes financing — dollars from CNs attributed to this round.
+    // Notes financing — dollars from CNs attributed to this round's code.
     const codeKey = r.code.toUpperCase()
     let cnDollars = cnByCode.get(codeKey)?.dollars || 0
     if (effectiveKind === 'open') cnDollars += cnByCode.get('OPEN')?.dollars || 0
 
-    // Notes converted — informational only. Shares implied by the CN
-    // dollars at the round's PPS. NOT added separately to FDS because
-    // those shares are already in preferred_issued.
+    // Notes converted shares (informational; share count from the CN
+    // dollars at this round's PPS).
     const cnShares = r.share_price && r.share_price > 0 ? cnDollars / r.share_price : 0
-
-    const poolIssued = Number(r.option_pool_issued) || 0
-    const sharesAdded = common + preferredIssued + poolIssued
 
     const preMoney = (r.pre_money != null && r.pre_money !== 0) ? r.pre_money : null
     const newMoney = r.new_money || 0
     const postMoney = (preMoney || 0) + newMoney + cnDollars
 
-    cumulativeFDS += sharesAdded
+    // Cumulative FDS sums up user-typed share contributions for this
+    // round. notes_converted is informational (those shares are already
+    // counted in preferred_issued when the CN converted into this round's
+    // class), so it's NOT added separately here.
+    cumulativeFDS += common + preferredIssued + poolIssued
     cumulativeFinancing += newMoney + cnDollars
-
-    const gc = groupCodeOf(r.code, r.kind)
-    const gn = groupNameOf(r)
-    const isPrimary = primaryByGroup.get(gc) === r.id
-    const groupPreMoney = preMoneyByGroup.get(gc) ?? null
 
     cols.push({
       round_id: r.id,
       code: r.code,
       name: r.name,
       kind: effectiveKind,
-      group_code: gc,
-      group_name: gn,
-      is_group_primary: isPrimary,
-      group_pre_money: groupPreMoney,
       close_date: effectiveKind === 'open' ? null : r.close_date,
       seniority: r.seniority,
       share_class_code: r.share_class_code,
@@ -257,8 +175,7 @@ export default defineEventHandler((event) => {
   }
 
   // Synthesize an Open Round column when assumptions.round_name doesn't match
-  // any existing round (user is modelling a future round not yet in the cap
-  // table). When it does match, that round already got kind='open' above.
+  // any existing round (user is modelling a future round not yet added).
   if (openIdx < 0 && openRoundName) {
     const openPreMoney = Number(assumptions.pre_money) || 0
     const openNewMoney = Number(assumptions.new_money) || 0
@@ -275,10 +192,6 @@ export default defineEventHandler((event) => {
       code: 'OPEN',
       name: openRoundName,
       kind: 'open',
-      group_code: 'OPEN',
-      group_name: openRoundName,
-      is_group_primary: true,
-      group_pre_money: openPreMoney || null,
       close_date: null,
       seniority: rounds.length + 1,
       share_class_code: null,

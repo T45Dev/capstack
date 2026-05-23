@@ -225,6 +225,8 @@ function migrate(d: Database.Database): void {
   ensureColumn('rounds', 'option_pool_issued', 'REAL NOT NULL DEFAULT 0')
   ensureColumn('rounds', 'parent_round_code', 'TEXT')
   ensureColumn('rounds', 'pre_money', 'REAL')
+  ensureColumn('rounds', 'preferred_issued', 'REAL NOT NULL DEFAULT 0')
+  ensureColumn('rounds', 'common', 'REAL NOT NULL DEFAULT 0')
 
   // Backfill: for any company whose Formation round has option_pool_issued = 0
   // but whose option_pools table is non-empty, seed Formation with the

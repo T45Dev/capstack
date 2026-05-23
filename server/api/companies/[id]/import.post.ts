@@ -43,7 +43,9 @@ export default defineEventHandler(async (event) => {
       db().prepare('DELETE FROM share_classes WHERE company_id = ?').run(id)
       db().prepare('DELETE FROM stakeholders WHERE company_id = ?').run(id)
       db().prepare('DELETE FROM option_pools WHERE company_id = ?').run(id)
-      db().prepare('DELETE FROM rounds WHERE company_id = ?').run(id)
+      // Rounds are user-managed via the Summary card; the importer leaves
+      // them alone. Stakeholders / holdings / grants / CNs / pool size are
+      // sourced from Carta.
     }
 
     // Share classes
@@ -165,54 +167,12 @@ export default defineEventHandler(async (event) => {
       }
     }
 
-    // Rounds (per-class ledger rollup — Formation + each closed preferred).
-    // Seniority follows the parser's order, which matches the workbook's
-    // sheet order (chronological in every Carta export we've seen). The
-    // share_class_code column soft-links each round to share_classes.code.
-    // Every round is a peer in the timeline; CNs are tracked separately on
-    // the Convertible Notes page with a per-CN destination round.
-    if (parsed.rounds.length) {
-      const insRound = db().prepare(`
-        INSERT INTO rounds (
-          id, company_id, code, name, kind, close_date, share_class_code,
-          share_price, new_money, debt_canceled, seniority
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(company_id, code) DO UPDATE SET
-          name = excluded.name,
-          kind = excluded.kind,
-          close_date = excluded.close_date,
-          share_class_code = excluded.share_class_code,
-          share_price = excluded.share_price,
-          new_money = excluded.new_money,
-          debt_canceled = excluded.debt_canceled,
-          seniority = excluded.seniority
-      `)
-      // pre_money and parent_round_code are NOT in the ON CONFLICT UPDATE
-      // list — user-typed pre-money values survive re-imports, and the
-      // parent_round_code column (legacy from an earlier model) stays
-      // untouched.
-      let rSeniority = 0
-      for (const r of parsed.rounds) {
-        rSeniority++
-        try {
-          insRound.run(
-            newId('rd'), id,
-            r.code, r.name || null, r.kind,
-            r.closeDate || null,
-            // Soft-link to share_classes. For closed rounds the code IS the
-            // share-class code (SS == SS class); Formation has no preferred
-            // class so we leave share_class_code null.
-            r.kind === 'closed' ? r.code : null,
-            r.sharePrice ?? null,
-            r.newMoney || 0,
-            r.debtCanceled || 0,
-            rSeniority,
-          )
-        } catch (err: any) {
-          parsed.warnings.push(`Couldn't import round "${r.code}": ${err?.message || err}`)
-        }
-      }
-    }
+    // Rounds: NOT imported. The Carta share-class structure (SA1/SA2/SA3/…)
+    // doesn't map cleanly to how operators think about funding rounds, so
+    // the Summary card is user-driven now — they add rounds, type the
+    // numbers, and own that data. The importer still seeds CNs / holdings
+    // / grants / pool size so the downstream pages work; the parsed
+    // `parsed.rounds` array is just ignored.
 
     // Option pool. Prefer the Summary "Plan" row, otherwise derive from outstanding+available.
     let poolSize = parsed.poolAuthorized
@@ -230,16 +190,10 @@ export default defineEventHandler(async (event) => {
       } catch (err: any) {
         parsed.warnings.push(`Couldn't write option pool: ${err?.message || err}`)
       }
-      // Seed per-round attribution: the whole imported pool lands on
-      // Formation. The user can move chunks to other rounds (e.g. PB1
-      // tranche) inline on the Cap Table Summary card. See spec §5.1.
-      const formationRow = db().prepare(
-        `SELECT id FROM rounds WHERE company_id = ? AND kind = 'formation' LIMIT 1`,
-      ).get(id) as { id: string } | undefined
-      if (formationRow) {
-        db().prepare('UPDATE rounds SET option_pool_issued = ? WHERE id = ?')
-          .run(poolSize, formationRow.id)
-      }
+      // Pool attribution per round lives on the Summary card now — the
+      // user types option_pool_issued into whichever round(s) authorized
+      // the top-ups. The imported total here is just for reference (still
+      // visible on the Securities card below the Summary).
     }
 
     // Audit row
