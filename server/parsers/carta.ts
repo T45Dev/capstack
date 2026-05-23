@@ -351,7 +351,12 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
             issueDate: cIssue > 0 ? asDate(row.getCell(cIssue).value) : null,
             maturityDate: cMaturity > 0 ? asDate(row.getCell(cMaturity).value) : null,
             conversionDate: cConvDate > 0 ? asDate(row.getCell(cConvDate).value) : null,
-            destinationClassCode: cDestination > 0 ? asString(row.getCell(cDestination).value) || null : null,
+            // Strip the "-N" tranche suffix Carta appends to Destination
+            // (e.g. "SA2-1" -> "SA2"). share_classes.code lives without the
+            // suffix, so dropping it keeps the CN's destination joinable.
+            destinationClassCode: cDestination > 0
+              ? (asString(row.getCell(cDestination).value) || '').replace(/-\d+$/, '') || null
+              : null,
             valuationCap: cCap > 0 ? asNumber(row.getCell(cCap).value) || null : null,
             conversionDiscount: cDiscount > 0 ? asNumber(row.getCell(cDiscount).value) : 0,
           })
