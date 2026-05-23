@@ -12,6 +12,32 @@ interface Grant { id: string; stakeholder_id: string | null; recipient_name: str
 
 const { data } = await useFetch<{ share_classes: ShareClassRow[]; stakeholders: Stakeholder[]; holdings: Holding[]; grants: Grant[]; pools: any[]; current_pps: number }>(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => ({ share_classes: [], stakeholders: [], holdings: [], grants: [], pools: [], current_pps: 0 } as any) })
 
+// Per-round Summary Cap Table — spec §5.1 top card. One column per round
+// (chronological) recreating the per-round breakdown Carta exposes via its
+// per-class ledgers. Open Round is synthesized from Assumptions.
+interface RoundColumn {
+  round_id: string
+  code: string
+  name: string | null
+  kind: 'formation' | 'closed' | 'open'
+  close_date: string | null
+  seniority: number
+  share_class_code: string | null
+  share_price: number | null
+  new_money: number
+  notes_financing: number
+  pre_money: number | null
+  post_money: number
+  common: number
+  preferred_issued: number
+  notes_converted: number
+  option_pool_issued: number
+  total_shares_fds: number
+  cumulated_financing: number
+}
+const { data: roundSummary } = await useFetch<{ rounds: RoundColumn[] }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
+const roundCols = computed<RoundColumn[]>(() => roundSummary.value?.rounds || [])
+
 const query = ref('')
 const currentPPS = computed(() => data.value?.current_pps || 0)
 
@@ -327,11 +353,131 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
     </UiEmpty>
 
     <div v-else class="space-y-6">
-      <!-- Summary cap table — Carta-style rollup. One line per security, with
-           Common / Preferred subtotals when more than one class exists in the
-           group, small spacer rows between Common / Preferred / Pool sections,
-           and a Total fully-diluted row at the bottom. -->
-      <UiCard title="Summary cap table" subtitle="Rolled up by security — recreates the Carta Summary tab" :padded="false">
+      <!-- Per-round Summary Cap Table (spec §5.1) — chronological columns
+           recreated from each share-class ledger plus the Open Round from
+           Assumptions. Rows are the line items the user expects to see at a
+           glance: close date, money / share-price math at the top, then the
+           per-round share contributions, with cumulative FDS + financing at
+           the bottom. The Open Round column is highlighted; closed rounds are
+           plain. -->
+      <UiCard
+        v-if="roundCols.length"
+        title="Summary cap table"
+        subtitle="Per-round breakdown — chronological. Open round is highlighted."
+        :padded="false"
+      >
+        <div class="overflow-x-auto">
+          <table class="text-[12px] border-separate" style="border-spacing: 0; min-width: 100%;">
+            <colgroup>
+              <col style="width: 220px" />
+              <col v-for="r in roundCols" :key="r.round_id" style="min-width: 130px" />
+            </colgroup>
+            <thead class="text-ink-700 bg-ink-100">
+              <tr>
+                <th class="px-3 py-2 border-b border-ink-300 text-left text-[11px] font-semibold uppercase tracking-wide">Capitalization table</th>
+                <th
+                  v-for="r in roundCols"
+                  :key="r.round_id"
+                  class="px-3 py-2 border-b border-ink-300 text-right text-[11px] font-semibold"
+                  :class="r.kind === 'open' ? 'bg-accent-50 text-accent-700' : 'text-ink-700'"
+                >
+                  <div>{{ r.name || r.code }}</div>
+                  <div v-if="r.kind === 'open'" class="text-[9px] font-medium uppercase tracking-wider text-accent-600">open</div>
+                </th>
+              </tr>
+            </thead>
+            <tbody class="num">
+              <!-- Round-level money math (top group) -->
+              <tr>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Closing date of funding</td>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  {{ r.close_date || (r.kind === 'open' ? 'TBD' : '—') }}
+                </td>
+              </tr>
+              <tr>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Pre-money valuation ($)</td>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  {{ r.pre_money == null ? '—' : fmtUSD(r.pre_money) }}
+                </td>
+              </tr>
+              <tr>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">New money ($)</td>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  {{ r.new_money ? fmtUSD(r.new_money) : '—' }}
+                </td>
+              </tr>
+              <tr>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Notes financing ($)</td>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  {{ r.notes_financing ? fmtUSD(r.notes_financing) : '—' }}
+                </td>
+              </tr>
+              <tr class="font-medium">
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-800">Post-money valuation ($)</td>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-900" :class="r.kind === 'open' ? 'bg-accent-50/40 text-accent-700' : ''">
+                  {{ r.post_money ? fmtUSD(r.post_money) : '—' }}
+                </td>
+              </tr>
+              <tr>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Share price ($)</td>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  {{ r.share_price ? fmtPricePerShare(r.share_price) : '—' }}
+                </td>
+              </tr>
+              <tr>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Cumulated financing</td>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  {{ fmtUSD(r.cumulated_financing) }}
+                </td>
+              </tr>
+
+              <!-- Spacer -->
+              <tr aria-hidden="true"><td colspan="99" class="h-3 p-0 bg-transparent" /></tr>
+
+              <!-- Per-round share contributions -->
+              <tr class="font-medium">
+                <td class="px-3 py-1.5 border-b border-ink-300 border-t-2 text-ink-900">Total shares issued (#) — fully diluted</td>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-300 border-t-2 text-right text-ink-900" :class="r.kind === 'open' ? 'bg-accent-50/40 text-accent-700' : ''">
+                  {{ r.total_shares_fds ? fmtShares(r.total_shares_fds) : '—' }}
+                </td>
+              </tr>
+              <tr>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6">Common</td>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  {{ r.common ? fmtShares(r.common) : '—' }}
+                </td>
+              </tr>
+              <tr>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6">Preferred issued</td>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  {{ r.preferred_issued ? fmtShares(r.preferred_issued) : '—' }}
+                </td>
+              </tr>
+              <tr>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6">Notes converted</td>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  {{ r.notes_converted ? fmtShares(r.notes_converted) : '—' }}
+                </td>
+              </tr>
+              <tr>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6">Option pool issued</td>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  {{ r.option_pool_issued ? fmtShares(r.option_pool_issued) : '—' }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="px-4 py-2 text-[11px] text-ink-500 bg-ink-50/60 border-t border-ink-200">
+          Closed-round values derived from per-class ledgers + Convertible Ledger; Open round mirrors Assumptions. Re-import to refresh closed-round data.
+        </p>
+      </UiCard>
+
+      <!-- Securities rollup — one line per security class with authorized vs
+           outstanding vs available, Common / Preferred subtotals, and the
+           Total fully-diluted footer. (Different lens from the per-round
+           summary above.) -->
+      <UiCard title="Securities" subtitle="Authorized vs outstanding vs available per share class" :padded="false">
         <div class="overflow-x-auto">
           <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
