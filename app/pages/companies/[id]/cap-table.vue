@@ -13,19 +13,15 @@ interface Grant { id: string; stakeholder_id: string | null; recipient_name: str
 const { data } = await useFetch<{ share_classes: ShareClassRow[]; stakeholders: Stakeholder[]; holdings: Holding[]; grants: Grant[]; pools: any[]; current_pps: number }>(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => ({ share_classes: [], stakeholders: [], holdings: [], grants: [], pools: [], current_pps: 0 } as any) })
 
 // Per-round Summary Cap Table — spec §5.1 top card. One column per round
-// (chronological) recreating the per-round breakdown Carta exposes via its
-// per-class ledgers. Open Round is synthesized from Assumptions.
-//
-// Rounds group by parent_round_code: CN-conversion-only subrounds (cash = 0,
-// debt > 0) attach to the most recent preceding cash-driven round. The
-// Summary card renders one column per parent by default (rolled-up totals)
-// and expands to show parent + children as separate columns on demand.
+// (each Carta share class is its own round in the user's vocabulary), in
+// chronological order by close date. CNs are tracked separately on the
+// Convertible Notes page and roll up into each round's notes-financing
+// column via their destination attribution.
 interface RoundColumn {
   round_id: string
   code: string
   name: string | null
   kind: 'formation' | 'closed' | 'open'
-  parent_round_code: string | null
   close_date: string | null
   seniority: number
   share_class_code: string | null
@@ -45,119 +41,26 @@ interface RoundColumn {
 const { data: roundSummary, refresh: refreshRoundSummary } = await useFetch<{ rounds: RoundColumn[] }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
 const roundCols = computed<RoundColumn[]>(() => roundSummary.value?.rounds || [])
 
-// Group columns by parent. Each group = { parent, children[] }, in
-// chronological order. CN-conversion children render inset under the parent
-// when the group is expanded. roundColsByParent preserves the timeline order.
-interface RoundGroup {
-  parent: RoundColumn
-  children: RoundColumn[]
-}
-const roundGroups = computed<RoundGroup[]>(() => {
-  const groups: RoundGroup[] = []
-  const byCode = new Map<string, RoundGroup>()
-  for (const r of roundCols.value) {
-    if (!r.parent_round_code) {
-      const g: RoundGroup = { parent: r, children: [] }
-      groups.push(g)
-      byCode.set(r.code, g)
-    }
-  }
-  for (const r of roundCols.value) {
-    if (r.parent_round_code) {
-      const g = byCode.get(r.parent_round_code)
-      if (g) g.children.push(r)
-      else groups.push({ parent: r, children: [] }) // orphan — render solo
-    }
-  }
-  return groups
-})
-
-// Expand/collapse state by parent code. Default: every group collapsed
-// except the rightmost parent (current modeling focus).
-const expandedParents = ref<Set<string>>(new Set())
-watch(roundGroups, (gs) => {
-  if (!gs.length) return
-  // Seed once; subsequent recomputes preserve user toggles.
-  if (expandedParents.value.size === 0) {
-    const last = gs[gs.length - 1]
-    if (last) expandedParents.value = new Set([last.parent.code])
-  }
-})
-function toggleExpand(code: string) {
-  const next = new Set(expandedParents.value)
-  if (next.has(code)) next.delete(code)
-  else next.add(code)
-  expandedParents.value = next
-}
-function groupHasChildren(code: string): boolean {
-  return (roundGroups.value.find(g => g.parent.code === code)?.children.length || 0) > 0
-}
-
 // Friendly column label. Carta's raw names ("Series A-1 Preferred (SA1)") are
-// noisy on the Summary header; we strip the "Preferred (CODE)" suffix and,
-// for parent rounds only, drop the trailing "-1" since the first close
-// defines the canonical round (SA1 -> "Series A", PB1 -> "Series B"). SA4
-// keeps its "-4" because it's a separate extension/bridge round.
+// noisy on the Summary header; strip the "Preferred (CODE)" suffix and the
+// standalone "(CODE)" parenthetical. Every round shows its own subround
+// suffix (SA1 -> "Series A-1", PB2 -> "Series B-2") — peers in the timeline.
 function friendlyRoundLabel(r: RoundColumn): string {
   if (r.kind === 'formation') return 'Formation'
-  if (r.kind === 'open') return r.name || r.code
+  // Synthesized open round (no DB row) shows the assumptions name verbatim.
+  if (r.round_id === 'open') return r.name || 'Open round'
+  // Every other round — closed or matched-open — gets the Carta suffix
+  // stripped: "Series A-1 Preferred (SA1)" -> "Series A-1".
   const raw = (r.name || r.code).trim()
-  let label = raw
+  return raw
     .replace(/\s+Preferred\s*\([A-Z][A-Z0-9-]+\)\s*$/i, '')
-    .replace(/\s*\([A-Z][A-Z0-9-]+\)\s*$/i, '')
-  if (!r.parent_round_code) label = label.replace(/-1$/, '')
-  return label || r.code
+    .replace(/\s*\([A-Z][A-Z0-9-]+\)\s*$/i, '') || r.code
 }
 
 // Soft amber tint marks every cell that's a user-input field, so the operator
 // can tell at a glance which numbers they own vs which are derived from the
 // ledger import. Focus state clears the tint and switches to the accent ring.
 const inputCellClass = 'w-full bg-amber-50 border border-amber-300 hover:border-amber-500 focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-accent-500 rounded px-1 py-0.5 text-right text-[12px] text-ink-900 num'
-
-// Roll-up math: when a group is collapsed, the parent column shows aggregate
-// values across parent + children. When expanded, parent + children render
-// as separate columns each with their own values (no roll-up).
-function rolledUp(g: RoundGroup): RoundColumn {
-  if (!g.children.length) return g.parent
-  const last = g.children[g.children.length - 1] ?? g.parent
-  return {
-    ...g.parent,
-    // Closing date = latest among parent + children.
-    close_date: [g.parent.close_date, ...g.children.map(c => c.close_date)]
-      .filter((d): d is string => !!d)
-      .sort()
-      .pop() ?? g.parent.close_date,
-    new_money: g.parent.new_money + g.children.reduce((a, c) => a + c.new_money, 0),
-    notes_financing: g.parent.notes_financing + g.children.reduce((a, c) => a + c.notes_financing, 0),
-    preferred_issued: g.parent.preferred_issued + g.children.reduce((a, c) => a + c.preferred_issued, 0),
-    notes_converted: g.parent.notes_converted + g.children.reduce((a, c) => a + c.notes_converted, 0),
-    option_pool_issued: g.parent.option_pool_issued + g.children.reduce((a, c) => a + c.option_pool_issued, 0),
-    // Cumulative metrics flow with the last child (which closed last).
-    total_shares_fds: last.total_shares_fds,
-    cumulated_financing: last.cumulated_financing,
-    // post-money for the parent recomputes against the aggregated CN total.
-    post_money: (g.parent.pre_money || 0) + g.parent.new_money
-      + g.parent.notes_financing + g.children.reduce((a, c) => a + c.notes_financing, 0),
-  }
-}
-
-// Flattened render order: one entry per visible column, with a `role` tag so
-// the template can style child cells differently and emit "inherited" pre-money
-// markers.
-type RenderRole = 'rollup' | 'parent' | 'child'
-interface RenderCol { col: RoundColumn; role: RenderRole; groupCode: string }
-const renderCols = computed<RenderCol[]>(() => {
-  const out: RenderCol[] = []
-  for (const g of roundGroups.value) {
-    if (!expandedParents.value.has(g.parent.code) || !g.children.length) {
-      out.push({ col: g.children.length ? rolledUp(g) : g.parent, role: 'rollup', groupCode: g.parent.code })
-    } else {
-      out.push({ col: g.parent, role: 'parent', groupCode: g.parent.code })
-      for (const c of g.children) out.push({ col: c, role: 'child', groupCode: g.parent.code })
-    }
-  }
-  return out
-})
 
 // Inline edit of a round's close date (Closing date row, Summary card).
 // Open rounds don't get an input; the synthesized 'open' row_id has no DB
@@ -557,42 +460,26 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
       <UiCard
         v-if="roundCols.length"
         title="Summary cap table"
-        subtitle="Per-round breakdown — chronological. Each parent collapses; CN-conversion subrounds inset on expand."
+        subtitle="One column per round — chronological by close date. Open round highlighted."
         :padded="false"
       >
         <div class="overflow-x-auto">
           <table class="text-[12px] border-separate whitespace-nowrap" style="border-spacing: 0; min-width: 100%;">
             <colgroup>
               <col style="width: 220px" />
-              <col v-for="rc in renderCols" :key="rc.col.round_id" :style="{ minWidth: rc.role === 'child' ? '110px' : '140px' }" />
+              <col v-for="r in roundCols" :key="r.round_id" style="min-width: 140px" />
             </colgroup>
             <thead class="text-ink-700 bg-ink-100">
               <tr>
                 <th class="px-3 py-2 border-b border-ink-300 text-left text-[11px] font-semibold uppercase tracking-wide">Capitalization table</th>
                 <th
-                  v-for="rc in renderCols"
-                  :key="rc.col.round_id"
+                  v-for="r in roundCols"
+                  :key="r.round_id"
                   class="px-3 py-2 border-b border-ink-300 text-right text-[11px] font-semibold"
-                  :class="[
-                    rc.col.kind === 'open' ? 'bg-accent-50 text-accent-700' : 'text-ink-700',
-                    rc.role === 'child' ? 'bg-ink-50/60 text-ink-600 pl-6' : '',
-                  ]"
+                  :class="r.kind === 'open' ? 'bg-accent-50 text-accent-700' : 'text-ink-700'"
                 >
-                  <div class="flex items-center justify-end gap-1.5">
-                    <button
-                      v-if="rc.role !== 'child' && groupHasChildren(rc.groupCode)"
-                      type="button"
-                      class="text-ink-500 hover:text-ink-900 inline-flex items-center"
-                      @click="toggleExpand(rc.groupCode)"
-                      :title="expandedParents.has(rc.groupCode) ? 'Collapse subrounds' : 'Expand subrounds'"
-                    >
-                      <span v-if="expandedParents.has(rc.groupCode)" class="text-[10px]">▼</span>
-                      <span v-else class="text-[10px]">▶</span>
-                    </button>
-                    <span v-if="rc.role === 'child'" class="text-ink-400 mr-0.5" aria-hidden="true">↳</span>
-                    <span>{{ friendlyRoundLabel(rc.col) }}</span>
-                  </div>
-                  <div v-if="rc.col.kind === 'open'" class="text-[9px] font-medium uppercase tracking-wider text-accent-600">open</div>
+                  <div>{{ friendlyRoundLabel(r) }}</div>
+                  <div v-if="r.kind === 'open'" class="text-[9px] font-medium uppercase tracking-wider text-accent-600">open</div>
                 </th>
               </tr>
             </thead>
@@ -603,78 +490,70 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                    it falls through to a dash. -->
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Closing date of funding</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
-                  <template v-if="rc.col.kind === 'open'">
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  <template v-if="r.kind === 'open'">
                     <span class="text-ink-400">—</span>
                   </template>
                   <template v-else>
                     <input
                       type="date"
-                      :value="rc.col.close_date || ''"
+                      :value="r.close_date || ''"
                       :class="inputCellClass + ' cursor-pointer'"
-                      @change="updateRoundCloseDate(rc.col.round_id, ($event.target as HTMLInputElement).value)"
+                      @change="updateRoundCloseDate(r.round_id, ($event.target as HTMLInputElement).value)"
                     />
                   </template>
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Pre-money valuation ($)</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
-                  <template v-if="rc.role === 'child'">
-                    <span class="text-ink-400 italic text-[11px]">inherited</span>
-                  </template>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
                   <NumberInput
-                    v-else
                     variant="bare"
                     prefix="$"
-                    :model-value="rc.col.pre_money"
+                    :model-value="r.pre_money"
                     placeholder="—"
                     :input-class="inputCellClass"
                     title="Pre-money valuation — user input"
-                    @update:model-value="(v) => updateRoundPreMoney(rc.col.round_id, v == null ? '' : String(v))"
+                    @update:model-value="(v) => updateRoundPreMoney(r.round_id, v == null ? '' : String(v))"
                   />
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">New money ($)</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
-                  <template v-if="rc.role === 'child'">
-                    <span class="text-ink-400">—</span>
-                  </template>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
                   <NumberInput
-                    v-else
                     variant="bare"
                     prefix="$"
-                    :model-value="rc.col.new_money || null"
+                    :model-value="r.new_money || null"
                     placeholder="—"
                     :input-class="inputCellClass"
                     title="New money — user input"
-                    @update:model-value="(v) => updateRoundNewMoney(rc.col.round_id, v == null ? '' : String(v))"
+                    @update:model-value="(v) => updateRoundNewMoney(r.round_id, v == null ? '' : String(v))"
                   />
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Notes financing ($)</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
-                  {{ rc.col.notes_financing ? fmtUSD(rc.col.notes_financing) : '—' }}
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  {{ r.notes_financing ? fmtUSD(r.notes_financing) : '—' }}
                 </td>
               </tr>
               <tr class="font-medium">
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-800">Post-money valuation ($)</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-900" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40 text-accent-700' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
-                  {{ rc.col.post_money ? fmtUSD(rc.col.post_money) : '—' }}
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-900" :class="r.kind === 'open' ? 'bg-accent-50/40 text-accent-700' : ''">
+                  {{ r.post_money ? fmtUSD(r.post_money) : '—' }}
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Share price ($)</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
-                  {{ rc.col.share_price ? fmtPricePerShare(rc.col.share_price) : '—' }}
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  {{ r.share_price ? fmtPricePerShare(r.share_price) : '—' }}
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Cumulated financing</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
-                  {{ fmtUSD(rc.col.cumulated_financing) }}
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  {{ fmtUSD(r.cumulated_financing) }}
                 </td>
               </tr>
 
@@ -684,42 +563,42 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               <!-- Per-round share contributions -->
               <tr class="font-medium">
                 <td class="px-3 py-1.5 border-b border-ink-300 border-t-2 text-ink-900">Total shares issued (#) — fully diluted</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-300 border-t-2 text-right text-ink-900" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40 text-accent-700' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
-                  {{ rc.col.total_shares_fds ? fmtShares(rc.col.total_shares_fds) : '—' }}
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-300 border-t-2 text-right text-ink-900" :class="r.kind === 'open' ? 'bg-accent-50/40 text-accent-700' : ''">
+                  {{ r.total_shares_fds ? fmtShares(r.total_shares_fds) : '—' }}
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6">Common</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
-                  {{ rc.col.common ? fmtShares(rc.col.common) : '—' }}
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  {{ r.common ? fmtShares(r.common) : '—' }}
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6">Preferred issued</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
-                  {{ rc.col.preferred_issued ? fmtShares(rc.col.preferred_issued) : '—' }}
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  {{ r.preferred_issued ? fmtShares(r.preferred_issued) : '—' }}
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6">Notes converted</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
-                  {{ rc.col.notes_converted ? fmtShares(rc.col.notes_converted) : '—' }}
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  {{ r.notes_converted ? fmtShares(r.notes_converted) : '—' }}
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6">Option pool issued</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
-                  <template v-if="rc.col.round_id === 'open'">
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
+                  <template v-if="r.round_id === 'open'">
                     <span class="text-ink-400">—</span>
                   </template>
                   <NumberInput
                     v-else
                     variant="bare"
-                    :model-value="rc.col.option_pool_issued || null"
+                    :model-value="r.option_pool_issued || null"
                     placeholder="—"
                     :input-class="inputCellClass"
                     title="Option pool issued — user input"
-                    @update:model-value="(v) => updateRoundPoolIssued(rc.col.round_id, v == null ? '' : String(v))"
+                    @update:model-value="(v) => updateRoundPoolIssued(r.round_id, v == null ? '' : String(v))"
                   />
                 </td>
               </tr>
