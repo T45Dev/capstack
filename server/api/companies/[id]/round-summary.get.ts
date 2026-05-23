@@ -46,21 +46,44 @@ export default defineEventHandler((event) => {
     share_price: number | null; new_money: number; debt_canceled: number; seniority: number;
   }>
 
-  // Chronological order is driven by close_date (ISO strings sort
-  // lexically). Rounds whose date is null fall to the end of the dated
-  // group; ties — and date-less rounds — break on the import-order
-  // seniority. The Open Round's stored date is honoured even though the
-  // response suppresses it for display, so toggling the open/closed flag
-  // doesn't shuffle the timeline.
+  // Read Assumptions early — its round_name drives both the sort (open
+  // rounds are treated as date-less) and the per-round flip below.
+  const assumptions = db().prepare('SELECT * FROM assumptions WHERE company_id = ?').get(id) as any || {}
+
+  // Resolve which round (if any) Assumptions is pointing at as "Open". Match
+  // either the round's code (case-insensitive) OR a substring of the round's
+  // display name — Assumptions stores friendly labels like "Series B-2" while
+  // the rounds table holds either the class code ("PB2") or the full Carta
+  // name ("Series B-2 Preferred (PB2)"). If nothing matches, we synthesize a
+  // fresh open-round column at the end so the user can still model future
+  // rounds (Series C / B-3 / etc.) that aren't in the cap table yet.
+  const openRoundName = (assumptions.round_name && String(assumptions.round_name).trim()) || ''
+  const openRoundLc = openRoundName.toLowerCase()
+  function isOpenRound(r: { code: string; name: string | null }): boolean {
+    if (!openRoundLc) return false
+    if (r.code.toLowerCase() === openRoundLc) return true
+    if (r.name && r.name.toLowerCase().includes(openRoundLc)) return true
+    return false
+  }
+
+  // Chronological order is driven by close_date (ISO strings sort lexically).
+  // Open rounds are treated as date-less for sort purposes — a round whose
+  // close date isn't (yet) set is "most recent / TBD" by convention and
+  // anchors to the end of the timeline. Ties — and other date-less rounds —
+  // break on the import-order seniority.
   rounds.sort((a, b) => {
-    if (a.close_date && b.close_date) {
-      if (a.close_date !== b.close_date) return a.close_date.localeCompare(b.close_date)
+    const aDate = isOpenRound(a) ? null : a.close_date
+    const bDate = isOpenRound(b) ? null : b.close_date
+    if (aDate && bDate) {
+      if (aDate !== bDate) return aDate.localeCompare(bDate)
       return a.seniority - b.seniority
     }
-    if (a.close_date) return -1
-    if (b.close_date) return 1
+    if (aDate) return -1
+    if (bDate) return 1
     return a.seniority - b.seniority
   })
+
+  const openIdx = rounds.findIndex(isOpenRound)
 
   // Share-class lookup so we can sum holdings by round code.
   const classByCode = new Map<string, { id: string; kind: string }>()
@@ -124,26 +147,6 @@ export default defineEventHandler((event) => {
   const pools = db().prepare(
     'SELECT name, authorized, adopted_date FROM option_pools WHERE company_id = ?',
   ).all(id) as Array<{ name: string; authorized: number; adopted_date: string | null }>
-
-  // Assumptions row drives the Open Round column.
-  const assumptions = db().prepare('SELECT * FROM assumptions WHERE company_id = ?').get(id) as any || {}
-
-  // Resolve which round (if any) Assumptions is pointing at as "Open". Match
-  // either the round's code (case-insensitive) OR a substring of the round's
-  // display name — Assumptions stores friendly labels like "Series B-2" while
-  // the rounds table holds either the class code ("PB2") or the full Carta
-  // name ("Series B-2 Preferred (PB2)"). If nothing matches, we synthesize a
-  // fresh open-round column at the end so the user can still model future
-  // rounds (Series C / B-3 / etc.) that aren't in the cap table yet.
-  const openRoundName = (assumptions.round_name && String(assumptions.round_name).trim()) || ''
-  const openRoundLc = openRoundName.toLowerCase()
-  function matchesOpen(r: { code: string; name: string | null }): boolean {
-    if (!openRoundLc) return false
-    if (r.code.toLowerCase() === openRoundLc) return true
-    if (r.name && r.name.toLowerCase().includes(openRoundLc)) return true
-    return false
-  }
-  const openIdx = openRoundLc ? rounds.findIndex(matchesOpen) : -1
 
   // Pool attribution: when option_pools rows lack an adopted_date the cap-
   // table import doesn't tell us which round authorized them. Heuristic:
