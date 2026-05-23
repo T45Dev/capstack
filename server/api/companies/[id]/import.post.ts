@@ -224,6 +224,16 @@ export default defineEventHandler(async (event) => {
       } catch (err: any) {
         parsed.warnings.push(`Couldn't write option pool: ${err?.message || err}`)
       }
+      // Seed per-round attribution: the whole imported pool lands on
+      // Formation. The user can move chunks to other rounds (e.g. PB1
+      // tranche) inline on the Cap Table Summary card. See spec §5.1.
+      const formationRow = db().prepare(
+        `SELECT id FROM rounds WHERE company_id = ? AND kind = 'formation' LIMIT 1`,
+      ).get(id) as { id: string } | undefined
+      if (formationRow) {
+        db().prepare('UPDATE rounds SET option_pool_issued = ? WHERE id = ?')
+          .run(poolSize, formationRow.id)
+      }
     }
 
     // Audit row

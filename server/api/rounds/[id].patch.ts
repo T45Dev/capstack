@@ -10,7 +10,8 @@ export default defineEventHandler(async (event) => {
 
   const fields = [
     'name', 'kind', 'close_date', 'share_class_code',
-    'share_price', 'new_money', 'debt_canceled', 'seniority', 'notes',
+    'share_price', 'new_money', 'debt_canceled', 'option_pool_issued',
+    'seniority', 'notes',
   ]
   const updates: string[] = []
   const params: any[] = []
