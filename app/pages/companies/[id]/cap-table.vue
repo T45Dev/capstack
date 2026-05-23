@@ -586,7 +586,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                 >
                   <div class="flex items-center justify-end gap-1.5">
                     <button
-                      v-if="rc.role === 'parent' && groupHasMultipleSubrounds(rc.groupCode)"
+                      v-if="(rc.role === 'parent' && groupHasMultipleSubrounds(rc.groupCode)) || rc.role === 'subround'"
                       type="button"
                       class="text-ink-500 hover:text-ink-900 inline-flex items-center"
                       @click="toggleGroup(rc.groupCode)"
