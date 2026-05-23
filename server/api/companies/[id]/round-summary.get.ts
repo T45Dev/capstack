@@ -18,13 +18,20 @@ interface RoundColumn {
   code: string                    // "CS" / "SS" / "SA1" / "PB1" / "OPEN"
   name: string | null             // friendly display, e.g. "Series A-1"
   kind: 'formation' | 'closed' | 'open'
+  // Parent funding round (derived from share-class prefix). Subrounds with
+  // the same group_code roll up into one column on the Summary card by
+  // default; pre-money is stored on the group's primary subround.
+  group_code: string              // "CS" / "SS" / "SA" / "PB" / "OPEN"
+  group_name: string              // "Formation" / "Series Seed" / "Series A" / "Series B"
+  is_group_primary: boolean       // true on the round that owns the group's pre-money
+  group_pre_money: number | null  // group's pre-money (same on every member; null if unset)
   close_date: string | null
   seniority: number               // chronological order; open round always last
   share_class_code: string | null
   share_price: number | null      // ledger Original Issue Price; for OPEN: pre_money / pre_FDS
   new_money: number               // ledger Cash Contributed sum; for OPEN: assumptions.new_money
   notes_financing: number         // sum of CN principal+interest attributed to this round
-  pre_money: number | null        // user-typed; null if blank
+  pre_money: number | null        // user-typed on the group primary; null if blank
   post_money: number              // pre_money + new_money + notes_financing
   // Share contributions added at this round (NOT cumulative). For
   // CN-driven classes (SA2/SA3/PB2 in ANT) the holdings ARE the CN-converted
@@ -85,6 +92,42 @@ export default defineEventHandler((event) => {
     return a.seniority - b.seniority
   })
   const openIdx = rounds.findIndex(isOpenRound)
+
+  // Derive the parent funding round each subround belongs to. Heuristic:
+  //   - code "CS" -> Formation
+  //   - All other share-class codes: strip trailing digits to get the group
+  //     prefix ("SA1" -> "SA", "PB2" -> "PB", "SS" -> "SS")
+  // The group name comes from stripping "-N Preferred (XYZ)" off the
+  // round's friendly Carta name ("Series A-1 Preferred (SA1)" -> "Series A").
+  function groupCodeOf(code: string, kind: string): string {
+    if (kind === 'formation') return 'CS'
+    const stripped = code.replace(/\d+$/, '')
+    return stripped || code
+  }
+  function groupNameOf(r: { code: string; name: string | null; kind: string }): string {
+    if (r.kind === 'formation') return 'Formation'
+    const raw = (r.name || r.code).trim()
+    const stripped = raw
+      .replace(/-\d+\s+Preferred\s*\([A-Z][A-Z0-9-]+\)\s*$/i, '')
+      .replace(/\s+Preferred\s*\([A-Z][A-Z0-9-]+\)\s*$/i, '')
+      .replace(/\s*\([A-Z][A-Z0-9-]+\)\s*$/i, '')
+    return stripped || r.code
+  }
+
+  // Identify the primary subround per group: lowest seniority within each
+  // group is the one that owns the group's pre-money. All other subrounds
+  // in the group inherit by reading the primary's pre_money on display.
+  const primaryByGroup = new Map<string, string>() // group_code -> primary round id
+  const preMoneyByGroup = new Map<string, number | null>() // group_code -> pre_money
+  // Walk in seniority order to pick the primary (lowest seniority wins).
+  const byGroupSenSorted = [...rounds].sort((a, b) => a.seniority - b.seniority)
+  for (const r of byGroupSenSorted) {
+    const gc = groupCodeOf(r.code, r.kind)
+    if (!primaryByGroup.has(gc)) {
+      primaryByGroup.set(gc, r.id)
+      preMoneyByGroup.set(gc, (r.pre_money != null && r.pre_money !== 0) ? r.pre_money : null)
+    }
+  }
 
   // Share-class lookup so we can sum holdings by round code.
   const classByCode = new Map<string, { id: string; kind: string }>()
@@ -182,11 +225,20 @@ export default defineEventHandler((event) => {
     cumulativeFDS += sharesAdded
     cumulativeFinancing += newMoney + cnDollars
 
+    const gc = groupCodeOf(r.code, r.kind)
+    const gn = groupNameOf(r)
+    const isPrimary = primaryByGroup.get(gc) === r.id
+    const groupPreMoney = preMoneyByGroup.get(gc) ?? null
+
     cols.push({
       round_id: r.id,
       code: r.code,
       name: r.name,
       kind: effectiveKind,
+      group_code: gc,
+      group_name: gn,
+      is_group_primary: isPrimary,
+      group_pre_money: groupPreMoney,
       close_date: effectiveKind === 'open' ? null : r.close_date,
       seniority: r.seniority,
       share_class_code: r.share_class_code,
@@ -223,6 +275,10 @@ export default defineEventHandler((event) => {
       code: 'OPEN',
       name: openRoundName,
       kind: 'open',
+      group_code: 'OPEN',
+      group_name: openRoundName,
+      is_group_primary: true,
+      group_pre_money: openPreMoney || null,
       close_date: null,
       seniority: rounds.length + 1,
       share_class_code: null,
