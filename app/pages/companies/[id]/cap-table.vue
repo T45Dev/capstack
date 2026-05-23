@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Upload, Filter, ChevronUp, ChevronDown, Plus, Trash2 } from 'lucide-vue-next'
-import { fmtShares, fmtPct, fmtPricePerShare } from '~/utils/format'
+import { fmtShares, fmtPct, fmtPricePerShare, normalizeDate } from '~/utils/format'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -58,8 +58,12 @@ const inputCellClass = 'w-full bg-amber-50 border border-amber-300 hover:border-
 // default.
 async function updateRoundCloseDate(roundId: string, value: string) {
   if (!roundId || roundId === 'open') return
+  // Chrome's "type a 2-digit year" gotcha — "09/09/26" parses as year 26
+  // (0026-09-09) literally, which the date input then can't render. Promote
+  // anything <100 to 2000+yy so the user sees what they meant.
+  const normalized = normalizeDate(value)
   try {
-    await $fetch(`/api/rounds/${roundId}`, { method: 'PATCH', body: { close_date: value || null } })
+    await $fetch(`/api/rounds/${roundId}`, { method: 'PATCH', body: { close_date: normalized || null } })
     await refreshRoundSummary()
   } catch (e) {
     console.error('Failed to update round close date', e)
