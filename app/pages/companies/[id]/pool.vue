@@ -42,14 +42,37 @@ const fdsIncludingPool = computed(() => {
 })
 
 // ---- Build the unified timeline ----
+// Per spec §5.6, idea sub-types cover Future grants, Top-ups, Exercise,
+// Forfeit, Floor, and Reserve. Each maps to a direction (+/-/0) for the
+// running-pool calculation.
+type EventType = 'pool_topup' | 'grant' | 'exercise' | 'forfeit' | 'floor' | 'reserve'
+
+function directionFor(type: EventType): -1 | 0 | 1 {
+  if (type === 'pool_topup' || type === 'forfeit') return 1
+  if (type === 'grant' || type === 'reserve') return -1
+  // exercise: shares move from option → common, no net pool change
+  // floor: constraint, not an event
+  return 0
+}
+
+function labelFor(type: EventType, kind?: 'ISO' | 'NSO' | null): string {
+  if (type === 'pool_topup') return 'Pool top-up'
+  if (type === 'grant')      return kind || 'Grant'
+  if (type === 'exercise')   return 'Exercise'
+  if (type === 'forfeit')    return 'Forfeit'
+  if (type === 'floor')      return 'Floor'
+  if (type === 'reserve')    return 'Reserve'
+  return type
+}
+
 interface TimelineEvent {
   id: string
   date: string                 // ISO yyyy-mm-dd
   name: string
-  type: 'pool_topup' | 'grant'
+  type: EventType
   kind: 'ISO' | 'NSO' | null
   shares: number               // unsigned magnitude
-  direction: 1 | -1            // +1 adds to pool, -1 subtracts
+  direction: -1 | 0 | 1        // +1 adds to pool, -1 subtracts, 0 informational
   source: 'pool' | 'grant_outstanding' | 'grant_proposed' | 'idea'
   ideaId?: string              // pool_events.id when source === 'idea'
   grantId?: string             // grants.id when source === grant_*
@@ -90,14 +113,15 @@ const events = computed<TimelineEvent[]>(() => {
 
   // Ideas
   for (const ie of (ideas.value || [])) {
+    const t = ie.type as EventType
     out.push({
       id: `idea:${ie.id}`,
       date: ie.event_date,
       name: ie.name,
-      type: ie.type,
+      type: t,
       kind: ie.kind,
       shares: ie.shares,
-      direction: ie.type === 'pool_topup' ? 1 : -1,
+      direction: directionFor(t),
       source: 'idea',
       ideaId: ie.id,
       vestMonths: ie.vest_months ?? 48,
@@ -179,14 +203,17 @@ const chartPoints = computed<ChartPoint[]>(() => {
 
 // ---- Top stat values ----
 const totals = computed(() => {
-  const poolAuthorized = events.value.filter(e => e.type === 'pool_topup' && e.source !== 'idea').reduce((a, e) => a + e.shares, 0)
+  const isIdea = (s: string) => s === 'idea'
+  const poolAuthorized = events.value.filter(e => e.type === 'pool_topup' && !isIdea(e.source)).reduce((a, e) => a + e.shares, 0)
   const outstandingShares = events.value.filter(e => e.source === 'grant_outstanding').reduce((a, e) => a + e.shares, 0)
   const proposedShares = events.value.filter(e => e.source === 'grant_proposed').reduce((a, e) => a + e.shares, 0)
-  const ideaGrants = events.value.filter(e => e.source === 'idea' && e.type === 'grant').reduce((a, e) => a + e.shares, 0)
-  const ideaTopups = events.value.filter(e => e.source === 'idea' && e.type === 'pool_topup').reduce((a, e) => a + e.shares, 0)
+  const ideaGrants = events.value.filter(e => isIdea(e.source) && (e.type === 'grant' || e.type === 'reserve')).reduce((a, e) => a + e.shares, 0)
+  const ideaTopups = events.value.filter(e => isIdea(e.source) && e.type === 'pool_topup').reduce((a, e) => a + e.shares, 0)
+  const ideaForfeits = events.value.filter(e => isIdea(e.source) && e.type === 'forfeit').reduce((a, e) => a + e.shares, 0)
+  const floorShares = events.value.filter(e => isIdea(e.source) && e.type === 'floor').reduce((a, e) => Math.max(a, e.shares), 0)
   const available = poolAuthorized - outstandingShares - proposedShares
-  const projectedEnd = poolAuthorized + ideaTopups - outstandingShares - proposedShares - ideaGrants
-  return { poolAuthorized, outstandingShares, proposedShares, ideaGrants, ideaTopups, available, projectedEnd }
+  const projectedEnd = poolAuthorized + ideaTopups + ideaForfeits - outstandingShares - proposedShares - ideaGrants
+  return { poolAuthorized, outstandingShares, proposedShares, ideaGrants, ideaTopups, ideaForfeits, floorShares, available, projectedEnd }
 })
 
 // ---- Idea modal ----
@@ -196,7 +223,7 @@ type InputMode = 'shares' | 'pct' | 'value'
 const inputMode = ref<InputMode>('shares')
 const form = reactive({
   event_date: new Date().toISOString().slice(0, 10),
-  type: 'grant' as 'grant' | 'pool_topup',
+  type: 'grant' as EventType,
   name: '',
   kind: 'NSO' as 'ISO' | 'NSO',
   shares: 0,
@@ -206,6 +233,17 @@ const form = reactive({
   cliff_months: 12,
   notes: '',
 })
+
+// Idea sub-types shown in the modal selector — order matches the spec §5.6
+// listing.
+const IDEA_SUBTYPES: Array<{ value: EventType; label: string; hint: string }> = [
+  { value: 'grant',      label: 'Future grant', hint: 'Hypothetical new option grant (reduces available pool)' },
+  { value: 'pool_topup', label: 'Top-up',       hint: 'Add shares to the pool authorized' },
+  { value: 'exercise',   label: 'Exercise',     hint: 'Optionholder exercises (informational; no net pool change)' },
+  { value: 'forfeit',    label: 'Forfeit',      hint: 'Grant lapses and returns to pool' },
+  { value: 'floor',      label: 'Floor',        hint: 'Minimum the pool can fall to — a buffer constraint' },
+  { value: 'reserve',    label: 'Reserve',      hint: 'Hold-back for refresh / performance (reduces available)' },
+]
 
 // Two-way conversion among shares / % / $.
 //   shares = pct × fds   = value / pps
@@ -276,14 +314,15 @@ async function saveIdea() {
   if (!form.name.trim() || form.shares <= 0 || saving.value) return
   saving.value = true
   try {
+    const isGrant = form.type === 'grant'
     const body = {
       event_date: form.event_date,
       type: form.type,
       name: form.name.trim(),
-      kind: form.type === 'grant' ? form.kind : null,
+      kind: isGrant ? form.kind : null,
       shares: form.shares,
-      vest_months: form.type === 'grant' ? form.vest_months : null,
-      cliff_months: form.type === 'grant' ? form.cliff_months : null,
+      vest_months: isGrant ? form.vest_months : null,
+      cliff_months: isGrant ? form.cliff_months : null,
       notes: form.notes || null,
     }
     if (editingIdea.value) {
@@ -304,7 +343,49 @@ async function deleteIdea(idea: any) {
   await refreshIdeas()
 }
 
-// ---- Chart geometry ----
+// ---- Pie chart (Outstanding / Proposed / Ideas / Available, spec §5.6) ----
+// SVG donut so the legend can sit beside the slices and the relative
+// weights read at a glance.
+interface PieSlice { key: string; label: string; value: number; color: string; path: string; midAngle: number }
+
+function arcPath(cx: number, cy: number, r: number, startA: number, endA: number, inner: number): string {
+  if (endA - startA < 0.0001) return ''
+  const large = endA - startA > Math.PI ? 1 : 0
+  const sx = cx + r * Math.cos(startA), sy = cy + r * Math.sin(startA)
+  const ex = cx + r * Math.cos(endA),   ey = cy + r * Math.sin(endA)
+  const isx = cx + inner * Math.cos(endA),   isy = cy + inner * Math.sin(endA)
+  const iex = cx + inner * Math.cos(startA), iey = cy + inner * Math.sin(startA)
+  return `M ${sx} ${sy} A ${r} ${r} 0 ${large} 1 ${ex} ${ey} L ${isx} ${isy} A ${inner} ${inner} 0 ${large} 0 ${iex} ${iey} Z`
+}
+
+const pieSlices = computed<PieSlice[]>(() => {
+  const t = totals.value
+  // Available = pool authorized + idea topups + idea forfeits - already-allocated.
+  // Clamp negative (over-allocated) to zero in the chart so a slice never inverts.
+  const totalPie = t.poolAuthorized + t.ideaTopups + t.ideaForfeits
+  const available = Math.max(0, totalPie - t.outstandingShares - t.proposedShares - t.ideaGrants)
+  const segs = [
+    { key: 'outstanding', label: 'Outstanding', value: t.outstandingShares, color: '#475569' },  // ink-500
+    { key: 'proposed',    label: 'Proposed',    value: t.proposedShares,    color: '#2563eb' },  // accent-500
+    { key: 'ideas',       label: 'Ideas',       value: t.ideaGrants,        color: '#fbbf24' },  // amber-400
+    { key: 'available',   label: 'Available',   value: available,           color: '#a7f3d0' },  // emerald-200
+  ]
+  const sum = segs.reduce((a, s) => a + s.value, 0) || 1
+  const cx = 60, cy = 60, r = 56, inner = 28
+  let a = -Math.PI / 2
+  return segs.map(s => {
+    const frac = s.value / sum
+    const endA = a + frac * Math.PI * 2
+    const path = s.value > 0 ? arcPath(cx, cy, r, a, endA, inner) : ''
+    const midAngle = (a + endA) / 2
+    a = endA
+    return { ...s, path, midAngle }
+  })
+})
+
+const pieTotal = computed(() => pieSlices.value.reduce((a, s) => a + s.value, 0))
+
+// ---- Line chart geometry ----
 const chartW = 720, chartH = 160, padL = 50, padR = 12, padT = 10, padB = 26
 const chart = computed(() => {
   const pts = chartPoints.value
@@ -366,33 +447,28 @@ const chart = computed(() => {
         <UiStat label="Ideas (grants)" :value="fmtShares(totals.ideaGrants)" :tone="totals.ideaGrants ? 'warn' : 'default'" />
         <UiStat label="Projected ending" :value="fmtShares(totals.projectedEnd)" emphasis :tone="totals.projectedEnd < 0 ? 'warn' : 'default'" />
       </div>
-      <!-- Stacked bar visual -->
-      <div v-if="totals.poolAuthorized + totals.ideaTopups > 0" class="space-y-1">
-        <div class="flex h-6 rounded-md overflow-hidden border border-ink-300">
-          <div
-            :style="{ width: ((totals.outstandingShares / Math.max(1, totals.poolAuthorized + totals.ideaTopups)) * 100) + '%' }"
-            class="bg-ink-500 text-white text-[10px] flex items-center justify-center font-medium"
-            :title="`Outstanding: ${fmtShares(totals.outstandingShares)}`"
-          >{{ totals.outstandingShares ? 'Out' : '' }}</div>
-          <div
-            :style="{ width: ((totals.proposedShares / Math.max(1, totals.poolAuthorized + totals.ideaTopups)) * 100) + '%' }"
-            class="bg-accent-500 text-white text-[10px] flex items-center justify-center font-medium"
-            :title="`Proposed: ${fmtShares(totals.proposedShares)}`"
-          >{{ totals.proposedShares ? 'Prop' : '' }}</div>
-          <div
-            :style="{ width: ((totals.ideaGrants / Math.max(1, totals.poolAuthorized + totals.ideaTopups)) * 100) + '%' }"
-            class="bg-amber-400 text-ink-900 text-[10px] flex items-center justify-center font-medium"
-            :title="`Idea grants: ${fmtShares(totals.ideaGrants)}`"
-          >{{ totals.ideaGrants ? 'Ideas' : '' }}</div>
-          <div
-            :style="{ width: (Math.max(0, totals.projectedEnd) / Math.max(1, totals.poolAuthorized + totals.ideaTopups) * 100) + '%' }"
-            class="bg-emerald-200 text-emerald-900 text-[10px] flex items-center justify-center font-medium"
-            :title="`Remaining: ${fmtShares(totals.projectedEnd)}`"
-          >{{ totals.projectedEnd > 0 ? 'Free' : '' }}</div>
-        </div>
-        <div class="flex justify-between text-[10px] text-ink-500">
-          <span>0</span>
-          <span>{{ fmtShares(totals.poolAuthorized + totals.ideaTopups) }}</span>
+      <!-- Pie chart — Outstanding / Proposed / Ideas / Available (spec §5.6). -->
+      <div v-if="pieTotal > 0" class="flex items-center gap-6 flex-wrap">
+        <svg viewBox="0 0 120 120" width="120" height="120" class="shrink-0">
+          <g>
+            <path v-for="s in pieSlices" :key="s.key" :d="s.path" :fill="s.color" stroke="white" stroke-width="1" />
+          </g>
+        </svg>
+        <ul class="text-xs text-ink-700 space-y-1.5">
+          <li v-for="s in pieSlices" :key="s.key" class="flex items-center gap-2 num">
+            <span class="inline-block w-3 h-3 rounded-sm" :style="{ background: s.color }" />
+            <span class="text-ink-600 w-24">{{ s.label }}</span>
+            <span class="text-ink-900 font-medium">{{ fmtShares(s.value) }}</span>
+            <span class="text-ink-500">· {{ pieTotal > 0 ? fmtPct(s.value / pieTotal, 1) : '0%' }}</span>
+          </li>
+        </ul>
+        <div v-if="totals.floorShares > 0" class="text-xs text-ink-600 num ml-auto">
+          <div class="flex items-center gap-2">
+            <span class="inline-block w-3 h-3 rounded-sm border-2 border-dashed border-ink-400" />
+            <span class="text-ink-500">Floor</span>
+            <span class="text-ink-900 font-medium">{{ fmtShares(totals.floorShares) }}</span>
+          </div>
+          <p class="text-[10px] text-ink-500 mt-1 max-w-[200px]">Minimum the pool can fall to — informational; doesn't change the totals above.</p>
         </div>
       </div>
     </div>
@@ -463,12 +539,14 @@ const chart = computed(() => {
             <td class="px-2.5 py-1.5 text-ink-700">
               <span class="inline-flex items-center gap-1">
                 <TrendingUp v-if="e.direction > 0" :size="12" class="text-emerald-600" />
-                <ArrowDownIcon v-else :size="12" class="text-red-500" />
-                {{ e.type === 'pool_topup' ? 'Pool top-up' : (e.kind || 'Grant') }}
+                <ArrowDownIcon v-else-if="e.direction < 0" :size="12" class="text-red-500" />
+                <span v-else class="inline-block w-3 h-3 rounded-full border border-ink-400" />
+                {{ labelFor(e.type, e.kind) }}
               </span>
             </td>
-            <td class="px-2.5 py-1.5 text-right" :class="e.direction > 0 ? 'text-emerald-700' : 'text-red-600'">
-              {{ e.direction > 0 ? '+' : '−' }}{{ fmtShares(e.shares) }}
+            <td class="px-2.5 py-1.5 text-right" :class="e.direction > 0 ? 'text-emerald-700' : e.direction < 0 ? 'text-red-600' : 'text-ink-500'">
+              <template v-if="e.direction === 0">{{ fmtShares(e.shares) }}</template>
+              <template v-else>{{ e.direction > 0 ? '+' : '−' }}{{ fmtShares(e.shares) }}</template>
             </td>
             <td class="px-2.5 py-1.5 text-right text-ink-900 font-medium">{{ fmtShares(e.running) }}</td>
             <td class="px-2.5 py-1.5 text-right text-ink-600">{{ fmtPct(fdsIncludingPool > 0 ? e.shares / fdsIncludingPool : 0, 2) }}</td>
@@ -493,14 +571,27 @@ const chart = computed(() => {
 
         <div class="grid grid-cols-2 gap-3">
           <label class="block col-span-2">
-            <span class="block text-xs font-medium text-ink-700 mb-1">Event type</span>
-            <div class="inline-flex rounded-md border border-ink-300 bg-white p-0.5 text-sm w-full">
-              <button type="button" class="flex-1 px-2.5 py-1 rounded-[5px] font-medium" :class="form.type === 'grant' ? 'bg-accent-500 text-white' : 'text-ink-700'" @click="form.type = 'grant'">Grant</button>
-              <button type="button" class="flex-1 px-2.5 py-1 rounded-[5px] font-medium" :class="form.type === 'pool_topup' ? 'bg-accent-500 text-white' : 'text-ink-700'" @click="form.type = 'pool_topup'">Pool top-up</button>
+            <span class="block text-xs font-medium text-ink-700 mb-1">Sub-type</span>
+            <div class="grid grid-cols-3 gap-1.5">
+              <button
+                v-for="opt in IDEA_SUBTYPES"
+                :key="opt.value"
+                type="button"
+                class="text-xs px-2 py-1.5 rounded-md border transition-colors font-medium"
+                :class="form.type === opt.value ? 'border-accent-500 bg-accent-50 text-accent-700' : 'border-ink-300 bg-white text-ink-700 hover:border-accent-300'"
+                :title="opt.hint"
+                @click="form.type = opt.value"
+              >{{ opt.label }}</button>
             </div>
+            <p class="mt-1 text-[10px] text-ink-500">{{ IDEA_SUBTYPES.find(o => o.value === form.type)?.hint }}</p>
           </label>
 
-          <UiInput v-model="form.name" label="Name" :placeholder="form.type === 'grant' ? 'Future CEO' : 'Q3 2026 top-up'" class="col-span-2" />
+          <UiInput
+            v-model="form.name"
+            label="Name"
+            :placeholder="form.type === 'grant' ? 'Future CEO' : form.type === 'pool_topup' ? 'Q3 2026 top-up' : form.type === 'floor' ? 'Buffer (don\'t drop below)' : form.type === 'reserve' ? 'Refresh reserve' : form.type === 'forfeit' ? 'Lapse — unvested' : 'Exercise — vested options'"
+            class="col-span-2"
+          />
           <UiInput v-model="form.event_date" type="date" label="Target date" />
           <label v-if="form.type === 'grant'" class="block">
             <span class="block text-xs font-medium text-ink-700 mb-1">ISO / NSO</span>
