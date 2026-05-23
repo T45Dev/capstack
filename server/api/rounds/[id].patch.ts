@@ -9,9 +9,10 @@ export default defineEventHandler(async (event) => {
   const body = await readBody<Record<string, any>>(event)
 
   const fields = [
-    'name', 'kind', 'close_date', 'share_class_code',
+    'code', 'name', 'kind', 'close_date', 'share_class_code',
     'share_price', 'new_money', 'debt_canceled', 'option_pool_issued',
-    'pre_money', 'parent_round_code', 'seniority', 'notes',
+    'pre_money', 'preferred_issued', 'common',
+    'parent_round_code', 'seniority', 'notes',
   ]
   const updates: string[] = []
   const params: any[] = []
