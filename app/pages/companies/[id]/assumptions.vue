@@ -32,6 +32,7 @@ interface AssumptionVersion {
 }
 
 const { data: assumptions } = await useFetch<AssumptionsRow>(() => `/api/companies/${id.value}/assumptions`, { watch: [id] })
+const { data: company, refresh: refreshCompany } = await useFetch<any>(() => `/api/companies/${id.value}`, { watch: [id], default: () => null })
 const { data: versions, refresh: refreshVersions } = await useFetch<AssumptionVersion[]>(() => `/api/companies/${id.value}/assumption-versions`, { watch: [id], default: () => [] })
 
 const form = reactive({
@@ -44,6 +45,11 @@ const form = reactive({
   notes: '',
 })
 
+// Most-recently-closed round lives on the company (single source of truth).
+// Mirror it locally so the dropdown is reactive and we can PATCH on change.
+const preRound = ref<string>('')
+watch(company, (c) => { if (c) preRound.value = c.starting_round || '' }, { immediate: true })
+
 watch(assumptions, (a) => {
   if (!a) return
   form.round_name = a.round_name
@@ -54,6 +60,12 @@ watch(assumptions, (a) => {
   form.cn_conversion_basis = a.cn_conversion_basis
   form.notes = a.notes || ''
 }, { immediate: true })
+
+async function setPreRound(val: string) {
+  preRound.value = val
+  await $fetch(`/api/companies/${id.value}`, { method: 'PATCH', body: { starting_round: val } })
+  await refreshCompany()
+}
 
 const computeBody = computed(() => ({
   newMoney: form.new_money,
@@ -159,10 +171,20 @@ const seriesShortcuts = [
          they roll up into round math. Each editable variable appears wherever
          it's used; same v-model so all instances stay in sync. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card p-4 mb-4">
-      <!-- Selectors strip -->
+      <!-- Selectors strip. Two round dropdowns frame the rest of the page
+           (spec §5.2): the most-recently-closed round defines the "pre"
+           baseline; the open round is the one being modeled. Together they
+           drive CN bucketing (pre vs. new) on §5.3. -->
       <div class="flex items-center gap-3 mb-4 pb-3 border-b border-ink-200 flex-wrap">
         <label class="flex items-center gap-2">
-          <span class="text-[11px] font-medium text-ink-500 uppercase tracking-wider">Round</span>
+          <span class="text-[11px] font-medium text-ink-500 uppercase tracking-wider">Most recently closed round</span>
+          <select :value="preRound" @change="setPreRound(($event.target as HTMLSelectElement).value)" class="rounded-md border border-ink-300 bg-white px-2.5 py-1 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500">
+            <option value="">—</option>
+            <option v-for="s in seriesShortcuts" :key="s" :value="s">{{ s }}</option>
+          </select>
+        </label>
+        <label class="flex items-center gap-2">
+          <span class="text-[11px] font-medium text-ink-500 uppercase tracking-wider">Open round</span>
           <select v-model="form.round_name" class="rounded-md border border-ink-300 bg-white px-2.5 py-1 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500">
             <option v-for="s in seriesShortcuts" :key="s" :value="s">{{ s }}</option>
           </select>
@@ -232,7 +254,7 @@ const seriesShortcuts = [
           <span class="pb-5 text-ink-500 text-base">+</span>
           <div class="flex flex-col">
             <span class="px-2 py-1 text-sm num rounded-md bg-ink-100 text-ink-800 text-right min-w-[7rem]">{{ fmtShares(compute?.round?.newPreferredShares) }}</span>
-            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">new preferred</span>
+            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">new FDS</span>
           </div>
           <span class="pb-5 text-ink-500 text-base">+</span>
           <div class="flex flex-col">
