@@ -49,9 +49,11 @@ type EventType = 'pool_topup' | 'grant' | 'exercise' | 'forfeit' | 'floor' | 're
 
 function directionFor(type: EventType): -1 | 0 | 1 {
   if (type === 'pool_topup' || type === 'forfeit') return 1
-  if (type === 'grant' || type === 'reserve') return -1
-  // exercise: shares move from option → common, no net pool change
-  // floor: constraint, not an event
+  // grant, reserve, exercise all reduce the pool. Per the "deck of cards" rule
+  // in spec §2 Options: exercised options leave the pool and become Common
+  // stock (pool size shrinks by N; Common grows by N; total FDS unchanged).
+  // floor is a constraint, not an event.
+  if (type === 'grant' || type === 'reserve' || type === 'exercise') return -1
   return 0
 }
 
@@ -210,10 +212,12 @@ const totals = computed(() => {
   const ideaGrants = events.value.filter(e => isIdea(e.source) && (e.type === 'grant' || e.type === 'reserve')).reduce((a, e) => a + e.shares, 0)
   const ideaTopups = events.value.filter(e => isIdea(e.source) && e.type === 'pool_topup').reduce((a, e) => a + e.shares, 0)
   const ideaForfeits = events.value.filter(e => isIdea(e.source) && e.type === 'forfeit').reduce((a, e) => a + e.shares, 0)
+  // Idea exercises shrink the pool (shares move to Common). See spec §2 Options.
+  const ideaExercises = events.value.filter(e => isIdea(e.source) && e.type === 'exercise').reduce((a, e) => a + e.shares, 0)
   const floorShares = events.value.filter(e => isIdea(e.source) && e.type === 'floor').reduce((a, e) => Math.max(a, e.shares), 0)
   const available = poolAuthorized - outstandingShares - proposedShares
-  const projectedEnd = poolAuthorized + ideaTopups + ideaForfeits - outstandingShares - proposedShares - ideaGrants
-  return { poolAuthorized, outstandingShares, proposedShares, ideaGrants, ideaTopups, ideaForfeits, floorShares, available, projectedEnd }
+  const projectedEnd = poolAuthorized + ideaTopups + ideaForfeits - outstandingShares - proposedShares - ideaGrants - ideaExercises
+  return { poolAuthorized, outstandingShares, proposedShares, ideaGrants, ideaTopups, ideaForfeits, ideaExercises, floorShares, available, projectedEnd }
 })
 
 // ---- Idea modal ----
@@ -239,7 +243,7 @@ const form = reactive({
 const IDEA_SUBTYPES: Array<{ value: EventType; label: string; hint: string }> = [
   { value: 'grant',      label: 'Future grant', hint: 'Hypothetical new option grant (reduces available pool)' },
   { value: 'pool_topup', label: 'Top-up',       hint: 'Add shares to the pool authorized' },
-  { value: 'exercise',   label: 'Exercise',     hint: 'Optionholder exercises (informational; no net pool change)' },
+  { value: 'exercise',   label: 'Exercise',     hint: 'Optionholder exercises (shares leave the pool and become Common stock)' },
   { value: 'forfeit',    label: 'Forfeit',      hint: 'Grant lapses and returns to pool' },
   { value: 'floor',      label: 'Floor',        hint: 'Minimum the pool can fall to — a buffer constraint' },
   { value: 'reserve',    label: 'Reserve',      hint: 'Hold-back for refresh / performance (reduces available)' },

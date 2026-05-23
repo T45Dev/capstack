@@ -33,10 +33,24 @@ Two states:
 - **Convertible (not yet converted)** — Still accruing interest until a future conversion date. **Must be assigned to a round** in the model, which determines whether the resulting shares are counted in the **pre** bucket or the **new** bucket for the round being modeled.
 
 ### Options (pool accounting)
-- **Outstanding** — Granted and vesting.
-- **Forfeited** — Expired/returned to the pool. Increases *available* but not *total* pool.
-- **Exercised** — Removed from the pool and converted to common. Decreases both *available* and *total* pool; does **not** add to a "new" common bucket (the common stock total is unaffected by the conversion — exercised options simply leave the pool).
-- **Available** — `total pool − outstanding − forfeited − exercised`.
+Total FDS is a fixed deck of cards; events just move cards between piles. The three piles for option-pool capacity:
+
+- **Outstanding** — Granted (vesting or vested-but-unexercised).
+- **Available** — Pool capacity not currently allocated to an outstanding grant.
+- (out of the pool) → **Common** — Exercised options leave the pool entirely and become Common stock.
+
+Movements:
+- **Forfeit** (grant lapses): `Outstanding → Available`. Pool size unchanged; Common unchanged; total FDS unchanged.
+- **Exercise** (holder buys): `Outstanding → Common`. Pool size **decreases by N**, Common **increases by N**, total FDS unchanged. (This is the "moving cards between piles" rule — same deck, different pile.)
+- **Top-up** (board authorizes): pool size **increases by N**, all of it landing in Available. Total FDS increases by N (newly authorized capacity).
+
+Standing identity at any instant:
+
+```
+Available(T) = pool_size(T) − Outstanding(T)
+```
+
+where `pool_size(T)` is increased by every Top-up and decreased by every Exercise from inception through T. Forfeit is a movement event, not a separate state — once a grant is forfeited, those shares are back in Available.
 
 ### Pre / New / Post (the most important framing in the app)
 Always relative to the round being modeled (the to-close round):
@@ -45,13 +59,18 @@ Always relative to the round being modeled (the to-close round):
 - **Post-round / post-money** — `pre + new`.
 
 ### Round math (Assumptions identities)
-- `Share price = Pre-money valuation ÷ Pre-round FDS`
-- `New FDS = New money ÷ Share price`
-- `Post-money valuation = Pre-money valuation + New money + (to-convert CN $)`
-- `Post-round FDS = Pre-round FDS + New FDS + (convertible-note shares)`
-- `Post-round share price × Post-round FDS = Post-money valuation`
+The Assumptions card displays these as four rows. Rows 1–3 are working math; row 4 is a **read-only sanity-check** row that should always agree with row 2:
+
+1. `Share price = Pre-money valuation ÷ Pre-round FDS`
+2. `Post-money valuation = Pre-money valuation + New money + CN $ converting`
+3. `Post-round FDS = Pre-round FDS + New FDS + CN shares converting`
+4. `PPS × Post-round FDS = Valuation at Post-FDS`  *(sanity check; should match row 2)*
+
+Derived field: `New FDS = New money ÷ Share price`.
 
 "New money" is total financing coming in for the to-close round, **excluding** CN $ from notes that won't convert in this round.
+
+**Pre-round FDS** has a default value computed from the imported cap table (holdings + outstanding options + available pool). The Assumptions card exposes it as an **override** field — typing a different number flags the row "(override)" and that value supersedes the cap-table default for round math; clicking *revert* restores the default.
 
 ---
 
@@ -105,14 +124,27 @@ Re-creates the Carta **Detailed Cap Table** tab as HTML/CSS. Toggleable display:
 The page where modeling begins. Lays out the round math identities from §2 as editable/derived fields:
 
 - Pre-money valuation *(input)*
-- Pre-round FDS *(input or derived from cap table)*
+- Pre-round FDS *(override field; defaults from cap table — see §2 Round math)*
 - New money *(input)*
 - Share price *(derived)*
 - New FDS *(derived)*
 - Convertible-note shares feeding pre vs. new buckets *(from §5.3 below)*
 - Post-money valuation *(derived)*
 - Post-round FDS *(derived)*
-- Post-round share price *(derived; check identity holds)*
+- Post-round share price *(derived; row-4 sanity check, see §2)*
+
+**Round selectors — top of the page.** Two dropdowns frame everything below:
+
+- **Most Recently Closed Round** — the round whose post-close state defines the *pre* baseline. Persisted on the company.
+- **Open Round** — the round being modeled (i.e. the to-close round). Persisted on the assumptions row.
+
+These two selectors, together with each CN's **Destination** (set on §5.3), drive CN bucketing:
+
+| CN destination | Bucket | Effect |
+|---|---|---|
+| = Open Round | **new** | Adds to *CN $ converting* and *CN shares converting* — affects the new-round math. |
+| = any closed round | **pre** | Already represented in cap-table holdings at that round's issue price. Does **not** add to the *new* buckets. |
+| (unassigned / deferred) | **deferred** | Excluded from post-round math; tracked as a hint with projected shares at round PPS. |
 
 ---
 
