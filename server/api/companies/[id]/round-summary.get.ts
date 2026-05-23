@@ -11,6 +11,8 @@ interface RoundColumn {
   code: string                    // "Formation" / "SS" / "SA1" / "PB1" / "OPEN"
   name: string | null             // friendly display, e.g. "Series A-1"
   kind: 'formation' | 'closed' | 'open'
+  parent_round_code: string | null  // CN-conversion children point at their cash-driven parent
+  pre_money_is_user_set: boolean  // true when rounds.pre_money is a stored value (false = derived fallback)
   close_date: string | null
   seniority: number               // chronological order; open round always last
   share_class_code: string | null
@@ -38,13 +40,15 @@ export default defineEventHandler((event) => {
 
   const rounds = db().prepare(`
     SELECT id, code, name, kind, close_date, share_class_code, share_price,
-           new_money, debt_canceled, option_pool_issued, seniority
+           new_money, debt_canceled, option_pool_issued, pre_money,
+           parent_round_code, seniority
     FROM rounds WHERE company_id = ?
   `).all(id) as Array<{
     id: string; code: string; name: string | null; kind: 'formation' | 'closed';
     close_date: string | null; share_class_code: string | null;
     share_price: number | null; new_money: number; debt_canceled: number;
-    option_pool_issued: number; seniority: number;
+    option_pool_issued: number; pre_money: number | null;
+    parent_round_code: string | null; seniority: number;
   }>
 
   // Read Assumptions early — its round_name drives both the sort (open
@@ -60,30 +64,58 @@ export default defineEventHandler((event) => {
   // rounds (Series C / B-3 / etc.) that aren't in the cap table yet.
   const openRoundName = (assumptions.round_name && String(assumptions.round_name).trim()) || ''
   const openRoundLc = openRoundName.toLowerCase()
-  function isOpenRound(r: { code: string; name: string | null }): boolean {
+  function isOpenRound(r: { code: string; name: string | null; parent_round_code: string | null }): boolean {
     if (!openRoundLc) return false
+    // CN-conversion children represent past conversions attached to a cash
+    // parent — they can't themselves be "the round being modeled". If the
+    // user's open-round name happens to match one (e.g. picking "Series B-2"
+    // when PB2 is a CN child of PB1), fall through to the synthesized open
+    // column instead.
+    if (r.parent_round_code) return false
     if (r.code.toLowerCase() === openRoundLc) return true
     if (r.name && r.name.toLowerCase().includes(openRoundLc)) return true
     return false
   }
 
-  // Chronological order is driven by close_date (ISO strings sort lexically).
-  // Open rounds are treated as date-less for sort purposes — a round whose
-  // close date isn't (yet) set is "most recent / TBD" by convention and
-  // anchors to the end of the timeline. Ties — and other date-less rounds —
-  // break on the import-order seniority.
-  rounds.sort((a, b) => {
-    const aDate = isOpenRound(a) ? null : a.close_date
-    const bDate = isOpenRound(b) ? null : b.close_date
-    if (aDate && bDate) {
-      if (aDate !== bDate) return aDate.localeCompare(bDate)
-      return a.seniority - b.seniority
-    }
-    if (aDate) return -1
-    if (bDate) return 1
-    return a.seniority - b.seniority
+  // Build group-aware chronological order. CN-conversion children belong to
+  // their cash parent regardless of close date — within the timeline they
+  // render *immediately after* their parent. The math (pre-money, cumulative
+  // FDS) treats each parent's children as part of the parent's "block".
+  //
+  // Order:
+  //   1. Sort parents (rows with parent_round_code IS NULL) by their close
+  //      date, then by seniority. Open rounds sort last (no real close).
+  //   2. For each parent, append its children (sorted by child close date,
+  //      then seniority).
+  function sortKey(r: { close_date: string | null; seniority: number }, open: boolean): [number, string, number] {
+    return [open || !r.close_date ? 1 : 0, r.close_date || '', r.seniority]
+  }
+  const parents = rounds.filter(r => !r.parent_round_code)
+  parents.sort((a, b) => {
+    const ka = sortKey(a, isOpenRound(a))
+    const kb = sortKey(b, isOpenRound(b))
+    return ka[0] - kb[0] || ka[1].localeCompare(kb[1]) || ka[2] - kb[2]
   })
+  const childrenByParent = new Map<string, typeof rounds>()
+  for (const r of rounds) {
+    if (!r.parent_round_code) continue
+    const list = childrenByParent.get(r.parent_round_code) || []
+    list.push(r)
+    childrenByParent.set(r.parent_round_code, list)
+  }
+  for (const [, list] of childrenByParent) {
+    list.sort((a, b) => sortKey(a, false)[1].localeCompare(sortKey(b, false)[1]) || a.seniority - b.seniority)
+  }
+  const orderedRounds: typeof rounds = []
+  for (const p of parents) {
+    orderedRounds.push(p)
+    const children = childrenByParent.get(p.code) || []
+    for (const c of children) orderedRounds.push(c)
+  }
 
+  // Reassign — the rest of the code reads `rounds` as the ordered list.
+  rounds.length = 0
+  rounds.push(...orderedRounds)
   const openIdx = rounds.findIndex(isOpenRound)
 
   // Share-class lookup so we can sum holdings by round code.
@@ -154,45 +186,59 @@ export default defineEventHandler((event) => {
     const r = rounds[i]
     if (!r) continue
     const effectiveKind: 'formation' | 'closed' | 'open' = i === openIdx ? 'open' : r.kind
-    // Preferred shares issued this round (matched by share_class_code).
+    const isCnChild = !!r.parent_round_code
+
+    // Share contributions for this row. Rule of thumb:
+    //  - Cash-driven parent: preferred_issued = holdings of own class (absorbs
+    //    any CN that converted INTO this class at round PPS). notes_converted
+    //    is 0 — CN-driven shares that landed in a separate class belong to a
+    //    child row.
+    //  - CN-conversion child: preferred_issued = 0 (already counted as
+    //    notes_converted). notes_converted = holdings of own class.
     let preferredIssued = 0
+    let cnShares = 0
     if (r.share_class_code) {
       const sc = classByCode.get(r.share_class_code.toUpperCase())
-      if (sc) preferredIssued = holdingsByClass.get(sc.id) || 0
+      const holdings = sc ? (holdingsByClass.get(sc.id) || 0) : 0
+      if (isCnChild) cnShares = holdings
+      else preferredIssued = holdings
     }
 
-    // Common shares issued this round (only at Formation in the current
-    // model — option exercises showing up in CS Ledger don't reopen the
-    // Formation event).
+    // Common shares (only at Formation — option exercises showing up in CS
+    // Ledger don't reopen the Formation event).
     let common = 0
     if (effectiveKind === 'formation') {
-      // Find the Common (CS) share class and sum its holdings.
       const csClass = Array.from(classByCode.values()).find(c => c.kind === 'common')
       if (csClass) common = holdingsByClass.get(csClass.id) || 0
     }
 
-    // CN contributions attributed to this round (sum of principal + interest).
-    // For the OPEN round, *also* sweep up notes the user routed to "Open round"
-    // via the CN page sentinel (destination_class_code = null, converts = 1).
+    // Notes financing (dollars from CNs destined to this round). Parents that
+    // host CN-at-round-PPS conversions still surface those dollars here even
+    // though the resulting shares are folded into preferred_issued. For OPEN,
+    // also sweep up the "Open round" sentinel bucket from the CN page.
     const codeKey = r.code.toUpperCase()
     let cnDollars = cnByCode.get(codeKey)?.dollars || 0
     if (effectiveKind === 'open') {
       cnDollars += cnByCode.get('OPEN')?.dollars || 0
+      // For the synthesized/open round, derive the share count from the
+      // dollars at the round's PPS (there's no historical holdings to read).
+      cnShares = r.share_price && r.share_price > 0 ? cnDollars / r.share_price : 0
     }
-    const cnShares = r.share_price && r.share_price > 0 ? cnDollars / r.share_price : 0
 
     // Pool top-ups for this round come straight from rounds.option_pool_issued
-    // (user-editable on the Cap Table Summary card). Importer seeds Formation
-    // with the imported total; user shifts tranches to other rounds inline.
+    // (user-editable on the Cap Table Summary card).
     const poolIssued = Number(r.option_pool_issued) || 0
 
     const sharesAdded = common + preferredIssued + cnShares + poolIssued
-    // Pre-money for closed/open rounds: share_price × cumulative FDS through
-    // the previous round. The first round (Formation) has no prior FDS, so
-    // pre_money there is meaningless (null).
-    const preMoney = effectiveKind === 'formation'
+    // Pre-money: prefer the user-typed rounds.pre_money. When null, fall back
+    // to a derived value (share_price × cumulative FDS through the previous
+    // round) so the user sees a sensible default. Formation has no prior FDS
+    // so the derived fallback is also null.
+    const preMoneyDerived = effectiveKind === 'formation'
       ? null
-      : (r.share_price != null ? r.share_price * cumulativeFDS : null)
+      : (r.share_price != null && cumulativeFDS > 0 ? r.share_price * cumulativeFDS : null)
+    const userPreMoney = (r.pre_money != null && r.pre_money !== 0) ? r.pre_money : null
+    const preMoney = userPreMoney ?? preMoneyDerived
     const newMoney = r.new_money || 0
     const postMoney = (preMoney || 0) + newMoney + cnDollars
     cumulativeFDS += sharesAdded
@@ -203,6 +249,8 @@ export default defineEventHandler((event) => {
       code: r.code,
       name: r.name,
       kind: effectiveKind,
+      parent_round_code: r.parent_round_code,
+      pre_money_is_user_set: userPreMoney != null,
       // Open rounds don't have a close date — the stored value (typically the
       // max Issue Date from the parsed ledger) is only meaningful once the
       // round actually closes, so suppress it here. The DB row still holds
@@ -244,6 +292,8 @@ export default defineEventHandler((event) => {
       code: 'OPEN',
       name: openRoundName,
       kind: 'open',
+      parent_round_code: null,
+      pre_money_is_user_set: openPreMoney > 0,
       close_date: null,
       seniority: rounds.length + 1,
       share_class_code: null,

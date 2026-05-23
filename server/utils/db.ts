@@ -223,6 +223,8 @@ function migrate(d: Database.Database): void {
   ensureColumn('companies', 'starting_round_date', 'TEXT')
   ensureColumn('grants', 'approval_status', 'TEXT')
   ensureColumn('rounds', 'option_pool_issued', 'REAL NOT NULL DEFAULT 0')
+  ensureColumn('rounds', 'parent_round_code', 'TEXT')
+  ensureColumn('rounds', 'pre_money', 'REAL')
 
   // Backfill: for any company whose Formation round has option_pool_issued = 0
   // but whose option_pools table is non-empty, seed Formation with the
@@ -242,6 +244,40 @@ function migrate(d: Database.Database): void {
       }
     })
     tx(formationsToBackfill)
+  }
+
+  // Backfill: classify CN-conversion-only subrounds (cash = 0, debt > 0) and
+  // attach them to the nearest preceding cash-driven round as their parent.
+  // Idempotent — only touches CN-only rounds where parent_round_code is still
+  // NULL.
+  const companiesNeedingParentBackfill = d.prepare(`
+    SELECT DISTINCT company_id FROM rounds
+    WHERE parent_round_code IS NULL AND new_money = 0 AND debt_canceled > 0
+  `).all() as Array<{ company_id: string }>
+  if (companiesNeedingParentBackfill.length) {
+    const fetchRounds = d.prepare(`
+      SELECT id, code, new_money, debt_canceled, parent_round_code, seniority
+      FROM rounds WHERE company_id = ? ORDER BY seniority ASC
+    `)
+    const upd = d.prepare('UPDATE rounds SET parent_round_code = ? WHERE id = ?')
+    const tx = d.transaction((companies: typeof companiesNeedingParentBackfill) => {
+      for (const c of companies) {
+        const rs = fetchRounds.all(c.company_id) as Array<{
+          id: string; code: string; new_money: number; debt_canceled: number;
+          parent_round_code: string | null; seniority: number
+        }>
+        let lastCashCode: string | null = null
+        for (const r of rs) {
+          const isCNOnly = (r.new_money || 0) === 0 && (r.debt_canceled || 0) > 0
+          if (isCNOnly && lastCashCode && !r.parent_round_code) {
+            upd.run(lastCashCode, r.id)
+          } else if ((r.new_money || 0) > 0) {
+            lastCashCode = r.code
+          }
+        }
+      }
+    })
+    tx(companiesNeedingParentBackfill)
   }
 
   // One-shot: strip the "-N" tranche suffix off any historical CN
