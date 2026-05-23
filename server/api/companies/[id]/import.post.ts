@@ -169,28 +169,14 @@ export default defineEventHandler(async (event) => {
     // Seniority follows the parser's order, which matches the workbook's
     // sheet order (chronological in every Carta export we've seen). The
     // share_class_code column soft-links each round to share_classes.code.
-    // parent_round_code: CN-conversion-only subrounds (cash = 0, debt > 0)
-    // attach to the most recent preceding cash-driven round.
+    // Every round is a peer in the timeline; CNs are tracked separately on
+    // the Convertible Notes page with a per-CN destination round.
     if (parsed.rounds.length) {
-      // First pass: walk in parsed order and compute the parent_round_code
-      // for each CN-only subround. lastCashCode is the running anchor.
-      const parentByCode = new Map<string, string | null>()
-      let lastCashCode: string | null = null
-      for (const r of parsed.rounds) {
-        const isCNOnly = (r.newMoney || 0) === 0 && (r.debtCanceled || 0) > 0
-        if (isCNOnly && lastCashCode) {
-          parentByCode.set(r.code, lastCashCode)
-        } else {
-          parentByCode.set(r.code, null)
-          if ((r.newMoney || 0) > 0) lastCashCode = r.code
-        }
-      }
-
       const insRound = db().prepare(`
         INSERT INTO rounds (
           id, company_id, code, name, kind, close_date, share_class_code,
-          share_price, new_money, debt_canceled, seniority, parent_round_code
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          share_price, new_money, debt_canceled, seniority
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(company_id, code) DO UPDATE SET
           name = excluded.name,
           kind = excluded.kind,
@@ -199,11 +185,12 @@ export default defineEventHandler(async (event) => {
           share_price = excluded.share_price,
           new_money = excluded.new_money,
           debt_canceled = excluded.debt_canceled,
-          seniority = excluded.seniority,
-          parent_round_code = excluded.parent_round_code
+          seniority = excluded.seniority
       `)
-      // pre_money is NOT in the ON CONFLICT UPDATE list — user-typed values
-      // survive re-imports (the import only seeds the column on first insert).
+      // pre_money and parent_round_code are NOT in the ON CONFLICT UPDATE
+      // list — user-typed pre-money values survive re-imports, and the
+      // parent_round_code column (legacy from an earlier model) stays
+      // untouched.
       let rSeniority = 0
       for (const r of parsed.rounds) {
         rSeniority++
@@ -220,17 +207,11 @@ export default defineEventHandler(async (event) => {
             r.newMoney || 0,
             r.debtCanceled || 0,
             rSeniority,
-            parentByCode.get(r.code) || null,
           )
         } catch (err: any) {
           parsed.warnings.push(`Couldn't import round "${r.code}": ${err?.message || err}`)
         }
       }
-
-      // pre_money stays NULL after import — the round-summary endpoint falls
-      // back to the derived value (share_price × prior FDS) when the column
-      // is null, so the user sees a sensible default. Typing a number on the
-      // Summary card persists it; clearing the input writes null again.
     }
 
     // Option pool. Prefer the Summary "Plan" row, otherwise derive from outstanding+available.
