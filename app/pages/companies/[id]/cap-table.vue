@@ -381,7 +381,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
         :padded="false"
       >
         <div class="overflow-x-auto">
-          <table class="text-[12px] border-separate" style="border-spacing: 0; min-width: 100%;">
+          <table class="text-[12px] border-separate whitespace-nowrap" style="border-spacing: 0; min-width: 100%;">
             <colgroup>
               <col style="width: 220px" />
               <col v-for="r in roundCols" :key="r.round_id" style="min-width: 130px" />
