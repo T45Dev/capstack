@@ -20,8 +20,13 @@ interface Props {
   digits?: number
   // Tailwind classes applied to the input element itself.
   inputClass?: string
+  // Layout variant. 'boxed' (default) renders a bordered, padded box for
+  // form contexts. 'bare' drops the wrapper styling so the input fits
+  // inside dense table cells; the consumer supplies the cell styling via
+  // inputClass instead.
+  variant?: 'boxed' | 'bare'
 }
-const props = withDefaults(defineProps<Props>(), { digits: 0 })
+const props = withDefaults(defineProps<Props>(), { digits: 0, variant: 'boxed' })
 const emit = defineEmits<{ (e: 'update:modelValue', v: number | null): void }>()
 
 const focused = ref(false)
@@ -38,7 +43,11 @@ watchEffect(() => {
 })
 
 function parse(s: string): number | null {
-  const cleaned = s.replace(/[,\s]/g, '').trim()
+  // Strip thousands separators, whitespace, and currency symbols so the
+  // bare variant can round-trip "$80,000,000" without choking. The dollar
+  // sign is preserved on display via the prefix prop; we just don't want
+  // to see it back as part of the user's edits.
+  const cleaned = s.replace(/[$,\s]/g, '').trim()
   if (cleaned === '' || cleaned === '-') return null
   const n = Number(cleaned)
   return isFinite(n) ? n : null
@@ -70,7 +79,25 @@ function onInput(e: Event) {
 </script>
 
 <template>
+  <!-- Bare variant: render just the input. Consumer controls all styling
+       (cell padding, hover/focus borders) via inputClass. The prefix is
+       baked into the displayed text when blurred so dense cells stay
+       single-line; on focus we drop the prefix so the cursor sits cleanly
+       at the start of the editable number. -->
+  <input
+    v-if="variant === 'bare'"
+    type="text"
+    inputmode="numeric"
+    :value="focused ? text : ((prefix && text) ? `${prefix}${text}` : text)"
+    :placeholder="placeholder"
+    :disabled="disabled"
+    :class="['num', disabled ? 'cursor-not-allowed' : '', inputClass]"
+    @focus="onFocus"
+    @blur="onBlur"
+    @input="onInput"
+  />
   <div
+    v-else
     class="flex items-center rounded-md border focus-within:ring-2 focus-within:ring-accent-500"
     :class="disabled
       ? 'border-ink-200 bg-ink-100 cursor-not-allowed'
