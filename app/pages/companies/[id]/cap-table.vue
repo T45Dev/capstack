@@ -603,19 +603,16 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                   <template v-if="rc.role === 'child'">
                     <span class="text-ink-400 italic text-[11px]">inherited</span>
                   </template>
-                  <template v-else>
-                    <input
-                      type="number"
-                      step="1"
-                      min="0"
-                      :value="rc.col.pre_money || ''"
-                      class="w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-accent-500 focus:outline-none rounded px-1 py-0.5 text-right text-[12px] num"
-                      :class="rc.col.pre_money_is_user_set ? 'text-ink-900 font-medium' : 'text-ink-500 italic'"
-                      placeholder="—"
-                      :title="rc.col.pre_money_is_user_set ? 'User-set pre-money' : 'Derived from share_price × prior FDS — type to override'"
-                      @change="updateRoundPreMoney(rc.col.round_id, ($event.target as HTMLInputElement).value)"
-                    />
-                  </template>
+                  <NumberInput
+                    v-else
+                    variant="bare"
+                    prefix="$"
+                    :model-value="rc.col.pre_money"
+                    placeholder="—"
+                    :input-class="`w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-accent-500 focus:outline-none rounded px-1 py-0.5 text-right text-[12px] ${rc.col.pre_money_is_user_set ? 'text-ink-900 font-medium' : 'text-ink-500 italic'}`"
+                    :title="rc.col.pre_money_is_user_set ? 'User-set pre-money' : 'Derived from share_price × prior FDS — type to override'"
+                    @update:model-value="(v) => updateRoundPreMoney(rc.col.round_id, v == null ? '' : String(v))"
+                  />
                 </td>
               </tr>
               <tr>
@@ -624,17 +621,15 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                   <template v-if="rc.role === 'child'">
                     <span class="text-ink-400">—</span>
                   </template>
-                  <template v-else>
-                    <input
-                      type="number"
-                      step="1"
-                      min="0"
-                      :value="rc.col.new_money || ''"
-                      class="w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-accent-500 focus:outline-none rounded px-1 py-0.5 text-right text-[12px] text-ink-700 num"
-                      placeholder="—"
-                      @change="updateRoundNewMoney(rc.col.round_id, ($event.target as HTMLInputElement).value)"
-                    />
-                  </template>
+                  <NumberInput
+                    v-else
+                    variant="bare"
+                    prefix="$"
+                    :model-value="rc.col.new_money || null"
+                    placeholder="—"
+                    input-class="w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-accent-500 focus:outline-none rounded px-1 py-0.5 text-right text-[12px] text-ink-700"
+                    @update:model-value="(v) => updateRoundNewMoney(rc.col.round_id, v == null ? '' : String(v))"
+                  />
                 </td>
               </tr>
               <tr>
@@ -696,17 +691,14 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                   <template v-if="rc.col.round_id === 'open'">
                     <span class="text-ink-400">—</span>
                   </template>
-                  <template v-else>
-                    <input
-                      type="number"
-                      step="1"
-                      min="0"
-                      :value="rc.col.option_pool_issued || ''"
-                      class="w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-accent-500 focus:outline-none rounded px-1 py-0.5 text-right text-[12px] text-ink-700 num"
-                      placeholder="—"
-                      @change="updateRoundPoolIssued(rc.col.round_id, ($event.target as HTMLInputElement).value)"
-                    />
-                  </template>
+                  <NumberInput
+                    v-else
+                    variant="bare"
+                    :model-value="rc.col.option_pool_issued || null"
+                    placeholder="—"
+                    input-class="w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-accent-500 focus:outline-none rounded px-1 py-0.5 text-right text-[12px] text-ink-700"
+                    @update:model-value="(v) => updateRoundPoolIssued(rc.col.round_id, v == null ? '' : String(v))"
+                  />
                 </td>
               </tr>
             </tbody>

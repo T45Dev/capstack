@@ -35,8 +35,8 @@ export function fmtPricePerShare(n: number | null | undefined): string {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
-    maximumFractionDigits: 4,
-    minimumFractionDigits: 4,
+    maximumFractionDigits: 5,
+    minimumFractionDigits: 5,
   }).format(n)
 }
 
