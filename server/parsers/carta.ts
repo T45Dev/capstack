@@ -28,6 +28,17 @@ export interface ParsedGrant {
   quantity: number
 }
 
+export interface ParsedRound {
+  code: string                       // "CS", "SS", "SA1", "PB1", ...
+  name?: string | null               // friendly display from sheet title (e.g. "Series A-1")
+  kind: 'formation' | 'closed'
+  closeDate: string | null           // ISO yyyy-mm-dd; max Board Approval Date from the round's ledger
+  sharePrice: number | null          // Original Issue Price (constant per ledger)
+  newMoney: number                   // Sum of "Cash Contributed to Company"
+  debtCanceled: number               // Sum of "Debt Canceled" (== CN-driven conversions; informational)
+  sharesIssued: number               // Sum of "Quantity Issued"
+}
+
 export interface ParsedConvertible {
   externalId?: string | null
   stakeholderName: string
@@ -51,6 +62,7 @@ export interface ParsedCartaCapTable {
   holdings: ParsedHolding[]
   grants: ParsedGrant[]
   convertibles: ParsedConvertible[]
+  rounds: ParsedRound[]
   poolAuthorized: number
   poolAvailable: number
   warnings: string[]
@@ -96,6 +108,114 @@ function extractCode(name: string, fallback: string): string {
   return m ? m[1] : fallback
 }
 
+// Parse one per-class "<CODE> Ledger" sheet. Carta puts a banner in rows 2-3,
+// a header row at row 5, and per-issuance rows from row 6 onward. We pull the
+// few columns we need to seed the `rounds` table: Original Issue Price, Cash
+// Contributed, Debt Canceled, Quantity Issued, Board Approval / Issue Date.
+// CS Ledger -> Formation; everything else -> closed preferred round.
+function parseLedgerSheet(sheet: import('exceljs').Worksheet, code: string, warnings: string[]): ParsedRound | null {
+  // Detect the header row by scanning for a row containing "Quantity Issued".
+  let headerRow = -1
+  for (let r = 1; r <= Math.min(sheet.rowCount, 12); r++) {
+    const flat = (sheet.getRow(r).values as any[]).map(v => asString(v).toLowerCase()).join('|')
+    if (flat.includes('quantity issued') && flat.includes('cash contributed')) {
+      headerRow = r
+      break
+    }
+  }
+  if (headerRow < 0) return null
+
+  // Build a label -> column index map. Header cells are simple text in Carta.
+  const headerCells = sheet.getRow(headerRow).values as any[]
+  const findCol = (...patterns: RegExp[]): number => {
+    for (let c = 1; c < headerCells.length; c++) {
+      const label = asString(headerCells[c])
+      if (patterns.some(p => p.test(label))) return c
+    }
+    return -1
+  }
+  const cQty       = findCol(/^quantity\s*issued$/i)
+  const cIssue     = findCol(/^share\s*class\s*original\s*issue\s*price$/i, /^company-?provided\s*price/i)
+  const cCash      = findCol(/^cash\s*contributed\s*to\s*company$/i, /^cash\s*contributed/i)
+  const cDebt      = findCol(/^debt\s*canceled$/i)
+  const cBoard     = findCol(/^board\s*approval\s*date$/i)
+  const cIssueDate = findCol(/^issue\s*date$/i)
+  if (cQty < 0) {
+    warnings.push(`"${sheet.name}": no Quantity Issued column found — skipping.`)
+    return null
+  }
+
+  // Round name from the banner ("Advanced NanoTherapies, Inc Series A-1
+  // Preferred (SA1) Ledger" -> "Series A-1 Preferred (SA1)").
+  let displayName: string | null = null
+  for (let r = 1; r < headerRow; r++) {
+    for (let c = 1; c <= sheet.columnCount; c++) {
+      const s = asString(sheet.getRow(r).getCell(c).value)
+      if (!s) continue
+      const m = /\b((?:Common|Series\s+[A-Za-z0-9-]+\s+Preferred|Series\s+Seed\s+Preferred)\s*\([A-Z][A-Z0-9-]+\))\s*(?:Stock\s*)?Ledger/i.exec(s)
+      if (m && m[1]) { displayName = m[1]; break }
+    }
+    if (displayName) break
+  }
+
+  let sharePrice: number | null = null
+  let newMoney = 0
+  let debtCanceled = 0
+  let sharesIssued = 0
+  let maxBoard: string | null = null
+  let maxIssue: string | null = null
+  let minIssue: string | null = null
+  const trackMax = (cur: string | null, next: string | null) =>
+    next && (!cur || next > cur) ? next : cur
+  const trackMin = (cur: string | null, next: string | null) =>
+    next && (!cur || next < cur) ? next : cur
+
+  for (let r = headerRow + 1; r <= sheet.rowCount; r++) {
+    const row = sheet.getRow(r)
+    const qty = cQty > 0 ? asNumber(row.getCell(cQty).value) : 0
+    if (qty <= 0) continue
+    sharesIssued += qty
+    if (cIssue > 0 && sharePrice == null) {
+      const p = asNumber(row.getCell(cIssue).value)
+      if (p > 0) sharePrice = p
+    }
+    if (cCash > 0)  newMoney     += asNumber(row.getCell(cCash).value)
+    if (cDebt > 0)  debtCanceled += asNumber(row.getCell(cDebt).value)
+    if (cBoard > 0)     maxBoard = trackMax(maxBoard, asDate(row.getCell(cBoard).value))
+    if (cIssueDate > 0) {
+      const d = asDate(row.getCell(cIssueDate).value)
+      maxIssue = trackMax(maxIssue, d)
+      minIssue = trackMin(minIssue, d)
+    }
+  }
+  if (sharesIssued <= 0) return null
+
+  // Date semantics:
+  //   - Formation (CS): use the EARLIEST issuance — when the company was
+  //     founded. Later CS issuances are typically option exercises and
+  //     shouldn't shift the Formation date.
+  //   - Closed preferred round: use the LATEST issue date — when the last
+  //     share of the round actually issued (the effective "round closed"
+  //     moment). Board Approval Date can be the umbrella series
+  //     authorization weeks/months before the sub-round issued, so we
+  //     prefer Issue Date when available.
+  const isFormation = code === 'CS'
+  const closeDate = isFormation
+    ? (minIssue || maxBoard)
+    : (maxIssue || maxBoard)
+
+  return {
+    code,
+    name: displayName,
+    kind: isFormation ? 'formation' : 'closed',
+    closeDate,
+    sharePrice,
+    newMoney,
+    debtCanceled,
+    sharesIssued,
+  }
+}
+
 function classifyKind(name: string): 'common' | 'preferred' {
   const n = name.toLowerCase()
   if (n.includes('common')) return 'common'
@@ -113,9 +233,24 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
     holdings: [],
     grants: [],
     convertibles: [],
+    rounds: [],
     poolAuthorized: 0,
     poolAvailable: 0,
     warnings,
+  }
+
+  // ----- Per-round ledger sheets ("CS Ledger", "SS Ledger", "SA1 Ledger",
+  // "PB1 Ledger", ...). Each one carries the per-issuance detail Carta uses
+  // to assemble the per-round summary the user wants to see at the top of
+  // the Cap Table page (close date, share price, cash contributed, debt
+  // canceled). The CS Ledger maps to the Formation row; everything else is a
+  // closed preferred round.
+  for (const sheet of wb.worksheets) {
+    const m = /^([A-Z][A-Z0-9]*)\s+Ledger$/i.exec(sheet.name.trim())
+    if (!m || !m[1]) continue
+    const code = m[1].toUpperCase()
+    const round = parseLedgerSheet(sheet, code, warnings)
+    if (round) result.rounds.push(round)
   }
 
   // ----- Detailed Cap Table -----

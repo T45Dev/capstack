@@ -43,6 +43,7 @@ export default defineEventHandler(async (event) => {
       db().prepare('DELETE FROM share_classes WHERE company_id = ?').run(id)
       db().prepare('DELETE FROM stakeholders WHERE company_id = ?').run(id)
       db().prepare('DELETE FROM option_pools WHERE company_id = ?').run(id)
+      db().prepare('DELETE FROM rounds WHERE company_id = ?').run(id)
     }
 
     // Share classes
@@ -160,6 +161,49 @@ export default defineEventHandler(async (event) => {
           parsed.warnings.push(
             `Couldn't import convertible "${cn.stakeholderName}" (${cn.externalId || 'no ID'}): ${err?.message || err}`,
           )
+        }
+      }
+    }
+
+    // Rounds (per-class ledger rollup — Formation + each closed preferred).
+    // Seniority follows the parser's order, which matches the workbook's
+    // sheet order (chronological in every Carta export we've seen). The
+    // share_class_code column soft-links each round to share_classes.code.
+    if (parsed.rounds.length) {
+      const insRound = db().prepare(`
+        INSERT INTO rounds (
+          id, company_id, code, name, kind, close_date, share_class_code,
+          share_price, new_money, debt_canceled, seniority
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(company_id, code) DO UPDATE SET
+          name = excluded.name,
+          kind = excluded.kind,
+          close_date = excluded.close_date,
+          share_class_code = excluded.share_class_code,
+          share_price = excluded.share_price,
+          new_money = excluded.new_money,
+          debt_canceled = excluded.debt_canceled,
+          seniority = excluded.seniority
+      `)
+      let rSeniority = 0
+      for (const r of parsed.rounds) {
+        rSeniority++
+        try {
+          insRound.run(
+            newId('rd'), id,
+            r.code, r.name || null, r.kind,
+            r.closeDate || null,
+            // Soft-link to share_classes. For closed rounds the code IS the
+            // share-class code (SS == SS class); Formation has no preferred
+            // class so we leave share_class_code null.
+            r.kind === 'closed' ? r.code : null,
+            r.sharePrice ?? null,
+            r.newMoney || 0,
+            r.debtCanceled || 0,
+            rSeniority,
+          )
+        } catch (err: any) {
+          parsed.warnings.push(`Couldn't import round "${r.code}": ${err?.message || err}`)
         }
       }
     }

@@ -167,6 +167,30 @@ function migrate(d: Database.Database): void {
     -- timeline. Real grants and pool top-ups live in the grants / option_pools
     -- tables and are merged into the timeline at query time. This table holds
     -- only "ideas" -- planned events the user wants to model.
+    -- One row per closed funding round on the company's timeline (Formation,
+    -- Seed, Series A-1, ..., Series B-2). The Open Round is NOT stored here —
+    -- it's synthesized at query time from the assumptions row so the user can
+    -- iterate on its inputs without committing them as a round close. Share
+    -- counts (preferred_issued / notes_converted / option_pool_issued /
+    -- common) are NOT stored — they're derived at query time from holdings,
+    -- convertibles, and option_pools.
+    CREATE TABLE IF NOT EXISTS rounds (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      code TEXT NOT NULL,                 -- "Formation" | "CS" | "SS" | "SA1" | "PB1" ...
+      name TEXT,                          -- display name; e.g. "Series A-1"
+      kind TEXT NOT NULL,                 -- 'formation' | 'closed'
+      close_date TEXT,                    -- ISO yyyy-mm-dd (max Board Approval Date from the round's ledger)
+      share_class_code TEXT,              -- soft link to share_classes.code (preferred class for this round)
+      share_price REAL,                   -- Original Issue Price from the round's ledger
+      new_money REAL NOT NULL DEFAULT 0,  -- sum of Cash Contributed from the round's ledger
+      debt_canceled REAL NOT NULL DEFAULT 0, -- sum of Debt Canceled (informational; CN $ comes from the Convertible Ledger)
+      seniority INTEGER NOT NULL DEFAULT 0, -- chronological order (lower = earlier)
+      notes TEXT,
+      UNIQUE(company_id, code)
+    );
+    CREATE INDEX IF NOT EXISTS idx_rounds_company ON rounds(company_id, seniority);
+
     CREATE TABLE IF NOT EXISTS pool_events (
       id TEXT PRIMARY KEY,
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
