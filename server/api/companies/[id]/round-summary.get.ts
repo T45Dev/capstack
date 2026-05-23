@@ -38,12 +38,13 @@ export default defineEventHandler((event) => {
 
   const rounds = db().prepare(`
     SELECT id, code, name, kind, close_date, share_class_code, share_price,
-           new_money, debt_canceled, seniority
+           new_money, debt_canceled, option_pool_issued, seniority
     FROM rounds WHERE company_id = ?
   `).all(id) as Array<{
     id: string; code: string; name: string | null; kind: 'formation' | 'closed';
     close_date: string | null; share_class_code: string | null;
-    share_price: number | null; new_money: number; debt_canceled: number; seniority: number;
+    share_price: number | null; new_money: number; debt_canceled: number;
+    option_pool_issued: number; seniority: number;
   }>
 
   // Read Assumptions early — its round_name drives both the sort (open
@@ -140,28 +141,9 @@ export default defineEventHandler((event) => {
     return dollars / sharePrice
   }
 
-  // Option pool top-ups — sum across all pools (small data; no per-round
-  // attribution today since the cap-table import lumps the plan into one
-  // row). Show on the round whose close_date matches the plan's
-  // adopted_date when present; otherwise attribute to Formation.
-  const pools = db().prepare(
-    'SELECT name, authorized, adopted_date FROM option_pools WHERE company_id = ?',
-  ).all(id) as Array<{ name: string; authorized: number; adopted_date: string | null }>
-
-  // Pool attribution: when option_pools rows lack an adopted_date the cap-
-  // table import doesn't tell us which round authorized them. Heuristic:
-  // anchor them to the most recent closed round (after the open-round flip).
-  // For this dataset that lands on PB1, matching the user's mental model.
-  const seniorityOfMostRecentClosed = (() => {
-    for (let i = rounds.length - 1; i >= 0; i--) {
-      const r = rounds[i]
-      if (!r) continue
-      const isOpen = i === openIdx
-      if (!isOpen && r.kind === 'closed') return r.seniority
-    }
-    // Fallback: if every round is open (or none are closed), use Formation.
-    return rounds[0]?.seniority ?? 0
-  })()
+  // Pool attribution lives on rounds.option_pool_issued — the importer seeds
+  // Formation with the whole imported pool total, and the Summary card lets
+  // the user move tranches to other rounds inline.
 
   // ----- Assemble per-round columns -----
   const cols: RoundColumn[] = []
@@ -199,23 +181,10 @@ export default defineEventHandler((event) => {
     }
     const cnShares = r.share_price && r.share_price > 0 ? cnDollars / r.share_price : 0
 
-    // Option pool top-ups. When the row has no adopted_date the importer can't
-    // tell us where it belongs; we attribute it to the most recent CLOSED
-    // round (after the open-round flip). For PB1/PB2 modelling that lands on
-    // PB1 as the user expects, rather than Formation.
-    let poolIssued = 0
-    if (r.seniority === seniorityOfMostRecentClosed) {
-      for (const p of pools) {
-        if (!p.adopted_date) poolIssued += p.authorized || 0
-      }
-    }
-    for (const p of pools) {
-      if (!p.adopted_date) continue
-      const priorClose = rounds[i - 1]?.close_date ?? '0000-01-01'
-      if (p.adopted_date > priorClose && p.adopted_date <= (r.close_date || '9999-12-31')) {
-        poolIssued += p.authorized || 0
-      }
-    }
+    // Pool top-ups for this round come straight from rounds.option_pool_issued
+    // (user-editable on the Cap Table Summary card). Importer seeds Formation
+    // with the imported total; user shifts tranches to other rounds inline.
+    const poolIssued = Number(r.option_pool_issued) || 0
 
     const sharesAdded = common + preferredIssued + cnShares + poolIssued
     // Pre-money for closed/open rounds: share_price × cumulative FDS through

@@ -52,6 +52,21 @@ async function updateRoundCloseDate(roundId: string, value: string) {
   }
 }
 
+// Pool top-ups are per-round numbers stored on rounds.option_pool_issued
+// (importer seeds Formation with the imported total; user moves tranches
+// elsewhere inline). Empty input clears the cell to 0.
+async function updateRoundPoolIssued(roundId: string, value: string) {
+  if (!roundId || roundId === 'open') return
+  const n = value === '' ? 0 : Number(value)
+  if (!isFinite(n) || n < 0) return
+  try {
+    await $fetch(`/api/rounds/${roundId}`, { method: 'PATCH', body: { option_pool_issued: n } })
+    await refreshRoundSummary()
+  } catch (e) {
+    console.error('Failed to update round pool issuance', e)
+  }
+}
+
 const query = ref('')
 const currentPPS = computed(() => data.value?.current_pps || 0)
 
@@ -489,7 +504,20 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6">Option pool issued</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
-                  {{ r.option_pool_issued ? fmtShares(r.option_pool_issued) : '—' }}
+                  <template v-if="r.round_id === 'open'">
+                    <span class="text-ink-400">—</span>
+                  </template>
+                  <template v-else>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      :value="r.option_pool_issued || ''"
+                      class="w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-accent-500 focus:outline-none rounded px-1 py-0.5 text-right text-[12px] text-ink-700 num"
+                      placeholder="—"
+                      @change="updateRoundPoolIssued(r.round_id, ($event.target as HTMLInputElement).value)"
+                    />
+                  </template>
                 </td>
               </tr>
             </tbody>

@@ -222,6 +222,27 @@ function migrate(d: Database.Database): void {
   ensureColumn('companies', 'starting_round', 'TEXT')
   ensureColumn('companies', 'starting_round_date', 'TEXT')
   ensureColumn('grants', 'approval_status', 'TEXT')
+  ensureColumn('rounds', 'option_pool_issued', 'REAL NOT NULL DEFAULT 0')
+
+  // Backfill: for any company whose Formation round has option_pool_issued = 0
+  // but whose option_pools table is non-empty, seed Formation with the
+  // imported pool total. New imports run the same path explicitly below; this
+  // covers companies imported before the column existed.
+  const formationsToBackfill = d.prepare(`
+    SELECT r.id,
+      (SELECT COALESCE(SUM(authorized), 0) FROM option_pools WHERE company_id = r.company_id) AS pool_total
+    FROM rounds r
+    WHERE r.kind = 'formation' AND r.option_pool_issued = 0
+  `).all() as Array<{ id: string; pool_total: number }>
+  if (formationsToBackfill.length) {
+    const upd = d.prepare('UPDATE rounds SET option_pool_issued = ? WHERE id = ?')
+    const tx = d.transaction((rows: typeof formationsToBackfill) => {
+      for (const r of rows) {
+        if (r.pool_total > 0) upd.run(r.pool_total, r.id)
+      }
+    })
+    tx(formationsToBackfill)
+  }
 
   // One-shot: strip the "-N" tranche suffix off any historical CN
   // destination_class_code values so they match share_classes.code. Idempotent
