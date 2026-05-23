@@ -17,8 +17,22 @@ export default defineEventHandler(async (event) => {
   }>(event)
 
   // Capture the previous values so we can auto-snapshot when something
-  // meaningful changed.
+  // meaningful changed. Also used as the merge baseline so partial POSTs
+  // (e.g. the Summary card sending only { pre_money: X }) don't clobber
+  // unspecified fields.
   const prev = db().prepare('SELECT * FROM assumptions WHERE company_id = ?').get(id) as any
+
+  const merged = {
+    round_name:          body.round_name ?? prev?.round_name ?? 'Series B',
+    round_close_date:    body.round_close_date !== undefined ? body.round_close_date : (prev?.round_close_date ?? null),
+    new_money:           body.new_money !== undefined ? body.new_money : (prev?.new_money ?? 0),
+    pre_money:           body.pre_money !== undefined ? body.pre_money : (prev?.pre_money ?? 0),
+    pre_round_fds:       body.pre_round_fds !== undefined ? body.pre_round_fds : (prev?.pre_round_fds ?? null),
+    target_pool_pct:     body.target_pool_pct !== undefined ? body.target_pool_pct : (prev?.target_pool_pct ?? null),
+    pool_top_up_shares:  body.pool_top_up_shares !== undefined ? body.pool_top_up_shares : (prev?.pool_top_up_shares ?? 0),
+    cn_conversion_basis: body.cn_conversion_basis ?? prev?.cn_conversion_basis ?? 'best',
+    notes:               body.notes !== undefined ? body.notes : (prev?.notes ?? null),
+  }
 
   db().prepare(`
     INSERT INTO assumptions (
@@ -38,15 +52,15 @@ export default defineEventHandler(async (event) => {
       updated_at = datetime('now')
   `).run(
     id,
-    body.round_name || 'Series B',
-    body.round_close_date || null,
-    body.new_money ?? 0,
-    body.pre_money ?? 0,
-    body.pre_round_fds ?? null,
-    body.target_pool_pct ?? null,
-    body.pool_top_up_shares ?? 0,
-    body.cn_conversion_basis || 'best',
-    body.notes ?? null,
+    merged.round_name,
+    merged.round_close_date,
+    merged.new_money,
+    merged.pre_money,
+    merged.pre_round_fds,
+    merged.target_pool_pct,
+    merged.pool_top_up_shares,
+    merged.cn_conversion_basis,
+    merged.notes,
   )
 
   // Auto-snapshot the *previous* state into the version history, but only
@@ -54,13 +68,13 @@ export default defineEventHandler(async (event) => {
   // with notes-only edits.
   if (prev) {
     const changed =
-      (prev.round_name || '') !== (body.round_name || 'Series B') ||
-      (prev.round_close_date || null) !== (body.round_close_date || null) ||
-      Number(prev.new_money ?? 0) !== Number(body.new_money ?? 0) ||
-      Number(prev.pre_money ?? 0) !== Number(body.pre_money ?? 0) ||
-      (prev.pre_round_fds ?? null) !== (body.pre_round_fds ?? null) ||
-      Number(prev.pool_top_up_shares ?? 0) !== Number(body.pool_top_up_shares ?? 0) ||
-      (prev.cn_conversion_basis || 'best') !== (body.cn_conversion_basis || 'best')
+      (prev.round_name || '') !== merged.round_name ||
+      (prev.round_close_date || null) !== (merged.round_close_date || null) ||
+      Number(prev.new_money ?? 0) !== Number(merged.new_money) ||
+      Number(prev.pre_money ?? 0) !== Number(merged.pre_money) ||
+      (prev.pre_round_fds ?? null) !== (merged.pre_round_fds ?? null) ||
+      Number(prev.pool_top_up_shares ?? 0) !== Number(merged.pool_top_up_shares) ||
+      (prev.cn_conversion_basis || 'best') !== merged.cn_conversion_basis
     if (changed) {
       db().prepare(`
         INSERT INTO assumption_versions (

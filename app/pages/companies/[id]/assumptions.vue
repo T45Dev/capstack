@@ -202,102 +202,23 @@ const seriesShortcuts = [
         <p v-if="savedAt" class="ml-auto text-xs text-emerald-600">Saved at {{ savedAt }}</p>
       </div>
 
-      <!-- Equation rows -->
-      <div class="grid grid-cols-1 xl:grid-cols-2 gap-x-8 gap-y-5">
-        <!-- Eq 1: PPS = pre-money ÷ pre-round FDS -->
-        <div class="flex items-end gap-2.5 flex-wrap">
-          <div class="flex flex-col">
-            <NumberInput v-model="form.pre_money" prefix="$" :input-class="'w-32'" />
-            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">pre-money valuation</span>
-          </div>
-          <span class="pb-5 text-ink-500 text-base">÷</span>
-          <div class="flex flex-col">
-            <NumberInput v-model="preRoundFDSEffective" :input-class="'w-32'" />
-            <span class="mt-1 text-[10px] uppercase tracking-wider" :class="usingOverride ? 'text-amber-700' : 'text-ink-500'">pre-round FDS{{ usingOverride ? ' (override)' : ' (from cap table)' }}</span>
-          </div>
-          <span class="pb-5 text-ink-500 text-base">=</span>
-          <div class="flex flex-col items-end">
-            <span class="px-2.5 py-1 text-sm num rounded-md bg-accent-50 border border-accent-200 text-accent-700 font-semibold">{{ fmtPricePerShare(compute?.round?.pricePerShare) }}</span>
-            <span class="mt-1 text-[10px] uppercase tracking-wider text-accent-700">price per share</span>
-          </div>
-        </div>
+      <!-- Round-math equation rows now live on the Cap Table → Summary
+           card. That table owns the per-round inputs (pre-money valuation,
+           new money, option pool issuance) and computes everything else from
+           the imported ledgers. This page keeps the modeling-only knobs:
+           round selectors, CN basis, snapshots, deferred-CN warning, notes. -->
+      <p class="text-sm text-ink-600">
+        Round math (per-round pre-money valuation, new money, share counts) is now edited inline on the
+        <NuxtLink :to="`/companies/${id}/cap-table`" class="text-accent-600 hover:text-accent-700 font-medium">Cap Table</NuxtLink>
+        Summary card. The selectors above choose which closed round defines the pre baseline and which open round you're modeling; everything below is round-agnostic.
+      </p>
 
-        <!-- Eq 2: Post-money = pre-money + new money + CN $ -->
-        <div class="flex items-end gap-2.5 flex-wrap">
-          <div class="flex flex-col">
-            <NumberInput v-model="form.pre_money" prefix="$" :input-class="'w-32'" />
-            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">pre-money valuation</span>
-          </div>
-          <span class="pb-5 text-ink-500 text-base">+</span>
-          <div class="flex flex-col">
-            <NumberInput v-model="form.new_money" prefix="$" :input-class="'w-32'" />
-            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">new money</span>
-          </div>
-          <span class="pb-5 text-ink-500 text-base">+</span>
-          <div class="flex flex-col">
-            <span class="px-2 py-1 text-sm num rounded-md bg-ink-100 text-ink-800 text-right min-w-[7rem]">{{ fmtUSD(compute?.round?.cnConvertedDollars) }}</span>
-            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">CN $ converting</span>
-          </div>
-          <span class="pb-5 text-ink-500 text-base">=</span>
-          <div class="flex flex-col items-end">
-            <span class="px-2.5 py-1 text-sm num rounded-md bg-accent-50 border border-accent-200 text-accent-700 font-semibold">{{ fmtUSD(compute?.round?.postMoney) }}</span>
-            <span class="mt-1 text-[10px] uppercase tracking-wider text-accent-700">post-money</span>
-          </div>
-        </div>
-
-        <!-- Eq 3: Post-round FDS = pre-round FDS + new preferred + CN shares -->
-        <div class="flex items-end gap-2.5 flex-wrap">
-          <div class="flex flex-col">
-            <NumberInput v-model="preRoundFDSEffective" :input-class="'w-32'" />
-            <span class="mt-1 text-[10px] uppercase tracking-wider" :class="usingOverride ? 'text-amber-700' : 'text-ink-500'">pre-round FDS{{ usingOverride ? ' (override)' : ' (from cap table)' }}</span>
-          </div>
-          <span class="pb-5 text-ink-500 text-base">+</span>
-          <div class="flex flex-col">
-            <span class="px-2 py-1 text-sm num rounded-md bg-ink-100 text-ink-800 text-right min-w-[7rem]">{{ fmtShares(compute?.round?.newPreferredShares) }}</span>
-            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">new FDS</span>
-          </div>
-          <span class="pb-5 text-ink-500 text-base">+</span>
-          <div class="flex flex-col">
-            <span class="px-2 py-1 text-sm num rounded-md bg-ink-100 text-ink-800 text-right min-w-[5rem]">{{ fmtShares(compute?.round?.cnConvertedShares) }}</span>
-            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">CN conv.</span>
-          </div>
-          <span class="pb-5 text-ink-500 text-base">=</span>
-          <div class="flex flex-col items-end">
-            <span class="px-2.5 py-1 text-sm num rounded-md bg-accent-50 border border-accent-200 text-accent-700 font-semibold">{{ fmtShares(compute?.round?.postRoundFDS) }}</span>
-            <span class="mt-1 text-[10px] uppercase tracking-wider text-accent-700">post-round FDS</span>
-          </div>
-        </div>
-
-        <!-- Eq 4: Valuation = PPS × post-FDS -->
-        <div class="flex items-end gap-2.5 flex-wrap">
-          <div class="flex flex-col">
-            <span class="px-2 py-1 text-sm num rounded-md bg-ink-100 text-ink-800 text-right min-w-[6rem]">{{ fmtPricePerShare(compute?.round?.pricePerShare) }}</span>
-            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">PPS</span>
-          </div>
-          <span class="pb-5 text-ink-500 text-base">×</span>
-          <div class="flex flex-col">
-            <span class="px-2 py-1 text-sm num rounded-md bg-ink-100 text-ink-800 text-right min-w-[7rem]">{{ fmtShares(compute?.round?.postRoundFDS) }}</span>
-            <span class="mt-1 text-[10px] uppercase tracking-wider text-ink-500">post-FDS</span>
-          </div>
-          <span class="pb-5 text-ink-500 text-base">=</span>
-          <div class="flex flex-col items-end">
-            <span class="px-2.5 py-1 text-sm num rounded-md bg-accent-50 border border-accent-200 text-accent-700 font-semibold">{{ fmtUSD(compute?.round?.impliedPostFDSValuation) }}</span>
-            <span class="mt-1 text-[10px] uppercase tracking-wider text-accent-700">valuation at post-FDS</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Pre-round FDS source / override hint -->
+      <!-- Pre-round FDS hint + deferred CN warning -->
       <div class="mt-4 pt-3 border-t border-ink-200 flex items-center gap-4 text-xs flex-wrap">
         <span class="text-ink-500">
           Cap table FDS:
           <span class="text-ink-800 font-medium num">{{ fmtShares(fdsFromCapTable) }}</span>
         </span>
-        <button v-if="usingOverride" type="button"
-          class="text-ink-500 hover:text-ink-900 inline-flex items-center gap-1"
-          @click="clearOverride">
-          <RotateCcw :size="11" /> revert to cap table value
-        </button>
         <span
           v-if="compute?.round?.deferred?.totalDollars"
           class="ml-auto text-amber-700"
