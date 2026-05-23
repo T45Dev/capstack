@@ -41,10 +41,85 @@ const { data: roundSummary, refresh: refreshRoundSummary } = await useFetch<{ ro
 const roundCols = computed<RoundColumn[]>(() => roundSummary.value?.rounds || [])
 
 // Display label for a round. The user names it; if blank, fall back to the
-// code. Synthesized open column gets a generic label.
+// code. Synthesized open column gets a generic label. Draft override wins
+// when there's an in-flight edit.
 function friendlyRoundLabel(r: RoundColumn): string {
   if (r.round_id === 'open') return r.name || 'Open round'
-  return (r.name || '').trim() || r.code
+  const d = drafts.value[r.round_id]
+  const name = (d && 'name' in d ? d.name : r.name) || ''
+  return name.trim() || r.code
+}
+
+// ---- Edit/save state ----
+// Every input on the Summary card writes into a local draft instead of
+// PATCHing immediately. The user clicks "Save" to commit the batch — that's
+// when the close-date sort actually re-runs, so columns don't jump around
+// mid-edit. Cancel discards. Add round / Delete round still hit the server
+// immediately so the row set itself stays in sync.
+interface RoundDraft {
+  name?: string | null
+  close_date?: string | null
+  pre_money?: number | null
+  new_money?: number
+  share_price?: number | null
+  common?: number
+  preferred_issued?: number
+  option_pool_issued?: number
+}
+const drafts = ref<Record<string, RoundDraft>>({})
+const isSaving = ref(false)
+const dirtyCount = computed(() => Object.keys(drafts.value).filter(k => {
+  const d = drafts.value[k]
+  return d && Object.keys(d).length > 0
+}).length)
+
+function setDraft<K extends keyof RoundDraft>(roundId: string, field: K, value: RoundDraft[K]): void {
+  const cur = drafts.value[roundId] || {}
+  drafts.value = { ...drafts.value, [roundId]: { ...cur, [field]: value } }
+}
+
+// Effective value to display in a cell — draft override wins, otherwise
+// the server value. Used by every input's :model-value / :value binding.
+function effective<K extends keyof RoundDraft>(r: RoundColumn, field: K): RoundDraft[K] {
+  const d = drafts.value[r.round_id]
+  if (d && field in d) return d[field]
+  return (r as any)[field]
+}
+
+async function saveDrafts() {
+  if (!dirtyCount.value) return
+  isSaving.value = true
+  try {
+    for (const [roundId, body] of Object.entries(drafts.value)) {
+      if (!body || Object.keys(body).length === 0) continue
+      // Normalize close_date before saving (Chrome 2-digit-year gotcha).
+      const payload: any = { ...body }
+      if ('close_date' in payload) payload.close_date = normalizeDate(payload.close_date || '') || null
+      if (roundId === 'open') {
+        // Synthesized open column writes to assumptions; only some fields
+        // are meaningful there. share_price / share counts on open are
+        // derived in the endpoint and not directly settable.
+        const a: any = {}
+        if ('pre_money' in payload) a.pre_money = payload.pre_money ?? 0
+        if ('new_money' in payload) a.new_money = payload.new_money ?? 0
+        if (Object.keys(a).length) {
+          await $fetch(`/api/companies/${id.value}/assumptions`, { method: 'POST', body: a })
+        }
+      } else {
+        await $fetch(`/api/rounds/${roundId}`, { method: 'PATCH', body: payload })
+      }
+    }
+    drafts.value = {}
+    await refreshRoundSummary()
+  } catch (e) {
+    console.error('Save failed', e)
+  } finally {
+    isSaving.value = false
+  }
+}
+
+function cancelDrafts() {
+  drafts.value = {}
 }
 
 // Soft amber tint marks every cell that's a user-input field, so the operator
@@ -52,99 +127,15 @@ function friendlyRoundLabel(r: RoundColumn): string {
 // ledger import. Focus state clears the tint and switches to the accent ring.
 const inputCellClass = 'w-full bg-amber-50 border border-amber-300 hover:border-amber-500 focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-accent-500 rounded px-1 py-0.5 text-right text-[12px] text-ink-900 num'
 
-// Inline edit of a round's close date (Closing date row, Summary card).
-// Open rounds don't get an input; the synthesized 'open' row_id has no DB
-// backing and is skipped. Re-import from Carta resets to the ledger-derived
-// default.
-async function updateRoundCloseDate(roundId: string, value: string) {
-  if (!roundId || roundId === 'open') return
-  // Chrome's "type a 2-digit year" gotcha — "09/09/26" parses as year 26
-  // (0026-09-09) literally, which the date input then can't render. Promote
-  // anything <100 to 2000+yy so the user sees what they meant.
-  const normalized = normalizeDate(value)
-  try {
-    await $fetch(`/api/rounds/${roundId}`, { method: 'PATCH', body: { close_date: normalized || null } })
-    await refreshRoundSummary()
-  } catch (e) {
-    console.error('Failed to update round close date', e)
-  }
-}
-
-// Pool top-ups are per-round numbers stored on rounds.option_pool_issued
-// (importer seeds Formation with the imported total; user moves tranches
-// elsewhere inline). Empty input clears the cell to 0.
-async function updateRoundPoolIssued(roundId: string, value: string) {
-  if (!roundId || roundId === 'open') return
-  const n = value === '' ? 0 : Number(value)
-  if (!isFinite(n) || n < 0) return
-  try {
-    await $fetch(`/api/rounds/${roundId}`, { method: 'PATCH', body: { option_pool_issued: n } })
-    await refreshRoundSummary()
-  } catch (e) {
-    console.error('Failed to update round pool issuance', e)
-  }
-}
-
-// Pre-money is a user input on each "real" round (cash-driven parent or
-// synthesized open). CN-conversion children inherit their parent's value;
-// their cells are read-only. Open synthesized column writes to Assumptions
-// via /api/companies/:id/assumptions because there's no rounds row to PATCH.
-async function updateRoundPreMoney(roundId: string, value: string) {
-  if (!roundId) return
-  const n = value === '' ? null : Number(value)
-  if (n != null && (!isFinite(n) || n < 0)) return
-  try {
-    if (roundId === 'open') {
-      await $fetch(`/api/companies/${id.value}/assumptions`, {
-        method: 'POST',
-        body: { pre_money: n ?? 0 },
-      })
-    } else {
-      await $fetch(`/api/rounds/${roundId}`, { method: 'PATCH', body: { pre_money: n } })
-    }
-    await refreshRoundSummary()
-  } catch (e) {
-    console.error('Failed to update round pre_money', e)
-  }
-}
-
-// New money — cash raised at this round. Open round writes to Assumptions
-// (synthesized only; no DB row).
-async function updateRoundNewMoney(roundId: string, value: string) {
-  if (!roundId) return
-  const n = value === '' ? 0 : Number(value)
-  if (!isFinite(n) || n < 0) return
-  try {
-    if (roundId === 'open') {
-      await $fetch(`/api/companies/${id.value}/assumptions`, { method: 'POST', body: { new_money: n } })
-    } else {
-      await $fetch(`/api/rounds/${roundId}`, { method: 'PATCH', body: { new_money: n } })
-    }
-    await refreshRoundSummary()
-  } catch (e) { console.error('Failed to update round new_money', e) }
-}
-
-// Generic per-round numeric field updater for share_price, preferred_issued,
-// common. Always writes to the round row directly; the synthesized open
-// column doesn't allow editing these (it's all derived from Assumptions).
-async function updateRoundField(roundId: string, field: 'share_price' | 'preferred_issued' | 'common', value: string) {
-  if (!roundId || roundId === 'open') return
-  const allowNull = field === 'share_price'
-  const n = value === '' ? (allowNull ? null : 0) : Number(value)
-  if (n != null && (!isFinite(n) || n < 0)) return
-  try {
-    await $fetch(`/api/rounds/${roundId}`, { method: 'PATCH', body: { [field]: n } })
-    await refreshRoundSummary()
-  } catch (e) { console.error(`Failed to update ${field}`, e) }
-}
-
-// Round name (header label) edit. Each round picks its own name.
-async function updateRoundName(roundId: string, value: string) {
-  if (!roundId || roundId === 'open') return
-  try {
-    await $fetch(`/api/rounds/${roundId}`, { method: 'PATCH', body: { name: value.trim() || null } })
-    await refreshRoundSummary()
-  } catch (e) { console.error('Failed to update round name', e) }
+// All per-cell editors now write into the drafts buffer instead of
+// PATCHing immediately. The user clicks "Save" to commit the batch and
+// trigger the close-date re-sort. Open round's pre_money/new_money still
+// route to assumptions on save.
+function parseNumeric(value: string, allowNull = false): number | null | undefined {
+  if (value === '') return allowNull ? null : 0
+  const n = Number(value)
+  if (!isFinite(n) || n < 0) return undefined
+  return n
 }
 
 // Add a new round. The server picks a unique code (R1, R2, …); the user can
@@ -477,14 +468,14 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
     </div>
 
     <UiEmpty
-      v-if="!data.stakeholders.length"
+      v-if="!data.stakeholders.length && !roundCols.length"
       title="No cap table loaded"
-      description="Import a Carta export to populate stakeholders, share classes, and convertibles."
+      description="Import a Carta export to populate stakeholders, share classes, and convertibles — or click Add round on the Summary card below to start typing your funding history."
     >
       <NuxtLink :to="`/companies/${id}/import`"><UiButton variant="primary"><Upload :size="14" /> Import Carta export</UiButton></NuxtLink>
     </UiEmpty>
 
-    <div v-else class="space-y-6">
+    <div class="space-y-6">
       <!-- Per-round Summary Cap Table (spec §5.1) — chronological columns
            recreated from each share-class ledger plus the Open Round from
            Assumptions. Rows are the line items the user expects to see at a
@@ -494,11 +485,20 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
            plain. -->
       <UiCard
         title="Summary cap table"
-        subtitle="One column per round — chronological by close date. Type the values; Add round to extend."
+        subtitle="One column per round — type the values; Save commits and re-sorts by close date."
         :padded="false"
       >
         <template #header>
-          <UiButton variant="primary" @click="addRound"><Plus :size="14" /> Add round</UiButton>
+          <div class="flex items-center gap-2">
+            <span v-if="dirtyCount" class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+              {{ dirtyCount }} unsaved {{ dirtyCount === 1 ? 'change' : 'changes' }}
+            </span>
+            <UiButton v-if="dirtyCount" variant="ghost" :disabled="isSaving" @click="cancelDrafts">Cancel</UiButton>
+            <UiButton v-if="dirtyCount" variant="primary" :disabled="isSaving" @click="saveDrafts">
+              {{ isSaving ? 'Saving…' : 'Save' }}
+            </UiButton>
+            <UiButton :disabled="isSaving" @click="addRound"><Plus :size="14" /> Add round</UiButton>
+          </div>
         </template>
         <div v-if="!roundCols.length" class="px-4 py-8 text-center text-sm text-ink-500">
           No rounds yet. Click <span class="font-medium text-ink-700">Add round</span> to start typing your funding history.
@@ -511,7 +511,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
             </colgroup>
             <thead class="text-ink-700 bg-ink-100">
               <tr>
-                <th class="px-3 py-2 border-b border-ink-300 text-left text-[11px] font-semibold uppercase tracking-wide">Capitalization table</th>
+                <th class="px-3 py-2 border-b border-ink-300 text-left text-[11px] font-semibold uppercase tracking-wide sticky left-0 z-10 bg-ink-100">Capitalization table</th>
                 <th
                   v-for="r in roundCols"
                   :key="r.round_id"
@@ -531,9 +531,9 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     <input
                       v-if="r.round_id !== 'open'"
                       type="text"
-                      :value="r.name || r.code"
+                      :value="effective(r, 'name') ?? r.code"
                       class="bg-transparent text-right font-semibold text-[11px] border border-transparent hover:border-ink-300 focus:border-accent-500 focus:bg-white focus:outline-none rounded px-1 py-0.5 w-full"
-                      @change="updateRoundName(r.round_id, ($event.target as HTMLInputElement).value)"
+                      @input="setDraft(r.round_id, 'name', ($event.target as HTMLInputElement).value)"
                     />
                     <span v-else>{{ friendlyRoundLabel(r) }}</span>
                   </div>
@@ -547,7 +547,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                    open column (round_id === 'open') has no DB row to PATCH so
                    it falls through to a dash. -->
               <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Closing date of funding</td>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">Closing date of funding</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[r.kind === 'open' ? 'bg-accent-50/40' : '', false ? 'bg-ink-50/60' : '']" >
                   <template v-if="r.kind === 'open'">
                     <span class="text-ink-400">—</span>
@@ -555,15 +555,15 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                   <template v-else>
                     <input
                       type="date"
-                      :value="r.close_date || ''"
+                      :value="(effective(r, 'close_date') ?? r.close_date) || ''"
                       :class="inputCellClass + ' cursor-pointer'"
-                      @change="updateRoundCloseDate(r.round_id, ($event.target as HTMLInputElement).value)"
+                      @change="setDraft(r.round_id, 'close_date', ($event.target as HTMLInputElement).value || null)"
                     />
                   </template>
                 </td>
               </tr>
               <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Pre-money valuation ($)</td>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">Pre-money valuation ($)</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[r.kind === 'open' ? 'bg-accent-50/40' : '', false ? 'bg-ink-50/60' : '']" >
                   <template v-if="false">
                     <span class="text-ink-400 italic text-[11px]">inherited</span>
@@ -572,42 +572,42 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     v-else
                     variant="bare"
                     prefix="$"
-                    :model-value="r.pre_money"
+                    :model-value="effective(r, 'pre_money') ?? r.pre_money"
                     placeholder="—"
                     :input-class="inputCellClass"
-                    title="Pre-money valuation — user input on the parent round; inherited by all subrounds"
-                    @update:model-value="(v) => updateRoundPreMoney(r.round_id, v == null ? '' : String(v))"
+                    title="Pre-money valuation — user input"
+                    @update:model-value="(v) => setDraft(r.round_id, 'pre_money', v)"
                   />
                 </td>
               </tr>
               <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">New money ($)</td>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">New money ($)</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[r.kind === 'open' ? 'bg-accent-50/40' : '', false ? 'bg-ink-50/60' : '']" >
                   <NumberInput
                     variant="bare"
                     prefix="$"
-                    :model-value="r.new_money || null"
+                    :model-value="effective(r, 'new_money') ?? (r.new_money || null)"
                     placeholder="—"
                     :input-class="inputCellClass"
                     title="New money — user input"
-                    @update:model-value="(v) => updateRoundNewMoney(r.round_id, v == null ? '' : String(v))"
+                    @update:model-value="(v) => setDraft(r.round_id, 'new_money', v ?? 0)"
                   />
                 </td>
               </tr>
               <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Notes financing ($)</td>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">Notes financing ($)</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[r.kind === 'open' ? 'bg-accent-50/40' : '', false ? 'bg-ink-50/60' : '']" >
                   {{ r.notes_financing ? fmtUSD(r.notes_financing) : '—' }}
                 </td>
               </tr>
               <tr class="font-medium">
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-800">Post-money valuation ($)</td>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-800 sticky left-0 z-10 bg-white">Post-money valuation ($)</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-900" :class="[r.kind === 'open' ? 'bg-accent-50/40 text-accent-700' : '', false ? 'bg-ink-50/60' : '']" >
                   {{ r.post_money ? fmtUSD(r.post_money) : '—' }}
                 </td>
               </tr>
               <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Share price ($)</td>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">Share price ($)</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
                   <template v-if="r.round_id === 'open'">
                     {{ r.share_price ? fmtPricePerShare(r.share_price) : '—' }}
@@ -617,15 +617,15 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     variant="bare"
                     prefix="$"
                     :digits="5"
-                    :model-value="r.share_price"
+                    :model-value="effective(r, 'share_price') ?? r.share_price"
                     placeholder="—"
                     :input-class="inputCellClass"
-                    @update:model-value="(v) => updateRoundField(r.round_id, 'share_price', v == null ? '' : String(v))"
+                    @update:model-value="(v) => setDraft(r.round_id, 'share_price', v)"
                   />
                 </td>
               </tr>
               <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Cumulated financing</td>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">Cumulated financing</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[r.kind === 'open' ? 'bg-accent-50/40' : '', false ? 'bg-ink-50/60' : '']" >
                   {{ fmtUSD(r.cumulated_financing) }}
                 </td>
@@ -636,13 +636,13 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
 
               <!-- Per-round share contributions -->
               <tr class="font-medium">
-                <td class="px-3 py-1.5 border-b border-ink-300 border-t-2 text-ink-900">Total shares issued (#) — fully diluted</td>
+                <td class="px-3 py-1.5 border-b border-ink-300 border-t-2 text-ink-900 sticky left-0 z-10 bg-white">Total shares issued (#) — fully diluted</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-300 border-t-2 text-right text-ink-900" :class="[r.kind === 'open' ? 'bg-accent-50/40 text-accent-700' : '', false ? 'bg-ink-50/60' : '']" >
                   {{ r.total_shares_fds ? fmtShares(r.total_shares_fds) : '—' }}
                 </td>
               </tr>
               <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6">Common</td>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6 sticky left-0 z-10 bg-white">Common</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
                   <template v-if="r.round_id === 'open'">
                     {{ r.common ? fmtShares(r.common) : '—' }}
@@ -650,15 +650,15 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                   <NumberInput
                     v-else
                     variant="bare"
-                    :model-value="r.common || null"
+                    :model-value="effective(r, 'common') ?? (r.common || null)"
                     placeholder="—"
                     :input-class="inputCellClass"
-                    @update:model-value="(v) => updateRoundField(r.round_id, 'common', v == null ? '' : String(v))"
+                    @update:model-value="(v) => setDraft(r.round_id, 'common', v ?? 0)"
                   />
                 </td>
               </tr>
               <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6">Preferred issued</td>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6 sticky left-0 z-10 bg-white">Preferred issued</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
                   <template v-if="r.round_id === 'open'">
                     {{ r.preferred_issued ? fmtShares(r.preferred_issued) : '—' }}
@@ -666,21 +666,21 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                   <NumberInput
                     v-else
                     variant="bare"
-                    :model-value="r.preferred_issued || null"
+                    :model-value="effective(r, 'preferred_issued') ?? (r.preferred_issued || null)"
                     placeholder="—"
                     :input-class="inputCellClass"
-                    @update:model-value="(v) => updateRoundField(r.round_id, 'preferred_issued', v == null ? '' : String(v))"
+                    @update:model-value="(v) => setDraft(r.round_id, 'preferred_issued', v ?? 0)"
                   />
                 </td>
               </tr>
               <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6">Notes converted</td>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6 sticky left-0 z-10 bg-white">Notes converted</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[r.kind === 'open' ? 'bg-accent-50/40' : '', false ? 'bg-ink-50/60' : '']" >
                   {{ r.notes_converted ? fmtShares(r.notes_converted) : '—' }}
                 </td>
               </tr>
               <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6">Option pool issued</td>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6 sticky left-0 z-10 bg-white">Option pool issued</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[r.kind === 'open' ? 'bg-accent-50/40' : '', false ? 'bg-ink-50/60' : '']" >
                   <template v-if="r.round_id === 'open'">
                     <span class="text-ink-400">—</span>
@@ -688,11 +688,11 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                   <NumberInput
                     v-else
                     variant="bare"
-                    :model-value="r.option_pool_issued || null"
+                    :model-value="effective(r, 'option_pool_issued') ?? (r.option_pool_issued || null)"
                     placeholder="—"
                     :input-class="inputCellClass"
                     title="Option pool issued — user input"
-                    @update:model-value="(v) => updateRoundPoolIssued(r.round_id, v == null ? '' : String(v))"
+                    @update:model-value="(v) => setDraft(r.round_id, 'option_pool_issued', v ?? 0)"
                   />
                 </td>
               </tr>
@@ -708,7 +708,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
            outstanding vs available, Common / Preferred subtotals, and the
            Total fully-diluted footer. (Different lens from the per-round
            summary above.) -->
-      <UiCard title="Securities" subtitle="Authorized vs outstanding vs available per share class" :padded="false">
+      <UiCard v-if="data.stakeholders.length" title="Securities" subtitle="Authorized vs outstanding vs available per share class" :padded="false">
         <div class="overflow-x-auto">
           <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
@@ -803,7 +803,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
       </UiCard>
 
       <!-- Holdings -->
-      <UiCard title="Holdings" :subtitle="`${pivot.length} positions`" :padded="false">
+      <UiCard v-if="data.stakeholders.length" title="Holdings" :subtitle="`${pivot.length} positions`" :padded="false">
         <template #header>
           <TableUnitsToggle storage-key="capstack:cap-table:holdings:units" />
         </template>
