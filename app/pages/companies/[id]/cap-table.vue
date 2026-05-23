@@ -93,6 +93,22 @@ function groupHasChildren(code: string): boolean {
   return (roundGroups.value.find(g => g.parent.code === code)?.children.length || 0) > 0
 }
 
+// Friendly column label. Carta's raw names ("Series A-1 Preferred (SA1)") are
+// noisy on the Summary header; we strip the "Preferred (CODE)" suffix and,
+// for parent rounds only, drop the trailing "-1" since the first close
+// defines the canonical round (SA1 -> "Series A", PB1 -> "Series B"). SA4
+// keeps its "-4" because it's a separate extension/bridge round.
+function friendlyRoundLabel(r: RoundColumn): string {
+  if (r.kind === 'formation') return 'Formation'
+  if (r.kind === 'open') return r.name || r.code
+  const raw = (r.name || r.code).trim()
+  let label = raw
+    .replace(/\s+Preferred\s*\([A-Z][A-Z0-9-]+\)\s*$/i, '')
+    .replace(/\s*\([A-Z][A-Z0-9-]+\)\s*$/i, '')
+  if (!r.parent_round_code) label = label.replace(/-1$/, '')
+  return label || r.code
+}
+
 // Soft amber tint marks every cell that's a user-input field, so the operator
 // can tell at a glance which numbers they own vs which are derived from the
 // ledger import. Focus state clears the tint and switches to the accent ring.
@@ -559,7 +575,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                   class="px-3 py-2 border-b border-ink-300 text-right text-[11px] font-semibold"
                   :class="[
                     rc.col.kind === 'open' ? 'bg-accent-50 text-accent-700' : 'text-ink-700',
-                    rc.role === 'child' ? 'bg-ink-50 text-ink-500 pl-6' : '',
+                    rc.role === 'child' ? 'bg-ink-50/60 text-ink-600 pl-6' : '',
                   ]"
                 >
                   <div class="flex items-center justify-end gap-1.5">
@@ -573,10 +589,10 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                       <span v-if="expandedParents.has(rc.groupCode)" class="text-[10px]">▼</span>
                       <span v-else class="text-[10px]">▶</span>
                     </button>
-                    <span :class="rc.role === 'child' ? 'text-[10px] font-mono' : ''">{{ rc.role === 'child' ? rc.col.code : (rc.col.name || rc.col.code) }}</span>
+                    <span v-if="rc.role === 'child'" class="text-ink-400 mr-0.5" aria-hidden="true">↳</span>
+                    <span>{{ friendlyRoundLabel(rc.col) }}</span>
                   </div>
                   <div v-if="rc.col.kind === 'open'" class="text-[9px] font-medium uppercase tracking-wider text-accent-600">open</div>
-                  <div v-else-if="rc.role === 'child'" class="text-[9px] uppercase tracking-wider text-ink-400">CN conv.</div>
                 </th>
               </tr>
             </thead>
@@ -587,7 +603,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                    it falls through to a dash. -->
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Closing date of funding</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50' : '']">
+                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
                   <template v-if="rc.col.kind === 'open'">
                     <span class="text-ink-400">—</span>
                   </template>
@@ -603,7 +619,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Pre-money valuation ($)</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50' : '']">
+                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
                   <template v-if="rc.role === 'child'">
                     <span class="text-ink-400 italic text-[11px]">inherited</span>
                   </template>
@@ -621,7 +637,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">New money ($)</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50' : '']">
+                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
                   <template v-if="rc.role === 'child'">
                     <span class="text-ink-400">—</span>
                   </template>
@@ -639,25 +655,25 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Notes financing ($)</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50' : '']">
+                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
                   {{ rc.col.notes_financing ? fmtUSD(rc.col.notes_financing) : '—' }}
                 </td>
               </tr>
               <tr class="font-medium">
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-800">Post-money valuation ($)</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-900" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40 text-accent-700' : '', rc.role === 'child' ? 'bg-ink-50' : '']">
+                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-900" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40 text-accent-700' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
                   {{ rc.col.post_money ? fmtUSD(rc.col.post_money) : '—' }}
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Share price ($)</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50' : '']">
+                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
                   {{ rc.col.share_price ? fmtPricePerShare(rc.col.share_price) : '—' }}
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700">Cumulated financing</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50' : '']">
+                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
                   {{ fmtUSD(rc.col.cumulated_financing) }}
                 </td>
               </tr>
@@ -668,31 +684,31 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               <!-- Per-round share contributions -->
               <tr class="font-medium">
                 <td class="px-3 py-1.5 border-b border-ink-300 border-t-2 text-ink-900">Total shares issued (#) — fully diluted</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-300 border-t-2 text-right text-ink-900" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40 text-accent-700' : '', rc.role === 'child' ? 'bg-ink-50' : '']">
+                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-300 border-t-2 text-right text-ink-900" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40 text-accent-700' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
                   {{ rc.col.total_shares_fds ? fmtShares(rc.col.total_shares_fds) : '—' }}
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6">Common</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50' : '']">
+                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
                   {{ rc.col.common ? fmtShares(rc.col.common) : '—' }}
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6">Preferred issued</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50' : '']">
+                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
                   {{ rc.col.preferred_issued ? fmtShares(rc.col.preferred_issued) : '—' }}
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6">Notes converted</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50' : '']">
+                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
                   {{ rc.col.notes_converted ? fmtShares(rc.col.notes_converted) : '—' }}
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6">Option pool issued</td>
-                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50' : '']">
+                <td v-for="rc in renderCols" :key="rc.col.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[rc.col.kind === 'open' ? 'bg-accent-50/40' : '', rc.role === 'child' ? 'bg-ink-50/60' : '']">
                   <template v-if="rc.col.round_id === 'open'">
                     <span class="text-ink-400">—</span>
                   </template>
