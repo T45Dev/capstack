@@ -152,11 +152,18 @@ async function addRound() {
 
 // Delete a round. Confirms first. Any CN whose destination matched this
 // round's code keeps the value but will read as unmatched until reassigned.
+// Also clears any in-flight draft for that round so the dirty count stays
+// accurate.
 async function deleteRound(roundId: string, label: string) {
   if (!roundId || roundId === 'open') return
   if (!confirm(`Delete round "${label}"? Any CNs attributed here will become unassigned.`)) return
   try {
     await $fetch(`/api/rounds/${roundId}`, { method: 'DELETE' })
+    if (drafts.value[roundId]) {
+      const next = { ...drafts.value }
+      delete next[roundId]
+      drafts.value = next
+    }
     await refreshRoundSummary()
   } catch (e) { console.error('Failed to delete round', e) }
 }
@@ -522,17 +529,18 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     <button
                       v-if="r.round_id !== 'open'"
                       type="button"
-                      class="opacity-0 group-hover:opacity-100 text-ink-500 hover:text-red-600 transition-opacity"
+                      class="shrink-0 text-ink-400 hover:text-red-600 transition-colors p-0.5 rounded hover:bg-red-50"
                       @click="deleteRound(r.round_id, friendlyRoundLabel(r))"
                       title="Delete round"
+                      aria-label="Delete round"
                     >
-                      <Trash2 :size="11" />
+                      <Trash2 :size="13" />
                     </button>
                     <input
                       v-if="r.round_id !== 'open'"
                       type="text"
                       :value="effective(r, 'name') ?? r.code"
-                      class="bg-transparent text-right font-semibold text-[11px] border border-transparent hover:border-ink-300 focus:border-accent-500 focus:bg-white focus:outline-none rounded px-1 py-0.5 w-full"
+                      class="flex-1 min-w-0 bg-transparent text-right font-semibold text-[11px] border border-transparent hover:border-ink-300 focus:border-accent-500 focus:bg-white focus:outline-none rounded px-1 py-0.5"
                       @input="setDraft(r.round_id, 'name', ($event.target as HTMLInputElement).value)"
                     />
                     <span v-else>{{ friendlyRoundLabel(r) }}</span>
