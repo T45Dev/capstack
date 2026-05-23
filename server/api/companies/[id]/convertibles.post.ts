@@ -17,6 +17,7 @@ export default defineEventHandler(async (event) => {
     valuation_cap?: number | null
     conversion_discount?: number
     converts_at_round?: boolean
+    destination_class_code?: string | null
     external_id?: string
   }>(event)
 
@@ -39,13 +40,21 @@ export default defineEventHandler(async (event) => {
     body.converts_at_round === undefined ? convertsDefault
     : (body.converts_at_round ? 1 : 0)
 
+  // Normalize destination by stripping any "-N" tranche suffix coming in from
+  // a stale client; share-class codes live without the suffix on the share
+  // classes table (see Carta importer + db migration).
+  const destinationClassCode = body.destination_class_code
+    ? String(body.destination_class_code).replace(/-\d+$/, '') || null
+    : null
+
   const cnId = newId('cn')
   db().prepare(`
     INSERT INTO convertibles (
       id, company_id, stakeholder_id, external_id, stakeholder_name,
       principal, interest_accrued, interest_rate, issue_date, maturity_date,
-      conversion_date, valuation_cap, conversion_discount, converts_at_round, status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outstanding')
+      conversion_date, valuation_cap, conversion_discount, converts_at_round,
+      destination_class_code, status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outstanding')
   `).run(
     cnId,
     id,
@@ -61,6 +70,7 @@ export default defineEventHandler(async (event) => {
     body.valuation_cap ?? null,
     body.conversion_discount ?? 0,
     convertsAtRound,
+    destinationClassCode,
   )
 
   return db().prepare('SELECT * FROM convertibles WHERE id = ?').get(cnId)

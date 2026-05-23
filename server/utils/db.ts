@@ -198,6 +198,25 @@ function migrate(d: Database.Database): void {
   ensureColumn('companies', 'starting_round', 'TEXT')
   ensureColumn('companies', 'starting_round_date', 'TEXT')
   ensureColumn('grants', 'approval_status', 'TEXT')
+
+  // One-shot: strip the "-N" tranche suffix off any historical CN
+  // destination_class_code values so they match share_classes.code. Idempotent
+  // — once cleaned, the WHERE clause matches zero rows.
+  const dirty = d.prepare(
+    `SELECT id, destination_class_code AS code FROM convertibles
+     WHERE destination_class_code IS NOT NULL
+       AND destination_class_code GLOB '*-[0-9]*'`,
+  ).all() as Array<{ id: string; code: string }>
+  if (dirty.length) {
+    const upd = d.prepare('UPDATE convertibles SET destination_class_code = ? WHERE id = ?')
+    const tx = d.transaction((rows: typeof dirty) => {
+      for (const r of rows) {
+        const cleaned = r.code.replace(/-\d+$/, '')
+        if (cleaned !== r.code) upd.run(cleaned || null, r.id)
+      }
+    })
+    tx(dirty)
+  }
 }
 
 export function reset(): void {
