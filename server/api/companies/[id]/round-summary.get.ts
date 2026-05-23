@@ -112,12 +112,47 @@ export default defineEventHandler((event) => {
   // Assumptions row drives the Open Round column.
   const assumptions = db().prepare('SELECT * FROM assumptions WHERE company_id = ?').get(id) as any || {}
 
+  // Resolve which round (if any) Assumptions is pointing at as "Open". Match
+  // either the round's code (case-insensitive) OR a substring of the round's
+  // display name — Assumptions stores friendly labels like "Series B-2" while
+  // the rounds table holds either the class code ("PB2") or the full Carta
+  // name ("Series B-2 Preferred (PB2)"). If nothing matches, we synthesize a
+  // fresh open-round column at the end so the user can still model future
+  // rounds (Series C / B-3 / etc.) that aren't in the cap table yet.
+  const openRoundName = (assumptions.round_name && String(assumptions.round_name).trim()) || ''
+  const openRoundLc = openRoundName.toLowerCase()
+  function matchesOpen(r: { code: string; name: string | null }): boolean {
+    if (!openRoundLc) return false
+    if (r.code.toLowerCase() === openRoundLc) return true
+    if (r.name && r.name.toLowerCase().includes(openRoundLc)) return true
+    return false
+  }
+  const openIdx = openRoundLc ? rounds.findIndex(matchesOpen) : -1
+
+  // Pool attribution: when option_pools rows lack an adopted_date the cap-
+  // table import doesn't tell us which round authorized them. Heuristic:
+  // anchor them to the most recent closed round (after the open-round flip).
+  // For this dataset that lands on PB1, matching the user's mental model.
+  const seniorityOfMostRecentClosed = (() => {
+    for (let i = rounds.length - 1; i >= 0; i--) {
+      const r = rounds[i]
+      if (!r) continue
+      const isOpen = i === openIdx
+      if (!isOpen && r.kind === 'closed') return r.seniority
+    }
+    // Fallback: if every round is open (or none are closed), use Formation.
+    return rounds[0]?.seniority ?? 0
+  })()
+
   // ----- Assemble per-round columns -----
   const cols: RoundColumn[] = []
   let cumulativeFDS = 0
   let cumulativeFinancing = 0
 
-  for (const r of rounds) {
+  for (let i = 0; i < rounds.length; i++) {
+    const r = rounds[i]
+    if (!r) continue
+    const effectiveKind: 'formation' | 'closed' | 'open' = i === openIdx ? 'open' : r.kind
     // Preferred shares issued this round (matched by share_class_code).
     let preferredIssued = 0
     if (r.share_class_code) {
@@ -129,40 +164,45 @@ export default defineEventHandler((event) => {
     // model — option exercises showing up in CS Ledger don't reopen the
     // Formation event).
     let common = 0
-    if (r.kind === 'formation') {
+    if (effectiveKind === 'formation') {
       // Find the Common (CS) share class and sum its holdings.
       const csClass = Array.from(classByCode.values()).find(c => c.kind === 'common')
       if (csClass) common = holdingsByClass.get(csClass.id) || 0
     }
 
     // CN contributions attributed to this round (sum of principal + interest).
-    const cnDollars = cnByCode.get(r.code.toUpperCase())?.dollars || 0
-    const cnShares = cnSharesFor(r.code.toUpperCase(), r.share_price)
+    // For the OPEN round, *also* sweep up notes the user routed to "Open round"
+    // via the CN page sentinel (destination_class_code = null, converts = 1).
+    const codeKey = r.code.toUpperCase()
+    let cnDollars = cnByCode.get(codeKey)?.dollars || 0
+    if (effectiveKind === 'open') {
+      cnDollars += cnByCode.get('OPEN')?.dollars || 0
+    }
+    const cnShares = r.share_price && r.share_price > 0 ? cnDollars / r.share_price : 0
 
-    // Option pool top-ups whose adopted_date falls on or before this round's
-    // close and after the previous round's. Crude attribution; refined when
-    // the user starts editing option_pools per-round.
+    // Option pool top-ups. When the row has no adopted_date the importer can't
+    // tell us where it belongs; we attribute it to the most recent CLOSED
+    // round (after the open-round flip). For PB1/PB2 modelling that lands on
+    // PB1 as the user expects, rather than Formation.
     let poolIssued = 0
-    if (r.kind === 'formation') {
-      // Anchor any pool with no adopted_date to Formation.
+    if (r.seniority === seniorityOfMostRecentClosed) {
       for (const p of pools) {
         if (!p.adopted_date) poolIssued += p.authorized || 0
       }
-    } else {
-      for (const p of pools) {
-        if (!p.adopted_date) continue
-        const prior = rounds[r.seniority - 2]?.close_date ?? '0000-01-01'
-        if (p.adopted_date > prior && p.adopted_date <= (r.close_date || '9999-12-31')) {
-          poolIssued += p.authorized || 0
-        }
+    }
+    for (const p of pools) {
+      if (!p.adopted_date) continue
+      const priorClose = rounds[i - 1]?.close_date ?? '0000-01-01'
+      if (p.adopted_date > priorClose && p.adopted_date <= (r.close_date || '9999-12-31')) {
+        poolIssued += p.authorized || 0
       }
     }
 
     const sharesAdded = common + preferredIssued + cnShares + poolIssued
-    // Pre-money for closed/formation rounds: share_price × cumulative FDS
-    // through the previous round. The first round (Formation) has no prior
-    // FDS, so pre_money there is meaningless (null).
-    const preMoney = r.kind === 'formation'
+    // Pre-money for closed/open rounds: share_price × cumulative FDS through
+    // the previous round. The first round (Formation) has no prior FDS, so
+    // pre_money there is meaningless (null).
+    const preMoney = effectiveKind === 'formation'
       ? null
       : (r.share_price != null ? r.share_price * cumulativeFDS : null)
     const newMoney = r.new_money || 0
@@ -174,7 +214,7 @@ export default defineEventHandler((event) => {
       round_id: r.id,
       code: r.code,
       name: r.name,
-      kind: r.kind,
+      kind: effectiveKind,
       close_date: r.close_date,
       seniority: r.seniority,
       share_class_code: r.share_class_code,
@@ -192,40 +232,42 @@ export default defineEventHandler((event) => {
     })
   }
 
-  // ----- Synthesize the Open Round column from Assumptions. -----
-  // share_price is back-computed from pre_money / cumulativeFDS (the same
-  // identity the Assumptions card displays).
-  const openName = (assumptions.round_name && String(assumptions.round_name).trim()) || 'Open round'
-  const openPreMoney = Number(assumptions.pre_money) || 0
-  const openNewMoney = Number(assumptions.new_money) || 0
-  const openPreFDS = (assumptions.pre_round_fds != null && Number(assumptions.pre_round_fds) > 0)
-    ? Number(assumptions.pre_round_fds)
-    : cumulativeFDS
-  const openSharePrice = openPreFDS > 0 ? openPreMoney / openPreFDS : null
-  const openCNDollars = cnByCode.get('OPEN')?.dollars || 0
-  const openCNShares = openSharePrice && openSharePrice > 0 ? openCNDollars / openSharePrice : 0
-  const openPreferredIssued = openSharePrice && openSharePrice > 0 ? openNewMoney / openSharePrice : 0
-  const openPoolIssued = Number(assumptions.pool_top_up_shares) || 0
-  cols.push({
-    round_id: 'open',
-    code: 'OPEN',
-    name: openName,
-    kind: 'open',
-    close_date: null,
-    seniority: rounds.length + 1,
-    share_class_code: null,
-    share_price: openSharePrice,
-    new_money: openNewMoney,
-    notes_financing: openCNDollars,
-    pre_money: openPreMoney || null,
-    post_money: openPreMoney + openNewMoney + openCNDollars,
-    common: 0,
-    preferred_issued: openPreferredIssued,
-    notes_converted: openCNShares,
-    option_pool_issued: openPoolIssued,
-    total_shares_fds: openPreFDS + openPreferredIssued + openCNShares + openPoolIssued,
-    cumulated_financing: cumulativeFinancing + openNewMoney + openCNDollars,
-  })
+  // ----- Synthesize an Open Round column ONLY when assumptions.round_name
+  // doesn't match any existing round (e.g. the user is modelling a future
+  // Series C that isn't in the cap table yet). Otherwise the matching round
+  // already got the 'open' kind in the loop above.
+  if (openIdx < 0 && openRoundName) {
+    const openPreMoney = Number(assumptions.pre_money) || 0
+    const openNewMoney = Number(assumptions.new_money) || 0
+    const openPreFDS = (assumptions.pre_round_fds != null && Number(assumptions.pre_round_fds) > 0)
+      ? Number(assumptions.pre_round_fds)
+      : cumulativeFDS
+    const openSharePrice = openPreFDS > 0 ? openPreMoney / openPreFDS : null
+    const openCNDollars = cnByCode.get('OPEN')?.dollars || 0
+    const openCNShares = openSharePrice && openSharePrice > 0 ? openCNDollars / openSharePrice : 0
+    const openPreferredIssued = openSharePrice && openSharePrice > 0 ? openNewMoney / openSharePrice : 0
+    const openPoolIssued = Number(assumptions.pool_top_up_shares) || 0
+    cols.push({
+      round_id: 'open',
+      code: 'OPEN',
+      name: openRoundName,
+      kind: 'open',
+      close_date: null,
+      seniority: rounds.length + 1,
+      share_class_code: null,
+      share_price: openSharePrice,
+      new_money: openNewMoney,
+      notes_financing: openCNDollars,
+      pre_money: openPreMoney || null,
+      post_money: openPreMoney + openNewMoney + openCNDollars,
+      common: 0,
+      preferred_issued: openPreferredIssued,
+      notes_converted: openCNShares,
+      option_pool_issued: openPoolIssued,
+      total_shares_fds: openPreFDS + openPreferredIssued + openCNShares + openPoolIssued,
+      cumulated_financing: cumulativeFinancing + openNewMoney + openCNDollars,
+    })
+  }
 
   return { rounds: cols }
 })
