@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { normalizeDate } from '~/utils/format'
+import NumberInput from './NumberInput.vue'
 
 interface Props {
   modelValue?: string | number | null
@@ -12,13 +13,18 @@ interface Props {
   hint?: string
   suffix?: string
   prefix?: string
+  // Fraction digits when displaying numeric values (only used when
+  // type === 'number'). Defaults to 0 — whole-dollar / whole-share fields.
+  // Money-per-share fields can pass `digits="5"` to match the global PPS
+  // standard.
+  digits?: number
 }
-const props = withDefaults(defineProps<Props>(), { type: 'text' })
+const props = withDefaults(defineProps<Props>(), { type: 'text', digits: 0 })
 const emit = defineEmits(['update:modelValue', 'change'])
 
 function onInput(e: Event) {
   const t = e.target as HTMLInputElement
-  emit('update:modelValue', props.type === 'number' ? (t.value === '' ? null : Number(t.value)) : t.value)
+  emit('update:modelValue', t.value)
 }
 
 // Fix Chrome's "type a 2-digit year" gotcha — committing "0026-09-09" gets
@@ -36,7 +42,21 @@ function onChange(e: Event) {
 <template>
   <label class="block">
     <span v-if="label" class="block text-xs font-medium text-ink-700 mb-1">{{ label }}</span>
-    <div class="relative">
+    <!-- Numeric fields delegate to NumberInput so they pick up the global
+         friendly-format standard ($, commas, focus/blur swap). Other types
+         (text, date, …) stay with the native input. -->
+    <NumberInput
+      v-if="type === 'number'"
+      :model-value="modelValue == null || modelValue === '' ? null : Number(modelValue)"
+      :prefix="prefix"
+      :suffix="suffix"
+      :placeholder="placeholder"
+      :disabled="disabled"
+      :digits="digits"
+      :step="step"
+      @update:model-value="(v) => emit('update:modelValue', v)"
+    />
+    <div v-else class="relative">
       <span v-if="prefix" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-500 text-sm pointer-events-none">{{ prefix }}</span>
       <input
         :type="type"

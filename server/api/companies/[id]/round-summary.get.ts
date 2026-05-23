@@ -12,7 +12,6 @@ interface RoundColumn {
   name: string | null             // friendly display, e.g. "Series A-1"
   kind: 'formation' | 'closed' | 'open'
   parent_round_code: string | null  // CN-conversion children point at their cash-driven parent
-  pre_money_is_user_set: boolean  // true when rounds.pre_money is a stored value (false = derived fallback)
   close_date: string | null
   seniority: number               // chronological order; open round always last
   share_class_code: string | null
@@ -230,15 +229,10 @@ export default defineEventHandler((event) => {
     const poolIssued = Number(r.option_pool_issued) || 0
 
     const sharesAdded = common + preferredIssued + cnShares + poolIssued
-    // Pre-money: prefer the user-typed rounds.pre_money. When null, fall back
-    // to a derived value (share_price × cumulative FDS through the previous
-    // round) so the user sees a sensible default. Formation has no prior FDS
-    // so the derived fallback is also null.
-    const preMoneyDerived = effectiveKind === 'formation'
-      ? null
-      : (r.share_price != null && cumulativeFDS > 0 ? r.share_price * cumulativeFDS : null)
-    const userPreMoney = (r.pre_money != null && r.pre_money !== 0) ? r.pre_money : null
-    const preMoney = userPreMoney ?? preMoneyDerived
+    // Pre-money is a pure user input. We don't compute or derive it; if the
+    // user hasn't typed a value the cell is blank and post_money math ignores
+    // it (post_money = 0 + new_money + cnDollars in that case).
+    const preMoney = (r.pre_money != null && r.pre_money !== 0) ? r.pre_money : null
     const newMoney = r.new_money || 0
     const postMoney = (preMoney || 0) + newMoney + cnDollars
     cumulativeFDS += sharesAdded
@@ -250,7 +244,6 @@ export default defineEventHandler((event) => {
       name: r.name,
       kind: effectiveKind,
       parent_round_code: r.parent_round_code,
-      pre_money_is_user_set: userPreMoney != null,
       // Open rounds don't have a close date — the stored value (typically the
       // max Issue Date from the parsed ledger) is only meaningful once the
       // round actually closes, so suppress it here. The DB row still holds
@@ -293,7 +286,6 @@ export default defineEventHandler((event) => {
       name: openRoundName,
       kind: 'open',
       parent_round_code: null,
-      pre_money_is_user_set: openPreMoney > 0,
       close_date: null,
       seniority: rounds.length + 1,
       share_class_code: null,

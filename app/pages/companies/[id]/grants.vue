@@ -637,7 +637,7 @@ function exportBoardApproval() {
               </span>
             </p>
           </div>
-          <UiInput v-model="form.strike" type="number" label="Strike (PPS)" prefix="$" step="0.01" />
+          <UiInput v-model="form.strike" type="number" label="Strike (PPS)" prefix="$" step="0.00001" :digits="5" />
           <UiInput v-model="form.issue_date" type="date" label="Issue date" />
           <UiInput v-model="form.vesting_start" type="date" label="Vest start" />
           <UiInput v-model="form.vest_months" type="number" label="Vest months" />
