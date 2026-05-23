@@ -302,9 +302,21 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
                   </tr>
                 </thead>
                 <tbody class="num">
-                  <tr v-for="r in sortedPayouts" :key="r.stakeholderId" class="hover:bg-accent-50/40 transition-colors">
+                  <tr
+                    v-for="r in sortedPayouts"
+                    :key="r.stakeholderId"
+                    class="transition-colors"
+                    :class="r.isIdea ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-accent-50/40'"
+                  >
                     <template v-for="c in payoutTable.cols" :key="c.key">
-                      <td v-if="c.key === 'name'" class="px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate" :title="r.name">{{ r.name }}</td>
+                      <td v-if="c.key === 'name'" class="px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate" :title="r.name">
+                        <span>{{ r.name }}</span>
+                        <span
+                          v-if="r.isIdea"
+                          class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border border-amber-300 bg-amber-50 text-amber-800 align-middle"
+                          title="Hypothetical grant from the Option Pool Impact page"
+                        >idea</span>
+                      </td>
                       <td v-else-if="c.key === 'postShares'" class="px-2.5 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200">{{ fmtShares(r.postShares) }}</td>
                       <td v-else-if="c.key === 'postPct'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ result.round.postRoundFDS > 0 ? fmtPct(r.postShares / result.round.postRoundFDS, 2) : '—' }}</td>
                       <td v-else-if="c.exitIdx != null" class="px-2.5 py-1.5 text-right border-b border-ink-200 text-ink-800">{{ fmtUSD(r.exits?.[c.exitIdx] || 0) }}</td>

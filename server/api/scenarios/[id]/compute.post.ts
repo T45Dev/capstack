@@ -74,11 +74,33 @@ export default defineEventHandler((event) => {
     GROUP BY s.id, s.name
   `).all(companyId) as any[]
 
+  // Idea events from the Option Pool Impact page. Grants + reserves are
+  // hypothetical share allocations that dilute everyone if they happen; the
+  // dilution table shows them as their own rows with an `isIdea` flag so
+  // scenarios.vue can label them clearly. Pool top-ups are folded into the
+  // post-round denominator alongside the scenario's pool_top_up_shares.
+  // Other idea types (exercise / forfeit / floor) don't change the FDS pie.
+  const ideaRows = db().prepare(`
+    SELECT id, event_date, type, name, shares
+    FROM pool_events WHERE company_id = ?
+  `).all(companyId) as Array<{ id: string; event_date: string; type: string; name: string; shares: number }>
+
+  const ideaGrantShares = ideaRows
+    .filter(i => i.type === 'grant' || i.type === 'reserve')
+    .reduce((a, i) => a + (i.shares || 0), 0)
+  const ideaTopupShares = ideaRows
+    .filter(i => i.type === 'pool_topup')
+    .reduce((a, i) => a + (i.shares || 0), 0)
+
+  // Effective post-round FDS used for dilution math. Idea grants come out of
+  // post-round FDS (they're new outstanding); idea top-ups expand the pool.
+  const dilutedPostFDS = round.postRoundFDS + ideaGrantShares + ideaTopupShares
+
   const dilution = stakeholderRows.map(r => {
     const preTotal = r.held_shares + r.option_shares
     const cnShares = cnSharesByStakeholder.get(r.id) || 0
     const postTotal = preTotal + cnShares
-    const exits = exitValues.map(ev => exitPayout(postTotal, round.postRoundFDS, ev))
+    const exits = exitValues.map(ev => exitPayout(postTotal, dilutedPostFDS, ev))
     return {
       stakeholderId: r.id,
       name: r.name,
@@ -86,10 +108,33 @@ export default defineEventHandler((event) => {
       cnShares,
       postShares: postTotal,
       prePct: round.preRoundFDS > 0 ? preTotal / round.preRoundFDS : 0,
-      postPct: round.postRoundFDS > 0 ? postTotal / round.postRoundFDS : 0,
+      postPct: dilutedPostFDS > 0 ? postTotal / dilutedPostFDS : 0,
       exits,
+      isIdea: false,
     }
-  }).sort((a, b) => b.postShares - a.postShares)
+  })
 
-  return { scenario, inputs, round, dilution, exitValues }
+  // Append synthetic dilution rows for each idea grant / reserve. They have
+  // no holdings, just the projected new shares.
+  for (const idea of ideaRows) {
+    if (idea.type !== 'grant' && idea.type !== 'reserve') continue
+    const shares = idea.shares || 0
+    const exits = exitValues.map(ev => exitPayout(shares, dilutedPostFDS, ev))
+    dilution.push({
+      stakeholderId: `idea:${idea.id}`,
+      name: idea.name,
+      preShares: 0,
+      cnShares: 0,
+      postShares: shares,
+      prePct: 0,
+      postPct: dilutedPostFDS > 0 ? shares / dilutedPostFDS : 0,
+      exits,
+      isIdea: true,
+    })
+  }
+
+  dilution.sort((a, b) => b.postShares - a.postShares)
+
+  const enrichedRound = { ...round, postRoundFDS: dilutedPostFDS, ideaGrantShares, ideaTopupShares }
+  return { scenario, inputs, round: enrichedRound, dilution, exitValues }
 })
