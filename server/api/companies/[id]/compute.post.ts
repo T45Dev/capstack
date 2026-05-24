@@ -105,13 +105,13 @@ export default defineEventHandler(async (event) => {
   // Per-stakeholder dilution
   const stakeholderRows = db().prepare(`
     SELECT
-      s.id, s.name,
+      s.id, s.name, s.type,
       COALESCE(SUM(h.shares), 0) AS held_shares,
       COALESCE((SELECT SUM(g.quantity) FROM grants g WHERE g.stakeholder_id = s.id AND g.status = 'outstanding'), 0) AS option_shares
     FROM stakeholders s
     LEFT JOIN holdings h ON h.stakeholder_id = s.id
     WHERE s.company_id = ?
-    GROUP BY s.id, s.name
+    GROUP BY s.id, s.name, s.type
   `).all(id) as any[]
 
   const dilution = stakeholderRows.map(r => {
@@ -121,6 +121,7 @@ export default defineEventHandler(async (event) => {
     return {
       stakeholderId: r.id,
       name: r.name,
+      type: r.type || null,
       preShares: preTotal,
       cnShares,
       postShares: postTotal,
