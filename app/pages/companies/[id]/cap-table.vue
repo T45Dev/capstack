@@ -580,13 +580,14 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
         <div v-if="!roundCols.length" class="px-4 py-8 text-center text-sm text-ink-500">
           No rounds yet. Click <span class="font-medium text-ink-700">Add round</span> to start typing your funding history.
         </div>
-        <!-- max-height + overflow-auto turns this wrapper into the scroll
-             context for BOTH axes — required so the thead's position:sticky
-             actually sticks to the table's top edge (not the page's, which
-             keeps moving when the page scrolls). The viewport-minus-padding
-             height lands the table just under the page nav with breathing
-             room below. -->
-        <div v-else class="overflow-auto max-h-[calc(100vh-12rem)]">
+        <!-- overflow-x: auto + overflow-y: clip — the wrapper is the
+             x-scroll container (so the table can scroll horizontally when
+             there are more rounds than fit) but is NOT a y-scroll
+             container, so position:sticky on the thead sticks against the
+             document instead of an internal mini-scroll-viewport. No
+             max-height means no reserved blank space when the table fits;
+             the document just keeps scrolling when it doesn't. -->
+        <div v-else class="overflow-x-auto overflow-y-clip">
           <table class="text-[12px] border-separate whitespace-nowrap" style="border-spacing: 0; min-width: 100%;">
             <colgroup>
               <col style="width: 220px" />
@@ -594,15 +595,17 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
             </colgroup>
             <thead class="text-ink-700 bg-ink-100">
               <tr>
-                <!-- Sticky top:0 within the scrollable wrapper — the wrapper
-                     starts below the page nav so top:0 lands the header just
-                     under it. The corner cell is sticky both ways so it owns
-                     the row/column intersection. -->
-                <th class="px-3 py-2 border-b border-ink-300 text-left text-[11px] font-semibold uppercase tracking-wide sticky left-0 top-0 z-30 bg-ink-100">Capitalization table</th>
+                <!-- Sticky top-14 lands the header just under the page's
+                     h-14 nav bar as the document scrolls. Y-scroll context
+                     is the document (the wrapper is overflow-y: clip), so
+                     sticky-top here actually sticks against the viewport.
+                     The corner cell is sticky both ways so it owns the
+                     row/column intersection. -->
+                <th class="px-3 py-2 border-b border-ink-300 text-left text-[11px] font-semibold uppercase tracking-wide sticky left-0 top-14 z-30 bg-ink-100">Capitalization table</th>
                 <th
                   v-for="r in roundCols"
                   :key="r.round_id"
-                  class="px-3 py-2 border-b border-ink-300 text-right text-[11px] font-semibold group sticky top-0 z-20"
+                  class="px-3 py-2 border-b border-ink-300 text-right text-[11px] font-semibold group sticky top-14 z-20"
                   :class="effectiveKind(r) === 'open' ? 'bg-accent-50 text-accent-700' : 'text-ink-700 bg-ink-100'"
                 >
                   <div class="flex items-center justify-end gap-1.5">
