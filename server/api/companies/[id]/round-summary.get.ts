@@ -54,22 +54,16 @@ export default defineEventHandler((event) => {
     preferred_issued: number; common: number; seniority: number;
   }>
 
-  const assumptions = db().prepare('SELECT * FROM assumptions WHERE company_id = ?').get(id) as any || {}
-  const openRoundName = (assumptions.round_name && String(assumptions.round_name).trim()) || ''
-  const openRoundLc = openRoundName.toLowerCase()
-  function isOpenRound(r: { code: string; name: string | null }): boolean {
-    if (!openRoundLc) return false
-    if (r.code.toLowerCase() === openRoundLc) return true
-    if (r.name && r.name.toLowerCase().includes(openRoundLc)) return true
-    return false
-  }
-
-  // Sort by close_date (ISO strings sort lexically). Open rounds — and any
-  // round without a close_date set — fall to the end of the timeline.
-  // Seniority breaks ties.
+  // The `kind` column on each round is the source of truth for whether
+  // it's open. assumptions.round_name is no longer used to flag a round
+  // as open from the cap-table perspective. Open rounds (kind = 'open')
+  // sort to the end of the timeline regardless of their close_date.
   rounds.sort((a, b) => {
-    const ad = isOpenRound(a) ? null : a.close_date
-    const bd = isOpenRound(b) ? null : b.close_date
+    const aOpen = a.kind === 'open'
+    const bOpen = b.kind === 'open'
+    if (aOpen !== bOpen) return aOpen ? 1 : -1
+    const ad = a.close_date
+    const bd = b.close_date
     if (ad && bd) {
       if (ad !== bd) return ad.localeCompare(bd)
       return a.seniority - b.seniority
@@ -78,7 +72,6 @@ export default defineEventHandler((event) => {
     if (bd) return 1
     return a.seniority - b.seniority
   })
-  const openIdx = rounds.findIndex(isOpenRound)
 
   // CNs — sum per attributed round. destination_class_code stores the
   // round's code (it's a legacy field name from when it pointed at share
@@ -123,7 +116,7 @@ export default defineEventHandler((event) => {
   for (let i = 0; i < rounds.length; i++) {
     const r = rounds[i]
     if (!r) continue
-    const effectiveKind: 'formation' | 'closed' | 'open' = i === openIdx ? 'open' : r.kind
+    const effectiveKind: 'formation' | 'closed' | 'open' = r.kind
 
     // All share counts are user-typed; we don't derive from holdings.
     // preferred_issued, common, option_pool_issued live directly on the
@@ -174,40 +167,9 @@ export default defineEventHandler((event) => {
     })
   }
 
-  // Synthesize an Open Round column when assumptions.round_name doesn't match
-  // any existing round (user is modelling a future round not yet added).
-  if (openIdx < 0 && openRoundName) {
-    const openPreMoney = Number(assumptions.pre_money) || 0
-    const openNewMoney = Number(assumptions.new_money) || 0
-    const openPreFDS = (assumptions.pre_round_fds != null && Number(assumptions.pre_round_fds) > 0)
-      ? Number(assumptions.pre_round_fds)
-      : cumulativeFDS
-    const openSharePrice = openPreFDS > 0 ? openPreMoney / openPreFDS : null
-    const openCNDollars = cnByCode.get('OPEN')?.dollars || 0
-    const openCNShares = openSharePrice && openSharePrice > 0 ? openCNDollars / openSharePrice : 0
-    const openPreferredIssued = openSharePrice && openSharePrice > 0 ? openNewMoney / openSharePrice : 0
-    const openPoolIssued = Number(assumptions.pool_top_up_shares) || 0
-    cols.push({
-      round_id: 'open',
-      code: 'OPEN',
-      name: openRoundName,
-      kind: 'open',
-      close_date: null,
-      seniority: rounds.length + 1,
-      share_class_code: null,
-      share_price: openSharePrice,
-      new_money: openNewMoney,
-      notes_financing: openCNDollars,
-      pre_money: openPreMoney || null,
-      post_money: openPreMoney + openNewMoney + openCNDollars,
-      common: 0,
-      preferred_issued: openPreferredIssued,
-      notes_converted: openCNShares,
-      option_pool_issued: openPoolIssued,
-      total_shares_fds: openPreFDS + openPreferredIssued + openPoolIssued,
-      cumulated_financing: cumulativeFinancing + openNewMoney + openCNDollars,
-    })
-  }
+  // No synthesized open column. To model a future round the user adds a
+  // row via "Add round" and flips its kind to 'open' via the column-header
+  // selector.
 
   return { rounds: cols }
 })

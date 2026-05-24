@@ -21,16 +21,8 @@ const showCreate = ref(false)
 const form = reactive({
   name: '',
   ticker: '',
-  starting_round: 'Series A',
-  starting_round_date: new Date().toISOString().slice(0, 10),
 })
 const creating = ref(false)
-
-const roundOptions = [
-  'Pre-seed', 'Seed', 'Series A', 'Series A-1', 'Series A-2', 'Series A-3', 'Series A-4',
-  'Series B', 'Series B-1', 'Series B-2',
-  'Series C', 'Series D', 'Bridge',
-]
 
 async function create() {
   if (!form.name.trim() || creating.value) return
@@ -41,8 +33,6 @@ async function create() {
       body: {
         name: form.name.trim(),
         ticker: form.ticker.trim() || undefined,
-        starting_round: form.starting_round || undefined,
-        starting_round_date: form.starting_round_date || undefined,
       },
     })
     showCreate.value = false
@@ -139,19 +129,10 @@ async function remove(id: string, name: string) {
     <div v-if="showCreate" class="fixed inset-0 z-40 bg-ink-900/40 backdrop-blur-sm grid place-items-center p-4" @click.self="showCreate = false">
       <div class="w-full max-w-md rounded-lg border border-ink-300 bg-white p-5 shadow-card-hover">
         <h2 class="text-base font-semibold text-ink-900">New company</h2>
-        <p class="text-xs text-ink-500 mt-1">Establishes a baseline round so future modelling has a reference point. You can upload a Carta export on the next page.</p>
+        <p class="text-xs text-ink-500 mt-1">You'll add funding rounds on the Cap Table page. You can upload a Carta export on the next page for option grants and stakeholders.</p>
         <div class="mt-4 space-y-3">
           <UiInput v-model="form.name" label="Name" placeholder="Advanced NanoTherapies, Inc." />
           <UiInput v-model="form.ticker" label="Ticker / short code (optional)" placeholder="ANT" />
-          <div class="grid grid-cols-2 gap-3">
-            <label class="block">
-              <span class="block text-xs font-medium text-ink-700 mb-1">Current round</span>
-              <select v-model="form.starting_round" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500">
-                <option v-for="r in roundOptions" :key="r" :value="r">{{ r }}</option>
-              </select>
-            </label>
-            <UiInput v-model="form.starting_round_date" type="date" label="Round date (closing)" />
-          </div>
         </div>
         <div class="mt-5 flex justify-end gap-2">
           <UiButton variant="ghost" @click="showCreate = false">Cancel</UiButton>
