@@ -23,6 +23,7 @@ interface CnRow {
   conversionDiscount: number
   valuationCap: number | null
   convPrice: number
+  effectiveConvPrice: number
   shares: number
   basisApplied: string
 }
@@ -87,6 +88,7 @@ const cnCols = computed<EditableCol[]>(() => {
     { key: 'interestAccrued',      label: 'Interest',    width: 110, sortable: true, align: 'right', type: 'usd',    editable: true, step: '100' },
     { key: 'conversionDiscount',   label: 'Discount',    width: 80,  sortable: true, align: 'right', type: 'pct',    editable: true, step: '0.01' },
     { key: 'convPrice',            label: 'Conv. price', width: 110, sortable: true, align: 'right', type: 'usd',    editable: true, step: '0.01' },
+    { key: 'effectiveConvPrice',   label: 'Eff. price',  width: 110, sortable: true, align: 'right' },
   ]
   for (const u of cnUnits.selected.value) {
     cols.push({
@@ -99,6 +101,21 @@ const cnCols = computed<EditableCol[]>(() => {
 })
 
 const rows = computed<CnRow[]>(() => convertibles.value?.convertibles || [])
+
+// Sanity check: flag the effective conv. price amber when it diverges
+// from the stored/imported price by more than 1%. Useful for catching
+// notes whose Carta-recorded price doesn't match the cap/discount math.
+function priceMismatchClass(stored: number, effective: number): string {
+  if (!stored || !effective) return 'text-ink-700'
+  const diff = Math.abs(stored - effective) / effective
+  return diff > 0.01 ? 'text-amber-700 bg-amber-50 px-1 rounded' : 'text-ink-700'
+}
+function priceMismatchTitle(stored: number, effective: number): string {
+  if (!stored || !effective) return ''
+  const diff = ((effective - stored) / stored) * 100
+  if (Math.abs(diff) <= 1) return 'Stored conv. price matches the cap/discount math.'
+  return `Stored conv. price differs from cap/discount math by ${diff > 0 ? '+' : ''}${diff.toFixed(1)}%`
+}
 
 const unassignedSummary = computed(() => {
   let dollars = 0
@@ -245,6 +262,14 @@ async function onDelete(row: CnRow) {
         <template #cell-convPrice="{ value }">
           <span v-if="value" class="text-ink-700">{{ fmtPricePerShare(value) }}</span>
           <span v-else class="text-ink-400">—</span>
+        </template>
+        <template #cell-effectiveConvPrice="{ row, value }">
+          <span v-if="!value" class="text-ink-400">—</span>
+          <span
+            v-else
+            :class="priceMismatchClass(row.convPrice, value)"
+            :title="priceMismatchTitle(row.convPrice, value)"
+          >{{ fmtPricePerShare(value) }}</span>
         </template>
         <template v-for="u in cnUnits.selected.value" :key="`cell-shares_${u}`" #[`cell-shares_${u}`]="{ row }">
           {{ formatBy(u, row.shares, compute?.round?.postRoundFDS || 0, row.convPrice || 0) }}
