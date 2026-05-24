@@ -26,6 +26,19 @@ export interface ParsedHolding {
 export interface ParsedGrant {
   recipientName: string
   quantity: number
+  // Carta's "[Year] Stock Option and Incentive Plan" sheet carries the
+  // per-grant detail the Detailed Cap Table sums together. These are
+  // populated when that sheet is present; null otherwise.
+  strike?: number | null
+  issueDate?: string | null
+  vestingStart?: string | null
+  vestMonths?: number | null
+  cliffMonths?: number | null
+  awardType?: string | null            // ISO / NSO / RSU / etc.
+  quantityIssued?: number | null       // original grant size
+  quantityExercised?: number | null
+  quantityForfeited?: number | null
+  acceleration?: string | null         // 'single' | 'double' | null
 }
 
 export interface ParsedRound {
@@ -221,6 +234,43 @@ function classifyKind(name: string): 'common' | 'preferred' {
   const n = name.toLowerCase()
   if (n.includes('common')) return 'common'
   return 'preferred'
+}
+
+// Best-effort parse of a free-text vesting schedule into (months, cliff).
+// Recognized patterns: "M-48-12" / "M-24-0" Carta codes; "4 year monthly
+// with 1 year cliff" / "48 months 12 month cliff" / "2 year no cliff"
+// natural-language. Anything we can't parse comes back as (null, null) —
+// the UI then renders the schedule as "Other".
+export function parseVestingSchedule(text: string): { months: number | null; cliff: number | null } {
+  if (!text) return { months: null, cliff: null }
+  const s = text.toLowerCase().trim()
+
+  // Carta code: M-{months}-{cliff} (monthly vesting)
+  const code = /^[mqy]-(\d+)-(\d+)$/i.exec(text.trim())
+  if (code) return { months: Number(code[1]), cliff: Number(code[2]) }
+
+  // Natural language: "X year(s)" or "X months" → months
+  let months: number | null = null
+  const yrMatch = /(\d+(?:\.\d+)?)\s*(?:year|yr)s?/i.exec(s)
+  if (yrMatch) months = Math.round(Number(yrMatch[1]) * 12)
+  if (months == null) {
+    const moMatch = /(\d+)\s*months?/i.exec(s)
+    if (moMatch) months = Number(moMatch[1])
+  }
+
+  // Cliff: "X year cliff" / "X month cliff" / "no cliff"
+  let cliff: number | null = null
+  if (/no\s+cliff/i.test(s)) cliff = 0
+  else {
+    const cliffYr = /(\d+(?:\.\d+)?)\s*(?:year|yr)s?\s+cliff/i.exec(s)
+    if (cliffYr) cliff = Math.round(Number(cliffYr[1]) * 12)
+    if (cliff == null) {
+      const cliffMo = /(\d+)\s*months?\s+cliff/i.exec(s)
+      if (cliffMo) cliff = Number(cliffMo[1])
+    }
+  }
+
+  return { months, cliff }
 }
 
 export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> {
@@ -519,6 +569,116 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
             + 'the Convertible Notes ledger to drive interest accrual.',
           )
         }
+      }
+    }
+  }
+
+  // ----- Stock Option & Incentive Plan: per-grant detail -----
+  // The Detailed Cap Table sums all of a stakeholder's grants into one
+  // options-column cell, losing strike / issue date / vesting. The Plan
+  // sheet (named "[Year] Stock Option and Incentive Plan" / "Equity
+  // Incentive Plan" / "Stock Option Ledger" / similar) has one row per
+  // grant with the columns we actually need to display + drive vesting.
+  // When present, we overlay the per-grant data onto whatever the cap
+  // table already gave us — and add any grant rows the cap table missed.
+  const planSheet = wb.worksheets.find(ws => {
+    const n = (ws.name || '').toLowerCase()
+    return /(stock\s*option|equity).+(plan|incentive|ledger)/i.test(n)
+      || /option.+ledger/i.test(n)
+      || /option.+detail/i.test(n)
+  })
+  if (planSheet) {
+    // Find the header row — first row in the top 8 with at least 3 grant-y
+    // signature headers (name + quantity + strike / date / vesting).
+    let planHeaderRow = -1
+    const headerSigs = [
+      /^(stakeholder|optionee|holder|grantee|recipient|employee)( ?name)?$/i,
+      /^(quantity|qty|shares?)( ?(issued|outstanding|granted))?$/i,
+      /^(strike|exercise)( ?price)?$/i,
+      /^(issue|award|grant) ?date$/i,
+      /^vest(ing)? ?(start|schedule|months)?( ?date)?$/i,
+    ]
+    for (let i = 1; i <= Math.min(planSheet.rowCount, 8); i++) {
+      const row = planSheet.getRow(i)
+      const headers: string[] = []
+      for (let c = 1; c <= planSheet.columnCount; c++) headers.push(asString(row.getCell(c).value))
+      const score = headerSigs.filter(re => headers.some(h => re.test(h))).length
+      if (score >= 3) { planHeaderRow = i; break }
+    }
+
+    if (planHeaderRow < 0) {
+      warnings.push(`Found "${planSheet.name}" but couldn't identify a grant-detail header row (need name + qty + at least one of strike/date/vesting).`)
+    } else {
+      const headers = (planSheet.getRow(planHeaderRow).values as any[]).map(v => asString(v).toLowerCase())
+      const findHeader = (...patterns: RegExp[]) => {
+        for (const p of patterns) {
+          const idx = headers.findIndex(h => p.test(h))
+          if (idx > 0) return idx
+        }
+        return -1
+      }
+      const cName = findHeader(
+        /^(stakeholder|optionee|holder|grantee|recipient|employee)( ?name)?$/,
+        /^full ?name$/, /name$/,
+      )
+      const cQtyIssued = findHeader(/^quantity ?issued$/, /^shares? ?issued$/, /^granted$/)
+      const cQtyOutstanding = findHeader(/^quantity ?outstanding$/, /^outstanding$/)
+      const cQtyExercised = findHeader(/^quantity ?exercised$/, /^exercised$/)
+      const cQtyCancelled = findHeader(/^quantity ?(cancelled|canceled|forfeited)$/, /^(cancelled|canceled|forfeited)$/)
+      const cStrike = findHeader(/^(strike|exercise) ?price( ?\(\$\))?$/, /^strike$/, /^exercise$/)
+      const cIssueDate = findHeader(/^(issue|award|grant) ?date$/, /^date( ?issued| ?granted| ?awarded)?$/, /^date$/)
+      const cVestStart = findHeader(/^vesting ?start( ?date)?$/, /^vest ?start$/)
+      const cVestSchedule = findHeader(/^vesting ?schedule$/, /^schedule$/)
+      const cAwardType = findHeader(/^(award|grant) ?type$/, /^(iso|nso|rsu)/)
+      const cAcceleration = findHeader(/^acceleration$/, /^accel/)
+
+      let parsed = 0
+      for (let r = planHeaderRow + 1; r <= planSheet.rowCount; r++) {
+        try {
+          const row = planSheet.getRow(r)
+          const name = cName > 0 ? asString(row.getCell(cName).value) : ''
+          if (!name) continue
+          const qtyIssued = cQtyIssued > 0 ? asNumber(row.getCell(cQtyIssued).value) : 0
+          const qtyOutstanding = cQtyOutstanding > 0 ? asNumber(row.getCell(cQtyOutstanding).value) : 0
+          const quantity = qtyOutstanding > 0 ? qtyOutstanding : qtyIssued
+          if (quantity <= 0) continue
+
+          const scheduleText = cVestSchedule > 0 ? asString(row.getCell(cVestSchedule).value) : ''
+          const { months, cliff } = parseVestingSchedule(scheduleText)
+          const accelStr = cAcceleration > 0 ? asString(row.getCell(cAcceleration).value).toLowerCase() : ''
+          const acceleration = /double/.test(accelStr) ? 'double'
+            : /single/.test(accelStr) ? 'single'
+            : null
+
+          result.grants.push({
+            recipientName: name,
+            quantity: Math.round(quantity),
+            strike: cStrike > 0 ? asNumber(row.getCell(cStrike).value) || null : null,
+            issueDate: cIssueDate > 0 ? asDate(row.getCell(cIssueDate).value) : null,
+            vestingStart: cVestStart > 0 ? asDate(row.getCell(cVestStart).value) : null,
+            vestMonths: months,
+            cliffMonths: cliff,
+            awardType: cAwardType > 0 ? (asString(row.getCell(cAwardType).value) || null) : null,
+            quantityIssued: qtyIssued > 0 ? Math.round(qtyIssued) : null,
+            quantityExercised: cQtyExercised > 0 ? Math.round(asNumber(row.getCell(cQtyExercised).value)) || null : null,
+            quantityForfeited: cQtyCancelled > 0 ? Math.round(asNumber(row.getCell(cQtyCancelled).value)) || null : null,
+            acceleration,
+          })
+          parsed++
+        } catch (err: any) {
+          warnings.push(`Skipped grant row ${r} on "${planSheet.name}": ${err?.message || err}`)
+        }
+      }
+      if (parsed > 0) {
+        // De-dupe: when the Plan sheet supplies a grant for a stakeholder
+        // we already inserted from the Detailed Cap Table (qty-only), drop
+        // the qty-only stub so we don't double-count. Plan-sheet grants
+        // have strike or issueDate populated; cap-table-only stubs don't.
+        const detailed = new Set(result.grants.filter(g => g.strike != null || g.issueDate != null).map(g => g.recipientName.toLowerCase()))
+        result.grants = result.grants.filter(g => {
+          const isStub = g.strike == null && g.issueDate == null && g.vestMonths == null
+          return !(isStub && detailed.has(g.recipientName.toLowerCase()))
+        })
       }
     }
   }

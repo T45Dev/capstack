@@ -245,6 +245,15 @@ function migrate(d: Database.Database): void {
   ensureColumn('companies', 'starting_round', 'TEXT')
   ensureColumn('companies', 'starting_round_date', 'TEXT')
   ensureColumn('grants', 'approval_status', 'TEXT')
+  // Per-grant details the Carta "Stock Option and Incentive Plan" sheet
+  // carries. quantity_issued is the original grant size; quantity_exercised /
+  // quantity_forfeited summed = (issued − outstanding). acceleration captures
+  // the change-of-control trigger (single / double / null).
+  ensureColumn('grants', 'quantity_issued', 'INTEGER')
+  ensureColumn('grants', 'quantity_exercised', 'INTEGER')
+  ensureColumn('grants', 'quantity_forfeited', 'INTEGER')
+  ensureColumn('grants', 'award_type', 'TEXT')
+  ensureColumn('grants', 'acceleration', 'TEXT')
   ensureColumn('rounds', 'option_pool_issued', 'REAL NOT NULL DEFAULT 0')
   ensureColumn('rounds', 'parent_round_code', 'TEXT')
   ensureColumn('rounds', 'pre_money', 'REAL')
