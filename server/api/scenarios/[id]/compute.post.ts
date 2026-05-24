@@ -181,17 +181,53 @@ export default defineEventHandler((event) => {
     })
   }
 
-  // The open / to-close round. Tranche holders = a synthetic "New Series X"
-  // investor for the new-money shares, plus the CN holders whose notes
-  // convert into this round (they end up as preferred shareholders of the
-  // new tranche, not common).
+  // Per-investor allocations for the open round, if the operator typed
+  // them into the matrix. Lets a "New investor" line resolve to the
+  // actual investors (VCT / T45 / etc.) instead of one anonymous lump.
+  const roundInvestors = db().prepare(`
+    SELECT round_id, stakeholder_id, amount FROM round_investors WHERE company_id = ?
+  `).all(companyId) as Array<{ round_id: string; stakeholder_id: string; amount: number }>
+
+  // The open / to-close round. Holders come from round_investors when the
+  // operator has filled out who's leading / following; otherwise we fall
+  // back to one synthetic "New Series X investor" line so the math still
+  // resolves. CN holders converting into this round get their own line
+  // alongside (they end up as preferred shareholders of the new tranche,
+  // not common).
   const openRound = allRounds.find(r => r.kind === 'open')
   let newRoundTranche: PreferredTranche | null = null
   if (round.newPreferredShares > 0 || round.cnConvertedShares > 0) {
-    const newInvestorId = `new:${openRound?.id || 'round'}`
-    const newInvestorName = openRound ? `New ${openRound.name || openRound.code} investor` : `New round investor`
     const holders: PreferredTranche['holders'] = []
-    if (round.newPreferredShares > 0) {
+    const pps = round.pricePerShare
+    const investorAllocs = openRound ? roundInvestors.filter(ri => ri.round_id === openRound.id) : []
+    const totalAllocated = investorAllocs.reduce((s, ri) => s + (ri.amount || 0), 0)
+    if (investorAllocs.length > 0 && pps > 0) {
+      // Use the per-investor matrix. Each investor's shares = amount / PPS.
+      // If their sum doesn't match new_money exactly we still attribute the
+      // shares from whatever they entered (the UI is the place to flag the
+      // mismatch — we shouldn't silently fudge the math here).
+      for (const ri of investorAllocs) {
+        const shares = (ri.amount || 0) / pps
+        if (shares <= 0) continue
+        holders.push({
+          stakeholderId: ri.stakeholder_id,
+          name: stakeholderNameById.get(ri.stakeholder_id) || ri.stakeholder_id,
+          shares,
+        })
+      }
+      // If the allocations don't cover all the new_money, top up with a
+      // synthetic "Unallocated new money" line so totals still reconcile.
+      const remainingDollars = Math.max(0, (scenario.new_money || 0) - totalAllocated)
+      if (remainingDollars > 0 && pps > 0) {
+        holders.push({
+          stakeholderId: `new:${openRound?.id || 'round'}:unallocated`,
+          name: `Unallocated ${openRound?.name || openRound?.code || 'new'} money`,
+          shares: remainingDollars / pps,
+        })
+      }
+    } else if (round.newPreferredShares > 0) {
+      const newInvestorId = `new:${openRound?.id || 'round'}`
+      const newInvestorName = openRound ? `New ${openRound.name || openRound.code} investor` : `New round investor`
       holders.push({ stakeholderId: newInvestorId, name: newInvestorName, shares: round.newPreferredShares })
     }
     // Attach CN-converted shares to their original stakeholder (so a
@@ -285,6 +321,29 @@ export default defineEventHandler((event) => {
     computeWaterfall({ exitValue: ev, preferred: tranches, common })
   )
 
+  // ---- Per-stakeholder total invested capital (drives MOIC) ----------------
+  // Sources, summed: (a) every round_investors row for this stakeholder, (b)
+  // every CN they hold (principal + accrued interest). Closed-round Carta
+  // imports don't carry $-per-investor today, so MOIC for those investors
+  // shows up only once the operator types the historical amounts into the
+  // matrix — same trade-off as the spreadsheet, which lists per-investor
+  // contributions explicitly.
+  const investedByStakeholder = new Map<string, number>()
+  for (const ri of roundInvestors) {
+    investedByStakeholder.set(
+      ri.stakeholder_id,
+      (investedByStakeholder.get(ri.stakeholder_id) || 0) + (ri.amount || 0),
+    )
+  }
+  for (const c of cnRows) {
+    if (!c.stakeholder_id) continue
+    const principalPlusInterest = (c.principal || 0) + (c.interest_accrued || 0)
+    investedByStakeholder.set(
+      c.stakeholder_id,
+      (investedByStakeholder.get(c.stakeholder_id) || 0) + principalPlusInterest,
+    )
+  }
+
   // ---- Build the per-stakeholder display rows -----------------------------
   // The grid still wants one row per stakeholder with `exits: number[]`.
   // We sum the holder's payout across each WaterfallResult.
@@ -301,39 +360,80 @@ export default defineEventHandler((event) => {
     return payoutByStakeholderByExit.get(stakeholderId) || exitValues.map(() => 0)
   }
 
+  // Helper: MOIC at each exit value. Returns null when there's no invested
+  // capital recorded — distinguishes "no money in, infinite multiple" from
+  // a real loss-making 0.5×.
+  function moicFor(stakeholderId: string, exits: number[]): Array<number | null> {
+    const invested = investedByStakeholder.get(stakeholderId) || 0
+    return invested > 0 ? exits.map(v => v / invested) : exits.map(() => null)
+  }
+
+  // Open-round shares per stakeholder, derived from round_investors. Lets
+  // a stakeholder that already exists in the cap table (e.g. an existing
+  // investor doing pro-rata follow-on) have their open-round contribution
+  // added to their dilution row instead of opening a duplicate "New
+  // investor" row.
+  const openRoundSharesByStakeholder = new Map<string, number>()
+  if (openRound && newRoundTranche) {
+    for (const h of newRoundTranche.holders) {
+      // Skip CN-holder shares — those are accounted for via cnShares.
+      const isSyntheticNewLine = h.stakeholderId.startsWith('new:')
+      const isCnHolder = round.cnDetails.some(d => stakeholderIdByCN.get(d.id) === h.stakeholderId)
+      if (isCnHolder && !isSyntheticNewLine) continue
+      openRoundSharesByStakeholder.set(
+        h.stakeholderId,
+        (openRoundSharesByStakeholder.get(h.stakeholderId) || 0) + h.shares,
+      )
+    }
+  }
+
   const dilution = stakeholderRows.map(r => {
     const preTotal = r.held_shares + r.option_shares
     const cnShares = cnSharesByStakeholder.get(r.id) || 0
-    const postTotal = preTotal + cnShares
+    const openRoundShares = openRoundSharesByStakeholder.get(r.id) || 0
+    const postTotal = preTotal + cnShares + openRoundShares
+    const exits = exitsFor(r.id)
     return {
       stakeholderId: r.id,
       name: r.name,
       preShares: preTotal,
       cnShares,
+      openRoundShares,
       postShares: postTotal,
       prePct: round.preRoundFDS > 0 ? preTotal / round.preRoundFDS : 0,
       postPct: dilutedPostFDS > 0 ? postTotal / dilutedPostFDS : 0,
-      exits: exitsFor(r.id),
+      exits,
+      invested: investedByStakeholder.get(r.id) || 0,
+      moic: moicFor(r.id, exits),
       isIdea: false,
     }
   })
 
-  // The "New Round investor" row, if any.
+  // Open-round investor rows. When the matrix is filled in, every named
+  // investor that doesn't already have a dilution row (typically the
+  // synthetic "new:…" / "new:…:unallocated" lines, since real stakeholders
+  // are handled in the main loop via openRoundSharesByStakeholder) gets
+  // one with their share count = amount / PPS.
   if (newRoundTranche) {
-    const newInvestorId = newRoundTranche.holders.find(h => h.stakeholderId.startsWith('new:'))?.stakeholderId
-    if (newInvestorId) {
-      const shares = round.newPreferredShares
+    const existingStakeholderIds = new Set(dilution.map(d => d.stakeholderId))
+    for (const h of newRoundTranche.holders) {
+      if (existingStakeholderIds.has(h.stakeholderId)) continue
+      const ex = exitsFor(h.stakeholderId)
       dilution.push({
-        stakeholderId: newInvestorId,
-        name: `New ${newRoundTranche.label} investor`,
+        stakeholderId: h.stakeholderId,
+        name: h.name,
         preShares: 0,
         cnShares: 0,
-        postShares: shares,
+        openRoundShares: h.shares,
+        postShares: h.shares,
         prePct: 0,
-        postPct: dilutedPostFDS > 0 ? shares / dilutedPostFDS : 0,
-        exits: exitsFor(newInvestorId),
+        postPct: dilutedPostFDS > 0 ? h.shares / dilutedPostFDS : 0,
+        exits: ex,
+        invested: investedByStakeholder.get(h.stakeholderId) || 0,
+        moic: moicFor(h.stakeholderId, ex),
         isIdea: false,
       })
+      existingStakeholderIds.add(h.stakeholderId)
     }
   }
 
@@ -349,10 +449,13 @@ export default defineEventHandler((event) => {
       name: idea.name,
       preShares: 0,
       cnShares: 0,
+      openRoundShares: 0,
       postShares: idea.shares,
       prePct: 0,
       postPct: dilutedPostFDS > 0 ? idea.shares / dilutedPostFDS : 0,
       exits,
+      invested: 0,
+      moic: exits.map(() => null),  // ideas have no invested capital
       isIdea: true,
     })
   }

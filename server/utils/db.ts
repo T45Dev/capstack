@@ -191,6 +191,27 @@ function migrate(d: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_rounds_company ON rounds(company_id, seniority);
 
+    -- Per-investor cash contributions to a round. Lets the operator model
+    -- "VCT leads $5M, T45 follows $3M" before the round closes — the
+    -- spreadsheet does this by giving each investor its own shareholder row
+    -- ("Series B (VCT Investments)") with $ amounts spread across round
+    -- columns. We keep stakeholders canonical and put the per-round amount
+    -- in this side table. The sum of amounts on a round is the source of
+    -- truth for new_money; per-investor share counts derive from amount /
+    -- share_price (with the round's terms applied).
+    CREATE TABLE IF NOT EXISTS round_investors (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      round_id TEXT NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+      stakeholder_id TEXT NOT NULL REFERENCES stakeholders(id) ON DELETE CASCADE,
+      amount REAL NOT NULL DEFAULT 0,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(round_id, stakeholder_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_round_investors_company ON round_investors(company_id);
+    CREATE INDEX IF NOT EXISTS idx_round_investors_round ON round_investors(round_id);
+
     CREATE TABLE IF NOT EXISTS pool_events (
       id TEXT PRIMARY KEY,
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
