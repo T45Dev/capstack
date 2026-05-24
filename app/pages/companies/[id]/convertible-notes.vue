@@ -1,24 +1,18 @@
 <script setup lang="ts">
-// Spec §5.3 — Convertible Notes page.
-// Carta Convertible Ledger, slimmed to the columns the spec calls out
-// (Holder, Destination, Conv. Date, Principal, Interest, Conv. Price,
-// Resulting Shares). Notes feed the Assumptions page round math:
-// destination_class_code decides whether the resulting shares count as pre
-// or new for the to-close round; conversion_date fixes the interest accrual
-// window. Rows without a conversion date are flagged "incomplete" inline.
-//
-// PR #8: this page is the first migration to UiEditableTable — click any
-// row to edit inline (holder, destination, date, principal), use the
-// add-row affordance at the bottom for bridge notes, delete from the row
-// itself.
+// Convertible Notes ledger. Each note is attributed to a round on the
+// Cap Table via the Destination dropdown — destination_class_code stores
+// the round's `code` (legacy column name from when it held share-class
+// codes; the round-summary endpoint keys notes_financing off the same
+// column). The Open round is whichever Cap Table row has kind='open'.
+// Click any row to edit inline; use the add-row affordance at the
+// bottom for bridge notes.
 import { fmtUSD, fmtShares, fmtPricePerShare } from '~/utils/format'
 import type { EditableCol } from '~/components/ui/UiEditableTable.vue'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
 
-const { data: capTable } = await useFetch(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => null as any })
-const { data: assumptions } = await useFetch<any>(() => `/api/companies/${id.value}/assumptions`, { watch: [id], default: () => null })
+const { data: roundSummary } = await useFetch<{ rounds: Array<{ code: string; name: string | null; kind: 'formation' | 'closed' | 'open' }> }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
 
 const computeBody = computed(() => ({}))
 const { data: compute, refresh: refreshCompute } = await useFetch(() => `/api/companies/${id.value}/compute`, {
@@ -29,24 +23,31 @@ const { data: compute, refresh: refreshCompute } = await useFetch(() => `/api/co
 
 const cnUnits = useTableUnits('capstack:cn-detail:units')
 
-// Sentinel value for the "Open round" dropdown entry. Selecting it stores
-// destination_class_code = null + converts_at_round = true (see onUpdate).
-const OPEN_ROUND = '__open__'
+// Friendly label for a round in the destination dropdown / display chip.
+// Falls back to the code when the user hasn't named the round; appends an
+// "Open" marker when this is the round currently being modeled.
+function roundLabel(r: { code: string; name: string | null; kind: string }): string {
+  const base = r.name && r.name.trim() && r.name.trim() !== r.code ? `${r.code} – ${r.name.trim()}` : r.code
+  return r.kind === 'open' ? `${base} • Open` : base
+}
 
-const openRoundLabel = computed(() => {
-  const r = assumptions.value?.round_name?.trim()
-  return r ? `Open round (${r})` : 'Open round'
+// Quick-lookup map for the display chip and stale-value detection.
+const roundsByCode = computed(() => {
+  const m = new Map<string, { code: string; name: string | null; kind: 'formation' | 'closed' | 'open' }>()
+  for (const r of (roundSummary.value?.rounds || [])) m.set(r.code, r)
+  return m
 })
 
-// Destination dropdown: explicit "Open round" entry first, then every closed
-// share class. Share-class codes are already stored without the "-N" tranche
-// suffix (Carta importer strips it).
+// Destination dropdown: one entry per round from the rounds table, plus an
+// explicit "Unassigned" option. Open-round designation lives on rounds.kind
+// (the Cap Table page's Open/Closed toggle), so we no longer carry an
+// OPEN_ROUND sentinel here.
 const destinationOptions = computed(() => {
   const opts: Array<{ value: string; label: string }> = [
-    { value: OPEN_ROUND, label: openRoundLabel.value },
+    { value: '', label: '— Unassigned' },
   ]
-  for (const c of (capTable.value?.share_classes || [])) {
-    opts.push({ value: c.code, label: c.code })
+  for (const r of (roundSummary.value?.rounds || [])) {
+    opts.push({ value: r.code, label: roundLabel(r) })
   }
   return opts
 })
@@ -83,15 +84,16 @@ const cnCols = computed<EditableCol[]>(() => {
 })
 
 const rows = computed<CnRow[]>(() => {
-  // Notes converting at the open round (no destination_class_code, basis
-  // resolved to round/discount/cap) get the OPEN_ROUND sentinel so the
-  // dropdown reflects the explicit "Open round" choice instead of "—".
-  const converting = (compute.value?.round?.cnDetails || []).map((d: any) => {
-    const isOpen = !d.destinationClassCode && d.basisApplied !== 'destination'
-    return { ...d, destinationClassCode: isOpen ? OPEN_ROUND : d.destinationClassCode }
-  })
+  // destinationClassCode now holds the round's `code` (R1, R2, …) — the
+  // round-summary endpoint aggregates CN dollars by this same key. CNs
+  // imported under the old share-class model show their stale code here
+  // and won't match any current round until the user re-picks.
+  const converting = compute.value?.round?.cnDetails || []
   const deferred = compute.value?.round?.deferred?.details || []
-  return [...converting, ...deferred]
+  return [...converting, ...deferred].map((d: any) => ({
+    ...d,
+    destinationClassCode: d.destinationClassCode ?? null,
+  }))
 })
 
 // Custom sort getter so the unit-variant share columns sort on the same
@@ -103,36 +105,30 @@ function sortValue(row: any, key: string) {
 }
 
 // ---- Mutations ----
+// Attribution = will-convert-at: picking a round in the dropdown stores
+// the round's code in destination_class_code (legacy column name) and
+// flips converts_at_round true. Clearing to "Unassigned" sets both back
+// to null/false so the note rolls up as deferred.
 async function onUpdate(row: CnRow, patch: Partial<CnRow>) {
   const body: Record<string, any> = {}
-  if ('stakeholderName' in patch)       body.stakeholder_name = patch.stakeholderName
+  if ('stakeholderName' in patch) body.stakeholder_name = patch.stakeholderName
   if ('destinationClassCode' in patch) {
-    // OPEN_ROUND sentinel -> store null + flag the note as converting at the
-    // open round. Picking a closed-round class code also implies "converts"
-    // (the note already converted into that class).
-    if (patch.destinationClassCode === OPEN_ROUND) {
-      body.destination_class_code = null
-      body.converts_at_round = true
-    } else {
-      body.destination_class_code = patch.destinationClassCode || null
-      if (patch.destinationClassCode) body.converts_at_round = true
-    }
+    const code = patch.destinationClassCode || null
+    body.destination_class_code = code
+    body.converts_at_round = !!code
   }
   if ('conversionDate' in patch) {
     body.conversion_date = patch.conversionDate || null
-    // Setting (or clearing) a conversion date toggles converts_at_round so
-    // the row moves between "deferred" and "converting" on the next pass.
-    body.converts_at_round = !!patch.conversionDate
+    if (patch.conversionDate) body.converts_at_round = true
   }
-  if ('principal' in patch)             body.principal = patch.principal
+  if ('principal' in patch) body.principal = patch.principal
   await $fetch(`/api/convertibles/${row.id}`, { method: 'PATCH', body })
   await refreshCompute()
 }
 
 async function onCreate(draft: Partial<CnRow>) {
   if (!draft.stakeholderName?.trim() || !draft.principal || draft.principal <= 0) return
-  const isOpen = draft.destinationClassCode === OPEN_ROUND
-  const destination = isOpen ? null : (draft.destinationClassCode || null)
+  const destination = draft.destinationClassCode || null
   await $fetch(`/api/companies/${id.value}/convertibles`, {
     method: 'POST',
     body: {
@@ -143,7 +139,7 @@ async function onCreate(draft: Partial<CnRow>) {
       interest_rate: 0.08,
       issue_date: new Date().toISOString().slice(0, 10),
       conversion_discount: 0,
-      converts_at_round: isOpen || !!draft.conversionDate || !!destination,
+      converts_at_round: !!destination || !!draft.conversionDate,
     },
   })
   await refreshCompute()
@@ -162,9 +158,9 @@ async function onDelete(row: CnRow) {
       <div>
         <h1 class="text-xl font-semibold tracking-tight text-ink-900">Convertible Notes</h1>
         <p class="text-sm text-ink-600 mt-1">
-          Holder, destination class, conversion date, principal, interest, conversion price, and resulting shares. Click a row to edit; use "Add convertible" for bridge notes. Edits feed the
-          <NuxtLink :to="`/companies/${id}/assumptions`" class="text-accent-600 hover:text-accent-700 font-medium">Assumptions</NuxtLink>
-          round math.
+          Attribute each note to a round on the
+          <NuxtLink :to="`/companies/${id}/cap-table`" class="text-accent-600 hover:text-accent-700 font-medium">Cap Table</NuxtLink>
+          — note dollars roll up into that round's "Notes financing" cell. Click a row to edit; use "Add convertible" for bridge notes.
         </p>
       </div>
       <TableUnitsToggle storage-key="capstack:cn-detail:units" />
@@ -191,9 +187,21 @@ async function onDelete(row: CnRow) {
           >incomplete</span>
         </template>
         <template #cell-destinationClassCode="{ value }">
-          <span v-if="value === OPEN_ROUND" class="text-xs font-medium text-accent-700 bg-accent-50 border border-accent-200 px-1.5 py-0.5 rounded">{{ openRoundLabel }}</span>
-          <span v-else-if="value" class="text-xs font-mono text-ink-800 bg-ink-100 px-1.5 py-0.5 rounded">{{ value }}</span>
-          <span v-else class="text-ink-400">—</span>
+          <template v-if="!value"><span class="text-ink-400">—</span></template>
+          <template v-else-if="roundsByCode.get(value)">
+            <span
+              class="text-xs font-medium px-1.5 py-0.5 rounded border"
+              :class="roundsByCode.get(value)!.kind === 'open'
+                ? 'text-accent-700 bg-accent-50 border-accent-200'
+                : 'text-ink-800 bg-ink-100 border-ink-200'"
+            >{{ roundLabel(roundsByCode.get(value)!) }}</span>
+          </template>
+          <template v-else>
+            <span
+              class="text-xs font-mono text-amber-800 bg-amber-50 border border-amber-300 px-1.5 py-0.5 rounded"
+              title="This destination doesn't match any round on the Cap Table. Edit the row to re-attribute."
+            >{{ value }} — re-attribute</span>
+          </template>
         </template>
         <template #cell-conversionDate="{ value }">
           <span v-if="value" class="text-ink-700">{{ value }}</span>
