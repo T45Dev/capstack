@@ -229,6 +229,10 @@ function migrate(d: Database.Database): void {
   ensureColumn('rounds', 'pre_money', 'REAL')
   ensureColumn('rounds', 'preferred_issued', 'REAL NOT NULL DEFAULT 0')
   ensureColumn('rounds', 'common', 'REAL NOT NULL DEFAULT 0')
+  // Optional override for Preferred issued — NULL means "use the formula
+  // new_money / share_price". A numeric value (including 0) overrides for
+  // rounds where the math doesn't apply, e.g. debt-only or bridge rounds.
+  ensureColumn('rounds', 'preferred_issued_override', 'REAL')
 
   // Backfill: for any company whose Formation round has option_pool_issued = 0
   // but whose option_pools table is non-empty, seed Formation with the

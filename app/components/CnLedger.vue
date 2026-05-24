@@ -1,17 +1,15 @@
 <script setup lang="ts">
-// Convertible Notes ledger. Each note is attributed to a round on the
-// Cap Table via the Destination dropdown — destination_class_code stores
-// the round's `code` (legacy column name from when it held share-class
-// codes; the round-summary endpoint keys notes_financing off the same
-// column). The Open round is whichever Cap Table row has kind='open'.
-// Click any row to edit inline; use the add-row affordance at the
-// bottom for bridge notes.
+// Convertible Notes ledger — embedded on the Financings page (and
+// historically the standalone CN page). Each note is attributed to a
+// round via the Destination dropdown; destination_class_code stores the
+// round's `code` (legacy column name). Notes flagged In summary roll up
+// into the Cap Table's Notes financing / Notes converted aggregates.
 import { CheckSquare, Square } from 'lucide-vue-next'
 import { fmtUSD, fmtPricePerShare, fmtPct } from '~/utils/format'
 import type { EditableCol } from '~/components/ui/UiEditableTable.vue'
 
-const route = useRoute()
-const id = computed(() => route.params.id as string)
+const props = defineProps<{ companyId: string }>()
+const emit = defineEmits<{ refreshed: [] }>()
 
 interface CnRow {
   id: string
@@ -31,46 +29,37 @@ interface CnRow {
   includeInSummary: boolean
 }
 
-const { data: roundSummary } = await useFetch<{ rounds: Array<{ code: string; name: string | null; kind: 'formation' | 'closed' | 'open' }> }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
+const companyId = computed(() => props.companyId)
 
-// All outstanding convertibles for the company, with per-CN conversion
-// price and resulting shares already resolved from the attributed round.
-// Attribution doesn't filter rows out — closed-round, open-round, and
-// unassigned CNs all stay visible and editable.
-const { data: convertibles, refresh: refreshConvertibles } = await useFetch<{ convertibles: CnRow[] }>(() => `/api/companies/${id.value}/convertibles`, { watch: [id], default: () => ({ convertibles: [] }) })
+const { data: roundSummary } = await useFetch<{ rounds: Array<{ code: string; name: string | null; kind: 'formation' | 'closed' | 'open' }> }>(() => `/api/companies/${companyId.value}/round-summary`, { watch: [companyId], default: () => ({ rounds: [] }) })
+
+const { data: convertibles, refresh: refreshConvertibles } = await useFetch<{ convertibles: CnRow[] }>(() => `/api/companies/${companyId.value}/convertibles`, { watch: [companyId], default: () => ({ convertibles: [] }) })
 
 const computeBody = computed(() => ({}))
-const { data: compute, refresh: refreshCompute } = await useFetch(() => `/api/companies/${id.value}/compute`, {
+const { data: compute, refresh: refreshCompute } = await useFetch(() => `/api/companies/${companyId.value}/compute`, {
   method: 'POST',
   body: computeBody,
-  watch: [id],
+  watch: [companyId],
 })
 
 async function refreshAll() {
   await Promise.all([refreshConvertibles(), refreshCompute()])
+  emit('refreshed')
 }
 
 const cnUnits = useTableUnits('capstack:cn-detail:units')
 
-// Friendly label for a round in the destination dropdown / display chip.
-// Falls back to the code when the user hasn't named the round; appends an
-// "Open" marker when this is the round currently being modeled.
 function roundLabel(r: { code: string; name: string | null; kind: string }): string {
   const base = r.name && r.name.trim() && r.name.trim() !== r.code ? `${r.code} – ${r.name.trim()}` : r.code
   return r.kind === 'open' ? `${base} • Open` : base
 }
 
-// Quick-lookup map for the display chip and stale-value detection.
 const roundsByCode = computed(() => {
   const m = new Map<string, { code: string; name: string | null; kind: 'formation' | 'closed' | 'open' }>()
   for (const r of (roundSummary.value?.rounds || [])) m.set(r.code, r)
   return m
 })
 
-// Destination dropdown: one entry per round from the rounds table, plus an
-// explicit "Unassigned" option. Open-round designation lives on rounds.kind
-// (the Cap Table page's Open/Closed toggle), so we no longer carry an
-// OPEN_ROUND sentinel here.
 const destinationOptions = computed(() => {
   const opts: Array<{ value: string; label: string }> = [
     { value: '', label: '— Unassigned' },
@@ -107,9 +96,6 @@ const cnCols = computed<EditableCol[]>(() => {
 
 const rows = computed<CnRow[]>(() => convertibles.value?.convertibles || [])
 
-// Sanity check: flag the effective conv. price amber when it diverges
-// from the stored/imported price by more than 1%. Useful for catching
-// notes whose Carta-recorded price doesn't match the cap/discount math.
 function priceMismatchClass(stored: number, effective: number): string {
   if (!stored || !effective) return 'text-ink-700'
   const diff = Math.abs(stored - effective) / effective
@@ -133,19 +119,12 @@ const unassignedSummary = computed(() => {
   return { dollars, count }
 })
 
-// Custom sort getter so the unit-variant share columns sort on the same
-// underlying `shares` value.
 function sortValue(row: any, key: string) {
   const m = /^shares_(shares|pct|value)$/.exec(key)
   if (m) return row.shares
   return undefined
 }
 
-// ---- Mutations ----
-// Attribution = will-convert-at: picking a round in the dropdown stores
-// the round's code in destination_class_code (legacy column name) and
-// flips converts_at_round true. Clearing to "Unassigned" sets both back
-// to null/false so the note rolls up as deferred.
 async function onUpdate(row: CnRow, patch: Partial<CnRow>) {
   const body: Record<string, any> = {}
   if ('stakeholderName' in patch) body.stakeholder_name = patch.stakeholderName
@@ -170,7 +149,7 @@ async function onUpdate(row: CnRow, patch: Partial<CnRow>) {
 async function onCreate(draft: Partial<CnRow>) {
   if (!draft.stakeholderName?.trim() || !draft.principal || draft.principal <= 0) return
   const destination = draft.destinationClassCode || null
-  await $fetch(`/api/companies/${id.value}/convertibles`, {
+  await $fetch(`/api/companies/${companyId.value}/convertibles`, {
     method: 'POST',
     body: {
       stakeholder_name: draft.stakeholderName.trim(),
@@ -188,9 +167,6 @@ async function onCreate(draft: Partial<CnRow>) {
   await refreshAll()
 }
 
-// Toggle whether this CN flows into the cap table's Notes financing /
-// Notes converted aggregates. Saves immediately (no draft state) so the
-// Summary card reflects the change on its next refresh.
 async function toggleInclude(row: CnRow) {
   await $fetch(`/api/convertibles/${row.id}`, {
     method: 'PATCH',
@@ -208,13 +184,11 @@ async function onDelete(row: CnRow) {
 
 <template>
   <div>
-    <div class="flex items-end justify-between mb-4 gap-3 flex-wrap">
+    <div class="flex items-end justify-between mb-3 gap-3 flex-wrap">
       <div>
-        <h1 class="text-xl font-semibold tracking-tight text-ink-900">Convertible Notes</h1>
-        <p class="text-sm text-ink-600 mt-1">
-          Attribute each note to a round on the
-          <NuxtLink :to="`/companies/${id}/cap-table`" class="text-accent-600 hover:text-accent-700 font-medium">Cap Table</NuxtLink>
-          — note dollars roll up into that round's "Notes financing" cell. Click a row to edit; use "Add convertible" for bridge notes.
+        <h2 class="text-base font-semibold text-ink-900">Convertible notes</h2>
+        <p class="text-xs text-ink-500 mt-0.5">
+          Attribute each note to a round above. Notes ticked "In summary" roll up into that round's Notes financing / Notes converted cells.
         </p>
       </div>
       <TableUnitsToggle storage-key="capstack:cn-detail:units" />
