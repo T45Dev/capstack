@@ -67,26 +67,6 @@ export default defineEventHandler((event) => {
     return a.seniority - b.seniority
   })
 
-  // Index PPS + pre-money FDS by both the round's `code` and its
-  // `share_class_code` so a CN whose destination matches either one
-  // resolves to the right round. This mirrors round-summary's attribution
-  // logic — keeps the "Shares" column on the CN page consistent with the
-  // "Notes converted" row on the Financings table.
-  const priceByCode = new Map<string, number>()
-  const preFDSByCode = new Map<string, number>()
-  let cumulativeFDS = 0
-  for (const r of rounds) {
-    const codeKey = String(r.code).toUpperCase()
-    const scKey = r.share_class_code ? String(r.share_class_code).toUpperCase() : null
-    preFDSByCode.set(codeKey, cumulativeFDS)
-    if (scKey) preFDSByCode.set(scKey, cumulativeFDS)
-    if (r.share_price) {
-      priceByCode.set(codeKey, r.share_price)
-      if (scKey) priceByCode.set(scKey, r.share_price)
-    }
-    cumulativeFDS += (r.common || 0) + (r.preferred_issued || 0) + (r.option_pool_issued || 0)
-  }
-
   const cnRows = db().prepare(`
     SELECT id, stakeholder_name, principal, interest_accrued, interest_rate,
            issue_date, conversion_date, destination_class_code,
@@ -119,37 +99,77 @@ export default defineEventHandler((event) => {
     return (c.principal || 0) * c.interest_rate * (days / 365)
   }
 
+  // Round destination keys → canonical round.code. Match on either the
+  // round's own code or its share_class_code so Carta-imported CN
+  // destinations (which use share-class codes like SA2 / PB1) resolve
+  // correctly.
+  const roundCodeByAttribKey = new Map<string, typeof rounds[number]>()
+  for (const r of rounds) {
+    roundCodeByAttribKey.set(r.code.toUpperCase(), r)
+    if (r.share_class_code) roundCodeByAttribKey.set(r.share_class_code.toUpperCase(), r)
+  }
+
+  // Group CNs by destination round so we can walk rounds chronologically
+  // and resolve each CN's shares with the correct pre-money FDS — which
+  // INCLUDES CN-converted shares from prior rounds. (Building a static
+  // preFDSByCode without folding in CN shares produces the wrong number
+  // when a cap binds at a later round.)
+  const cnsByRound = new Map<string, typeof cnRows>()
+  const unresolvedCns: typeof cnRows = []
+  for (const c of cnRows) {
+    const codeRaw = c.destination_class_code ? String(c.destination_class_code).replace(/-\d+$/, '').toUpperCase() : ''
+    const r = codeRaw ? roundCodeByAttribKey.get(codeRaw) : undefined
+    if (!r) { unresolvedCns.push(c); continue }
+    const key = r.code.toUpperCase()
+    const bucket = cnsByRound.get(key) || []
+    bucket.push(c)
+    cnsByRound.set(key, bucket)
+  }
+
+  // Chronological walk: at round R, preFDS = sum over rounds-before-R of
+  // (common + preferred_issued + option_pool_issued + CN shares attributed
+  // to that round). Compute each CN's shares using that preFDS, then add
+  // them to cumulativeFDS before moving on.
+  const sharesByCn = new Map<string, { shares: number; effectiveConvPrice: number; convPrice: number; preFDS: number }>()
+  let cumulativeFDS = 0
+  for (const r of rounds) {
+    const preFDS = cumulativeFDS
+    const roundPPS = r.share_price && r.share_price > 0 ? r.share_price : 0
+    const bucket = cnsByRound.get(r.code.toUpperCase()) || []
+    let bucketShares = 0
+    for (const c of bucket) {
+      const interest = accruedInterestFor(c)
+      const total = (c.principal || 0) + interest
+      const storedConvPrice = c.conversion_price && c.conversion_price > 0 ? c.conversion_price : 0
+      const convPrice = storedConvPrice || roundPPS
+      const discount = c.conversion_discount || 0
+      const cap = c.valuation_cap || 0
+      let eff = 0
+      if (convPrice > 0) {
+        const discountPrice = discount > 0 ? convPrice * (1 - discount) : convPrice
+        const capPrice = cap > 0 && preFDS > 0 ? cap / preFDS : 0
+        eff = capPrice > 0 ? Math.min(discountPrice, capPrice) : discountPrice
+      } else if (cap > 0 && preFDS > 0) {
+        eff = cap / preFDS
+      }
+      const shares = eff > 0 ? total / eff : 0
+      sharesByCn.set(c.id, { shares, effectiveConvPrice: eff, convPrice, preFDS })
+      bucketShares += shares
+    }
+    cumulativeFDS += (r.common || 0) + (r.preferred_issued || 0) + (r.option_pool_issued || 0) + bucketShares
+  }
+
+  // CNs whose destination couldn't be resolved (deferred / stale): no
+  // shares yet, just expose them so the ledger surfaces the issue.
+  for (const c of unresolvedCns) {
+    sharesByCn.set(c.id, { shares: 0, effectiveConvPrice: 0, convPrice: 0, preFDS: 0 })
+  }
+
   const convertibles: CnLine[] = cnRows.map(c => {
     const interest = accruedInterestFor(c)
     const total = (c.principal || 0) + interest
-    const codeKey = c.destination_class_code ? String(c.destination_class_code).toUpperCase() : ''
-    // Share price (basis for the effective calc): user-typed conversion_price
-    // overrides the attributed round's share_price. Editing the Share price
-    // cell flows through to Effective price and Shares.
-    const storedConvPrice = c.conversion_price && c.conversion_price > 0 ? c.conversion_price : 0
-    const roundPPS = codeKey ? (priceByCode.get(codeKey) || 0) : 0
-    const convPrice = storedConvPrice || roundPPS
-
-    // Effective conv price uses the Share price as its basis, then applies
-    // cap/discount adjustments:
-    //   - convPrice × (1 − discount)        when a discount is set
-    //   - cap / pre-money FDS at this round when a cap is set + FDS known
-    // Whichever is lower wins (best price for the noteholder).
-    const discount = c.conversion_discount || 0
-    const cap = c.valuation_cap || 0
-    const preFDS = codeKey ? (preFDSByCode.get(codeKey) || 0) : 0
-    let effectiveConvPrice = 0
-    if (convPrice > 0) {
-      const discountPrice = discount > 0 ? convPrice * (1 - discount) : convPrice
-      const capPrice = cap > 0 && preFDS > 0 ? cap / preFDS : 0
-      effectiveConvPrice = capPrice > 0 ? Math.min(discountPrice, capPrice) : discountPrice
-    } else if (cap > 0 && preFDS > 0) {
-      effectiveConvPrice = cap / preFDS
-    }
-
-    // Shares come from total investment ÷ effective conversion price, so
-    // cap/discount math flows through to the resulting share count.
-    const shares = effectiveConvPrice > 0 ? total / effectiveConvPrice : 0
+    const computed = sharesByCn.get(c.id) || { shares: 0, effectiveConvPrice: 0, convPrice: 0, preFDS: 0 }
+    const { shares, effectiveConvPrice, convPrice } = computed
     return {
       id: c.id,
       stakeholderName: c.stakeholder_name || '',
