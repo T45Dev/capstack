@@ -41,11 +41,12 @@ export default defineEventHandler((event) => {
   // effective conv price uses as its denominator. Sort matches
   // round-summary.get (open rounds last, otherwise close_date ascending).
   const rounds = db().prepare(`
-    SELECT code, share_price, common, preferred_issued, option_pool_issued,
-           close_date, seniority, kind
+    SELECT code, name, share_class_code, share_price, common, preferred_issued,
+           option_pool_issued, close_date, seniority, kind
     FROM rounds WHERE company_id = ?
   `).all(id) as Array<{
-    code: string; share_price: number | null;
+    code: string; name: string | null; share_class_code: string | null;
+    share_price: number | null;
     common: number; preferred_issued: number; option_pool_issued: number;
     close_date: string | null; seniority: number;
     kind: 'formation' | 'closed' | 'open';
@@ -66,13 +67,23 @@ export default defineEventHandler((event) => {
     return a.seniority - b.seniority
   })
 
+  // Index PPS + pre-money FDS by both the round's `code` and its
+  // `share_class_code` so a CN whose destination matches either one
+  // resolves to the right round. This mirrors round-summary's attribution
+  // logic — keeps the "Shares" column on the CN page consistent with the
+  // "Notes converted" row on the Financings table.
   const priceByCode = new Map<string, number>()
   const preFDSByCode = new Map<string, number>()
   let cumulativeFDS = 0
   for (const r of rounds) {
-    const key = String(r.code).toUpperCase()
-    preFDSByCode.set(key, cumulativeFDS)
-    if (r.share_price) priceByCode.set(key, r.share_price)
+    const codeKey = String(r.code).toUpperCase()
+    const scKey = r.share_class_code ? String(r.share_class_code).toUpperCase() : null
+    preFDSByCode.set(codeKey, cumulativeFDS)
+    if (scKey) preFDSByCode.set(scKey, cumulativeFDS)
+    if (r.share_price) {
+      priceByCode.set(codeKey, r.share_price)
+      if (scKey) priceByCode.set(scKey, r.share_price)
+    }
     cumulativeFDS += (r.common || 0) + (r.preferred_issued || 0) + (r.option_pool_issued || 0)
   }
 

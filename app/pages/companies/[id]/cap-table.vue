@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Upload, Filter, ChevronUp, ChevronDown, Plus, Trash2 } from 'lucide-vue-next'
-import { fmtShares, fmtPct, fmtPricePerShare, normalizeDate } from '~/utils/format'
+import { fmtShares, fmtPct, fmtPricePerShare, fmtUSD, normalizeDate } from '~/utils/format'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -12,7 +12,7 @@ interface Grant { id: string; stakeholder_id: string | null; recipient_name: str
 
 const { data } = await useFetch<{ share_classes: ShareClassRow[]; stakeholders: Stakeholder[]; holdings: Holding[]; grants: Grant[]; pools: any[]; current_pps: number }>(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => ({ share_classes: [], stakeholders: [], holdings: [], grants: [], pools: [], current_pps: 0 } as any) })
 
-// Per-round Summary Cap Table — top card. One column per round; the user
+// Per-round Financings table — top card. One column per round; the user
 // manages the row set directly via Add round / Delete round. Every cell
 // the operator owns is editable. The Carta import doesn't seed rounds
 // anymore; this is a manually-entered table.
@@ -42,8 +42,41 @@ interface RoundColumn {
   pref_tier: number
 }
 
-const { data: roundSummary, refresh: refreshRoundSummary } = await useFetch<{ rounds: RoundColumn[] }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
+interface CnReconciliation {
+  attributed_dollars: number
+  unattributed_dollars: number
+  total_dollars: number
+  by_reason: { deferred: number; excluded: number; stale_destination: number }
+  unreconciled: Array<{
+    id: string
+    stakeholderName: string
+    dollars: number
+    destinationCode: string | null
+    reason: 'deferred' | 'excluded' | 'stale_destination'
+  }>
+}
+const { data: roundSummary, refresh: refreshRoundSummary } = await useFetch<{ rounds: RoundColumn[]; cn_reconciliation: CnReconciliation }>(() => `/api/companies/${id.value}/round-summary`, {
+  watch: [id],
+  default: () => ({
+    rounds: [],
+    cn_reconciliation: { attributed_dollars: 0, unattributed_dollars: 0, total_dollars: 0, by_reason: { deferred: 0, excluded: 0, stale_destination: 0 }, unreconciled: [] },
+  }),
+})
 const roundCols = computed<RoundColumn[]>(() => roundSummary.value?.rounds || [])
+const cnReconciliation = computed<CnReconciliation>(() => roundSummary.value?.cn_reconciliation || { attributed_dollars: 0, unattributed_dollars: 0, total_dollars: 0, by_reason: { deferred: 0, excluded: 0, stale_destination: 0 }, unreconciled: [] })
+
+// Tooltip explaining why the CN ledger sum doesn't match Cumulated financing.
+const cnReconcileTitle = computed(() => {
+  const r = cnReconciliation.value
+  const lines: string[] = []
+  if (r.by_reason.stale_destination > 0) {
+    const codes = [...new Set(r.unreconciled.filter(u => u.reason === 'stale_destination').map(u => u.destinationCode))].filter(Boolean).join(', ')
+    lines.push(`Stale destination: ${codes || 'CN destination doesn\'t match any round code'}. Fix on the Convertible notes ledger below.`)
+  }
+  if (r.by_reason.deferred > 0) lines.push('Unassigned: pick a destination round on the CN ledger.')
+  if (r.by_reason.excluded > 0) lines.push('Excluded: "In summary" toggled off on the CN ledger.')
+  return lines.join('  •  ')
+})
 
 // Display label for a round. The user names it; if blank, fall back to the
 // code. Draft override wins when there's an in-flight edit.
@@ -269,8 +302,8 @@ const poolAuthorized = computed(() => data.value!.pools.reduce((a: number, p: an
 const poolAvailable = computed(() => Math.max(0, poolAuthorized.value - totals.value.totalOptions - data.value!.grants.filter((g: any) => g.status === 'proposed').reduce((a: number, g: any) => a + g.quantity, 0)))
 const fdsIncludingPool = computed(() => totals.value.fds + poolAvailable.value)
 
-// ----- Summary cap table (top card, spec §5.1) -----
-// Recreates Carta's Summary Cap Table tab — one line per security plus
+// ----- Financings table (top card, spec §5.1) -----
+// Recreates Carta's Financings table tab — one line per security plus
 // subtotals for Common / Preferred and a row for the Stock Plan. Each
 // security contributes to FDS = outstanding shares (or pool authorized).
 // `kind` drives row styling. The `*-gap` rows render as small spacer rows
@@ -516,7 +549,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
     </UiEmpty>
 
     <div class="space-y-6">
-      <!-- Per-round Summary Cap Table — one column per user-entered round.
+      <!-- Per-round Financings table — one column per user-entered round.
            Rows are the line items the user expects to see at a glance: close
            date, money / share-price math at the top, then the per-round
            share contributions, with cumulative FDS + financing at the
@@ -524,7 +557,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
            plain. Single-open invariant: only one round can be flagged Open
            at a time. -->
       <UiCard
-        title="Summary cap table"
+        title="Financings table"
         subtitle="One column per round — type the values; Save commits and re-sorts by close date."
         :padded="false"
       >
@@ -669,6 +702,30 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">Cumulated financing</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
                   {{ fmtUSD(r.cumulated_financing) }}
+                </td>
+              </tr>
+              <!-- CN reconciliation: when Cumulated financing doesn't equal
+                   the CN ledger total, surface the gap with a clickable
+                   breakdown so the operator can fix it. Hidden when the
+                   two reconcile. -->
+              <tr v-if="cnReconciliation.unattributed_dollars > 0">
+                <td class="px-3 py-1.5 border-b border-amber-200 bg-amber-50/40 text-amber-800 sticky left-0 z-10" :title="cnReconcileTitle">
+                  + CNs not rolled up
+                  <span class="ml-1 text-[10px] uppercase tracking-wide text-amber-700 font-semibold">{{ cnReconciliation.unreconciled.length }}</span>
+                </td>
+                <td :colspan="roundCols.length" class="px-3 py-1.5 border-b border-amber-200 bg-amber-50/40 text-right text-amber-900 num">
+                  <span class="font-medium">{{ fmtUSD(cnReconciliation.unattributed_dollars) }}</span>
+                  <span class="ml-2 text-[10px] text-amber-700">
+                    <span v-if="cnReconciliation.by_reason.stale_destination > 0">{{ fmtUSD(cnReconciliation.by_reason.stale_destination) }} bad destination</span>
+                    <span v-if="cnReconciliation.by_reason.deferred > 0" class="ml-2">{{ fmtUSD(cnReconciliation.by_reason.deferred) }} unassigned</span>
+                    <span v-if="cnReconciliation.by_reason.excluded > 0" class="ml-2">{{ fmtUSD(cnReconciliation.by_reason.excluded) }} excluded</span>
+                  </span>
+                </td>
+              </tr>
+              <tr v-if="cnReconciliation.total_dollars > 0">
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-500 text-[11px] italic sticky left-0 z-10 bg-white">All financings incl. unrolled-up CNs</td>
+                <td :colspan="roundCols.length" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-600 text-[11px] num italic">
+                  {{ fmtUSD((roundCols[roundCols.length - 1]?.cumulated_financing || 0) + cnReconciliation.unattributed_dollars) }}
                 </td>
               </tr>
 

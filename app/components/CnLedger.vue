@@ -31,7 +31,7 @@ interface CnRow {
 
 const companyId = computed(() => props.companyId)
 
-const { data: roundSummary } = await useFetch<{ rounds: Array<{ code: string; name: string | null; kind: 'formation' | 'closed' | 'open' }> }>(() => `/api/companies/${companyId.value}/round-summary`, { watch: [companyId], default: () => ({ rounds: [] }) })
+const { data: roundSummary } = await useFetch<{ rounds: Array<{ code: string; name: string | null; kind: 'formation' | 'closed' | 'open'; share_class_code: string | null }> }>(() => `/api/companies/${companyId.value}/round-summary`, { watch: [companyId], default: () => ({ rounds: [] }) })
 
 const { data: convertibles, refresh: refreshConvertibles } = await useFetch<{ convertibles: CnRow[] }>(() => `/api/companies/${companyId.value}/convertibles`, { watch: [companyId], default: () => ({ convertibles: [] }) })
 
@@ -54,9 +54,17 @@ function roundLabel(r: { code: string; name: string | null; kind: string }): str
   return r.kind === 'open' ? `${base} • Open` : base
 }
 
+// Lookup table for CN-destination → round. Indexed by BOTH `code` and
+// `share_class_code` (when present) so a Carta-imported CN with a share-
+// class destination resolves to the round that issued that class. Matches
+// the server-side attribution logic in round-summary so the UI badges
+// agree with the cap-table totals.
 const roundsByCode = computed(() => {
   const m = new Map<string, { code: string; name: string | null; kind: 'formation' | 'closed' | 'open' }>()
-  for (const r of (roundSummary.value?.rounds || [])) m.set(r.code, r)
+  for (const r of (roundSummary.value?.rounds || [])) {
+    m.set(r.code, r)
+    if (r.share_class_code) m.set(r.share_class_code, r)
+  }
   return m
 })
 
@@ -108,15 +116,36 @@ function priceMismatchTitle(stored: number, effective: number): string {
   return `Stored conv. price differs from cap/discount math by ${diff > 0 ? '+' : ''}${diff.toFixed(1)}%`
 }
 
+// Breakdown of CNs that don't roll up into Cumulated financing on the
+// Financings table above. Three reasons: deferred (no destination round
+// picked), stale (destination doesn't match any round code on the cap
+// table — typically a Carta share-class code that wasn't re-attributed
+// after import), excluded ("In summary" toggle off). The matched roundsByCode
+// map decides between deferred and stale.
 const unassignedSummary = computed(() => {
-  let dollars = 0
-  let count = 0
+  let deferredDollars = 0, deferredCount = 0
+  let staleDollars = 0, staleCount = 0
+  let excludedDollars = 0, excludedCount = 0
   for (const r of rows.value) {
-    if (r.basisApplied !== 'deferred') continue
-    dollars += (r.principal || 0) + (r.interestAccrued || 0)
-    count += 1
+    const total = (r.principal || 0) + (r.interestAccrued || 0)
+    if (!r.includeInSummary) {
+      excludedDollars += total; excludedCount += 1; continue
+    }
+    if (!r.destinationClassCode) {
+      deferredDollars += total; deferredCount += 1; continue
+    }
+    const cleaned = String(r.destinationClassCode).replace(/-\d+$/, '')
+    if (!roundsByCode.value.get(cleaned) && !roundsByCode.value.get(r.destinationClassCode)) {
+      staleDollars += total; staleCount += 1
+    }
   }
-  return { dollars, count }
+  return {
+    deferred: { dollars: deferredDollars, count: deferredCount },
+    stale: { dollars: staleDollars, count: staleCount },
+    excluded: { dollars: excludedDollars, count: excludedCount },
+    totalDollars: deferredDollars + staleDollars + excludedDollars,
+    totalCount: deferredCount + staleCount + excludedCount,
+  }
 })
 
 function sortValue(row: any, key: string) {
@@ -282,9 +311,23 @@ async function onDelete(row: CnRow) {
         </template>
       </UiEditableTable>
 
-      <p v-if="unassignedSummary.dollars > 0" class="px-4 py-2 text-xs text-ink-600 bg-amber-50/40 border-t border-amber-200/60">
-        {{ unassignedSummary.count }} unassigned {{ unassignedSummary.count === 1 ? 'note' : 'notes' }} total {{ fmtUSD(unassignedSummary.dollars) }}. Pick a destination round to roll their dollars up into the Cap Table.
-      </p>
+      <div v-if="unassignedSummary.totalDollars > 0" class="px-4 py-2 text-xs text-amber-900 bg-amber-50/60 border-t border-amber-200/60 space-y-0.5">
+        <div class="font-medium">
+          {{ fmtUSD(unassignedSummary.totalDollars) }} of CNs not rolled up into Cumulated financing.
+        </div>
+        <div class="text-amber-800 text-[11px]">
+          <span v-if="unassignedSummary.stale.count > 0">
+            <span class="font-medium">{{ fmtUSD(unassignedSummary.stale.dollars) }}</span> with a destination that doesn't match any round —
+            edit those rows above and pick a real destination (typical after a Carta re-import).
+          </span>
+          <span v-if="unassignedSummary.deferred.count > 0" :class="unassignedSummary.stale.count > 0 ? 'block' : ''">
+            <span class="font-medium">{{ fmtUSD(unassignedSummary.deferred.dollars) }}</span> unassigned — pick a destination round.
+          </span>
+          <span v-if="unassignedSummary.excluded.count > 0" :class="(unassignedSummary.stale.count + unassignedSummary.deferred.count) > 0 ? 'block' : ''">
+            <span class="font-medium">{{ fmtUSD(unassignedSummary.excluded.dollars) }}</span> excluded via the "In summary" toggle.
+          </span>
+        </div>
+      </div>
     </div>
   </div>
 </template>

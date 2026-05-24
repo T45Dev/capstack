@@ -1,6 +1,6 @@
 import { db } from '~~/server/utils/db'
 
-// Per-round Summary Cap Table — feeds the top card on the Cap Table page.
+// Per-round Financings table — feeds the top card on the Financings page.
 // One entry per row in the `rounds` table, plus the Open Round when
 // assumptions.round_name doesn't match any existing round (so the operator
 // can model a future round before adding it manually).
@@ -83,23 +83,26 @@ export default defineEventHandler((event) => {
     return a.seniority - b.seniority
   })
 
-  // CNs — group by attributed round. Each note carries its own
-  // cap/discount terms; effective conversion price is computed per CN
-  // using the round's PPS and pre-money FDS (resolved during the walk
-  // below). The same logic mirrors /companies/:id/convertibles so the
-  // "Notes converted" share count on the cap table matches the
+  // CNs — pulled in full (no include-in-summary filter at SQL) so we can
+  // classify each one into rolled-up vs. not, and surface the gap. The
+  // same effective-price logic mirrors /companies/:id/convertibles so
+  // the "Notes converted" share count on the cap table matches the
   // "Resulting shares" column on the CN page.
   const cnRows = db().prepare(`
-    SELECT principal, interest_accrued, interest_rate, issue_date, conversion_date,
-           destination_class_code, conversion_discount, valuation_cap, conversion_price
+    SELECT id, stakeholder_name, principal, interest_accrued, interest_rate,
+           issue_date, conversion_date, destination_class_code,
+           conversion_discount, valuation_cap, conversion_price,
+           include_in_summary
     FROM convertibles
-    WHERE company_id = ? AND status = 'outstanding' AND include_in_summary != 0
+    WHERE company_id = ? AND status = 'outstanding'
   `).all(id) as Array<{
+    id: string; stakeholder_name: string | null;
     principal: number; interest_accrued: number; interest_rate: number;
     issue_date: string | null; conversion_date: string | null;
     destination_class_code: string | null;
     conversion_discount: number; valuation_cap: number | null;
     conversion_price: number | null;
+    include_in_summary: number;
   }>
 
   function accruedInterestFor(c: typeof cnRows[number]): number {
@@ -114,6 +117,21 @@ export default defineEventHandler((event) => {
     return (c.principal || 0) * c.interest_rate * (days / 365)
   }
 
+  // CN attribution accepts either a round's `code` (user-typed identifier)
+  // OR its `share_class_code` (the Carta share class associated with the
+  // round). Carta imports populate CNs with share-class codes like "SA2"
+  // / "PS"; matching those to a round via its share_class_code means a
+  // typical Carta import "just works" without the operator having to
+  // manually re-attribute every CN. Falls back to round.code so manually
+  // typed CNs (whose destination matches the user's round identifier) still
+  // resolve.
+  const roundCodeByAttribKey = new Map<string, string>()
+  for (const r of rounds) {
+    roundCodeByAttribKey.set(r.code.toUpperCase(), r.code)
+    if (r.share_class_code) roundCodeByAttribKey.set(r.share_class_code.toUpperCase(), r.code)
+  }
+  const validRoundCodes = new Set(roundCodeByAttribKey.keys())
+
   interface CnAttrib {
     total: number               // principal + accrued interest
     storedConvPrice: number     // Carta-imported or user-typed
@@ -121,19 +139,54 @@ export default defineEventHandler((event) => {
     cap: number
   }
   const cnByCode = new Map<string, CnAttrib[]>()
+
+  // Reconciliation: classify each CN so the UI can surface "$X in CNs not
+  // rolling up because Y" with actionable detail. Same totals also let
+  // the Cap Table show its Cumulated financing gap explicitly instead of
+  // silently disagreeing with the CN ledger.
+  type CnExclusionReason = 'deferred' | 'excluded' | 'stale_destination'
+  interface UnreconciledCn {
+    id: string
+    stakeholderName: string
+    dollars: number
+    destinationCode: string | null
+    reason: CnExclusionReason
+  }
+  const unreconciled: UnreconciledCn[] = []
+  let attributedCnDollars = 0
+
   for (const c of cnRows) {
     const total = (c.principal || 0) + accruedInterestFor(c)
     if (total <= 0) continue
     const codeRaw = c.destination_class_code ? String(c.destination_class_code).replace(/-\d+$/, '').toUpperCase() : ''
-    if (!codeRaw) continue  // unassigned notes don't roll up anywhere
-    const bucket = cnByCode.get(codeRaw) || []
+    const excluded = c.include_in_summary === 0
+    const hasDestination = !!codeRaw
+    const resolvedRoundCode = hasDestination ? roundCodeByAttribKey.get(codeRaw) : undefined
+    if (excluded) {
+      unreconciled.push({ id: c.id, stakeholderName: c.stakeholder_name || '', dollars: total, destinationCode: c.destination_class_code, reason: 'excluded' })
+      continue
+    }
+    if (!hasDestination) {
+      unreconciled.push({ id: c.id, stakeholderName: c.stakeholder_name || '', dollars: total, destinationCode: null, reason: 'deferred' })
+      continue
+    }
+    if (!resolvedRoundCode) {
+      unreconciled.push({ id: c.id, stakeholderName: c.stakeholder_name || '', dollars: total, destinationCode: c.destination_class_code, reason: 'stale_destination' })
+      continue
+    }
+    // Bucket under the canonical round.code (uppercase) so the per-round
+    // walk below finds the right bucket regardless of whether the CN's
+    // destination matched the round's code or its share_class_code.
+    const bucketKey = resolvedRoundCode.toUpperCase()
+    const bucket = cnByCode.get(bucketKey) || []
     bucket.push({
       total,
       storedConvPrice: c.conversion_price && c.conversion_price > 0 ? c.conversion_price : 0,
       discount: c.conversion_discount || 0,
       cap: c.valuation_cap || 0,
     })
-    cnByCode.set(codeRaw, bucket)
+    cnByCode.set(bucketKey, bucket)
+    attributedCnDollars += total
   }
 
   const cols: RoundColumn[] = []
@@ -227,5 +280,30 @@ export default defineEventHandler((event) => {
   // row via "Add round" and flips its kind to 'open' via the column-header
   // selector.
 
-  return { rounds: cols }
+  // Reconciliation totals + per-CN breakdown for "why doesn't this match
+  // the CN ledger?" The UI uses these to render a clear gap row beneath
+  // Cumulated financing and link each unrolled-up CN back to its fix.
+  const unreconciledByReason: Record<'deferred' | 'excluded' | 'stale_destination', UnreconciledCn[]> = {
+    deferred: [],
+    excluded: [],
+    stale_destination: [],
+  }
+  for (const u of unreconciled) unreconciledByReason[u.reason].push(u)
+  const totalsByReason = {
+    deferred: unreconciledByReason.deferred.reduce((s, u) => s + u.dollars, 0),
+    excluded: unreconciledByReason.excluded.reduce((s, u) => s + u.dollars, 0),
+    stale_destination: unreconciledByReason.stale_destination.reduce((s, u) => s + u.dollars, 0),
+  }
+  const unattributedCnDollars = totalsByReason.deferred + totalsByReason.excluded + totalsByReason.stale_destination
+
+  return {
+    rounds: cols,
+    cn_reconciliation: {
+      attributed_dollars: attributedCnDollars,
+      unattributed_dollars: unattributedCnDollars,
+      total_dollars: attributedCnDollars + unattributedCnDollars,
+      by_reason: totalsByReason,
+      unreconciled,
+    },
+  }
 })
