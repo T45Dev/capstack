@@ -487,16 +487,12 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
   <div v-if="data">
     <div class="flex items-end justify-between mb-4 gap-3 flex-wrap">
       <div>
-        <h1 class="text-xl font-semibold tracking-tight text-ink-900">Cap table</h1>
+        <h1 class="text-xl font-semibold tracking-tight text-ink-900">Financings</h1>
         <p class="text-sm text-ink-600 mt-1">
-          Stakeholders × share classes. Toggle Shares / % FDS / $ per table — % uses FDS (incl. pool); $ uses the latest PPS ({{ fmtPricePerShare(currentPPS) }}).
+          Funding rounds (top) and convertible notes (below). Round values are user-entered; CNs roll up into the round they're attributed to.
         </p>
       </div>
       <div class="flex items-center gap-2 flex-wrap">
-        <div class="relative">
-          <Filter :size="12" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-500" />
-          <input v-model="query" placeholder="Filter stakeholders…" class="rounded-md border border-ink-300 bg-white pl-7 pr-3 py-1.5 text-sm w-64 shadow-sm focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500" />
-        </div>
         <NuxtLink :to="`/companies/${id}/import`">
           <UiButton><Upload :size="14" /> Re-import</UiButton>
         </NuxtLink>
@@ -730,190 +726,10 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
         </p>
       </UiCard>
 
-      <!-- Securities rollup — one line per security class with authorized vs
-           outstanding vs available, Common / Preferred subtotals, and the
-           Total fully-diluted footer. (Different lens from the per-round
-           summary above.) -->
-      <UiCard v-if="data.stakeholders.length" title="Securities" subtitle="Authorized vs outstanding vs available per share class" :padded="false">
-        <div class="overflow-x-auto">
-          <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
-            <colgroup>
-              <col style="width: 70px" />
-              <col />
-              <col style="width: 14%" />
-              <col style="width: 14%" />
-              <col style="width: 13%" />
-              <col style="width: 11%" />
-              <col style="width: 10%" />
-            </colgroup>
-            <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
-              <tr>
-                <th class="px-3 py-1.5 border-b border-ink-300 font-semibold">Code</th>
-                <th class="px-3 py-1.5 border-b border-ink-300 font-semibold">Security</th>
-                <th class="px-3 py-1.5 border-b border-ink-300 font-semibold text-right">Authorized</th>
-                <th class="px-3 py-1.5 border-b border-ink-300 font-semibold text-right">Outstanding</th>
-                <th class="px-3 py-1.5 border-b border-ink-300 font-semibold text-right">Available</th>
-                <th class="px-3 py-1.5 border-b border-ink-300 font-semibold text-right">FDS</th>
-                <th class="px-3 py-1.5 border-b border-ink-300 font-semibold text-right">% FDS</th>
-              </tr>
-            </thead>
-            <tbody class="num">
-              <template v-for="(r, i) in summaryRows" :key="i">
-                <!-- Spacer row between sections. Transparent so the card stays clean. -->
-                <tr v-if="r.kind === 'gap'" aria-hidden="true">
-                  <td colspan="7" class="h-3 p-0 bg-transparent" />
-                </tr>
-                <tr
-                  v-else
-                  :class="[
-                    r.kind === 'total' ? 'bg-ink-200 font-semibold text-ink-900' : '',
-                    (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal') ? 'bg-ink-100 font-semibold text-ink-800' : '',
-                    r.kind === 'pool' ? 'bg-amber-50/50' : '',
-                    (r.kind === 'common' || r.kind === 'preferred') ? 'hover:bg-accent-50/30 transition-colors' : '',
-                  ]"
-                >
-                  <td
-                    class="px-3 py-1.5 font-mono text-[11px] border-b border-ink-200"
-                    :class="[
-                      (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal' || r.kind === 'total') ? 'border-t border-ink-300' : '',
-                      r.kind === 'total' ? 'text-ink-900' : 'text-ink-700',
-                    ]"
-                  >{{ r.code || '' }}</td>
-                  <td
-                    class="px-3 py-1.5 border-b border-ink-200 truncate"
-                    :class="[
-                      (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal' || r.kind === 'total') ? 'border-t border-ink-300' : '',
-                    ]"
-                    :title="r.label"
-                  >{{ r.label }}</td>
-                  <td
-                    class="px-3 py-1.5 text-right border-b border-ink-200"
-                    :class="[
-                      r.kind === 'total' ? '' : 'text-ink-700',
-                      (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal' || r.kind === 'total') ? 'border-t border-ink-300' : '',
-                    ]"
-                  >{{ r.authorized == null ? '—' : fmtShares(r.authorized) }}</td>
-                  <td
-                    class="px-3 py-1.5 text-right border-b border-ink-200"
-                    :class="[
-                      r.kind === 'total' ? '' : 'text-ink-700',
-                      (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal' || r.kind === 'total') ? 'border-t border-ink-300' : '',
-                    ]"
-                  >{{ r.outstanding == null ? '—' : fmtShares(r.outstanding) }}</td>
-                  <td
-                    class="px-3 py-1.5 text-right border-b border-ink-200"
-                    :class="[
-                      r.kind === 'total' ? '' : 'text-ink-700',
-                      (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal' || r.kind === 'total') ? 'border-t border-ink-300' : '',
-                    ]"
-                  >{{ r.available == null ? '—' : fmtShares(r.available) }}</td>
-                  <td
-                    class="px-3 py-1.5 text-right border-b border-ink-200"
-                    :class="[
-                      r.kind === 'total' ? '' : 'font-medium text-ink-900',
-                      (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal' || r.kind === 'total') ? 'border-t border-ink-300' : '',
-                    ]"
-                  >{{ fmtShares(r.fds) }}</td>
-                  <td
-                    class="px-3 py-1.5 text-right border-b border-ink-200"
-                    :class="[
-                      r.kind === 'total' ? '' : 'text-ink-600',
-                      (r.kind === 'common-subtotal' || r.kind === 'preferred-subtotal' || r.kind === 'total') ? 'border-t border-ink-300' : '',
-                    ]"
-                  >{{ fdsIncludingPool > 0 ? fmtPct(r.fds / fdsIncludingPool, 2) : '—' }}</td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-        </div>
-      </UiCard>
-
-      <!-- Holdings -->
-      <UiCard v-if="data.stakeholders.length" title="Holdings" :subtitle="`${pivot.length} positions`" :padded="false">
-        <template #header>
-          <TableUnitsToggle storage-key="capstack:cap-table:holdings:units" />
-        </template>
-        <div class="overflow-x-auto">
-          <table class="text-[13px] border-separate" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: holdingsWidth + 'px' }">
-            <colgroup>
-              <col v-for="c in holdingsTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
-            </colgroup>
-            <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
-              <!-- Row 1: group labels spanning their sub-columns (CS, CS1, Options, CN, FDS, ...).
-                   Stakeholder column uses rowspan=2. -->
-              <tr>
-                <th
-                  rowspan="2"
-                  class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold text-left align-bottom bg-ink-100"
-                  :class="[holdingsTable.cols[0]?.sortable ? 'cursor-pointer hover:text-ink-900' : '', 'sticky-col']"
-                  @click="holdingsTable.cols[0] && holdingsTable.toggleSort(holdingsTable.cols[0].key)"
-                >
-                  <span class="inline-flex items-center gap-1">
-                    {{ holdingsTable.cols[0]?.label }}
-                    <ChevronUp v-if="holdingsTable.cols[0] && sortIconFor(holdingsTable, holdingsTable.cols[0].key) === 'asc'" :size="12" class="text-accent-600" />
-                    <ChevronDown v-if="holdingsTable.cols[0] && sortIconFor(holdingsTable, holdingsTable.cols[0].key) === 'desc'" :size="12" class="text-accent-600" />
-                  </span>
-                  <span class="resize-handle" v-if="holdingsTable.cols[0]" @mousedown.prevent.stop="holdingsTable.startResize($event, holdingsTable.cols[0].key)" @click.stop />
-                </th>
-                <th
-                  v-for="(g, gi) in holdingsGroups"
-                  :key="g.firstKey"
-                  :colspan="g.colspan"
-                  class="px-2.5 py-1 text-center border-b border-ink-300 text-ink-700 font-semibold"
-                  :class="gi % 2 === 0 ? 'bg-ink-100' : 'bg-ink-100/60'"
-                >{{ g.group }}</th>
-              </tr>
-              <!-- Row 2: per-unit labels (Shares / % / $). Sort + resize live here. -->
-              <tr>
-                <th
-                  v-for="(c, idx) in holdingsTable.cols.slice(1)"
-                  :key="c.key"
-                  class="relative px-2.5 py-1 border-b border-ink-300 select-none text-[10px] font-medium"
-                  :class="[
-                    c.align === 'right' ? 'text-right' : 'text-left',
-                    c.sortable ? 'cursor-pointer hover:text-ink-900' : '',
-                    // Tinted background matching the group row.
-                    (() => {
-                      let gi = -1; let lastG = ''
-                      for (const col of holdingsTable.cols.slice(1, idx + 2)) {
-                        if (col.group && col.group !== lastG) { gi++; lastG = col.group }
-                      }
-                      return gi % 2 === 0 ? 'bg-ink-100' : 'bg-ink-100/60'
-                    })(),
-                  ]"
-                  @click="c.sortable ? holdingsTable.toggleSort(c.key) : null"
-                >
-                  <span class="inline-flex items-center gap-1" :class="c.align === 'right' ? 'flex-row-reverse' : ''">
-                    {{ c.unit ? unitColLabel(c.unit) : c.label }}
-                    <ChevronUp v-if="sortIconFor(holdingsTable, c.key) === 'asc'" :size="12" class="text-accent-600" />
-                    <ChevronDown v-if="sortIconFor(holdingsTable, c.key) === 'desc'" :size="12" class="text-accent-600" />
-                  </span>
-                  <span class="resize-handle" @mousedown.prevent.stop="holdingsTable.startResize($event, c.key)" @click.stop />
-                </th>
-              </tr>
-            </thead>
-            <tbody class="num">
-              <tr v-for="r in sortedPivot" :key="r.stakeholderId" class="group">
-                <template v-for="c in holdingsTable.cols" :key="c.key">
-                  <td v-if="c.key === 'name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-accent-50/40" :title="r.name">{{ r.name }}</td>
-                  <td v-else class="px-2.5 py-1.5 text-right border-b border-ink-200" :class="c.baseKey === 'fds' ? 'font-medium text-ink-900' : ''">
-                    <template v-if="holdingBase(r, c.baseKey!)">{{ formatBy(c.unit!, holdingBase(r, c.baseKey!), fdsIncludingPool, currentPPS) }}</template>
-                    <span v-else class="text-ink-400">—</span>
-                  </td>
-                </template>
-              </tr>
-              <tr class="text-ink-900 font-semibold num bg-ink-100">
-                <template v-for="c in holdingsTable.cols" :key="c.key">
-                  <td v-if="c.key === 'name'" class="px-2.5 py-1.5 border-t-2 border-ink-300">Total</td>
-                  <td v-else-if="c.baseKey === 'fds'" class="px-2.5 py-1.5 text-right border-t-2 border-ink-300">{{ formatBy(c.unit!, totals.fds, fdsIncludingPool, currentPPS) }}</td>
-                  <td v-else-if="c.baseKey === 'optionShares'" class="px-2.5 py-1.5 text-right border-t-2 border-ink-300">{{ formatBy(c.unit!, totals.totalOptions, fdsIncludingPool, currentPPS) }}</td>
-                  <td v-else-if="c.baseKey?.startsWith('class_')" class="px-2.5 py-1.5 text-right border-t-2 border-ink-300">{{ formatBy(c.unit!, totals.byClass[c.baseKey.slice(6)] || 0, fdsIncludingPool, currentPPS) }}</td>
-                </template>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </UiCard>
+      <!-- Convertible Notes ledger — extracted into a shared component so
+           the dollars/shares always render right next to the rounds they
+           attribute to. -->
+      <CnLedger :company-id="id" @refreshed="refreshRoundSummary" />
 
     </div>
   </div>

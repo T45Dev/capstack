@@ -3,7 +3,7 @@
 // on the Companies index page (entry point). Drop the "Overview" tab; route
 // labels follow the spec vocabulary (Option Grants, Exit Scenarios, etc.).
 import {
-  FileSpreadsheet, Sliders, FileText, Award, GitCompare, TrendingDown,
+  FileSpreadsheet, Sliders, Award, GitCompare, TrendingDown,
   FlaskConical, Building2, Upload, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-vue-next'
 const route = useRoute()
@@ -33,9 +33,8 @@ function toggleNav() { navCollapsed.value = !navCollapsed.value }
 // the legacy filenames (e.g. /grants is still /grants on disk, but labelled
 // "Option Grants" everywhere in the UI).
 const tabs = computed(() => companyId.value ? [
-  { to: `/companies/${companyId.value}/cap-table`,         label: 'Cap Table',          icon: FileSpreadsheet },
+  { to: `/companies/${companyId.value}/cap-table`,         label: 'Financings',         icon: FileSpreadsheet },
   { to: `/companies/${companyId.value}/assumptions`,       label: 'Assumptions',        icon: Sliders },
-  { to: `/companies/${companyId.value}/convertible-notes`, label: 'Convertible Notes',  icon: FileText },
   { to: `/companies/${companyId.value}/grants`,            label: 'Option Grants',      icon: Award },
   { to: `/companies/${companyId.value}/dilution`,          label: 'Overall Dilution',   icon: GitCompare },
   { to: `/companies/${companyId.value}/pool`,              label: 'Option Pool Impact', icon: TrendingDown },
