@@ -150,7 +150,7 @@ function sortIconFor(key: string) {
         <h1 class="text-xl font-semibold tracking-tight text-ink-900">Overall Dilution</h1>
         <p class="text-sm text-ink-600 mt-1">
           Every stakeholder · Pre / Post / Δ for Shares, %, and $. Round inputs live on the
-          <NuxtLink :to="`/companies/${id}/assumptions`" class="text-accent-600 hover:text-accent-700 font-medium">Assumptions</NuxtLink>
+          <NuxtLink :to="`/companies/${id}/cap-table`" class="text-accent-600 hover:text-accent-700 font-medium">Financings</NuxtLink>
           page.
         </p>
       </div>

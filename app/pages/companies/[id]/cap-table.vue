@@ -580,14 +580,14 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
         <div v-if="!roundCols.length" class="px-4 py-8 text-center text-sm text-ink-500">
           No rounds yet. Click <span class="font-medium text-ink-700">Add round</span> to start typing your funding history.
         </div>
-        <!-- overflow-x: auto + overflow-y: clip — the wrapper is the
-             x-scroll container (so the table can scroll horizontally when
-             there are more rounds than fit) but is NOT a y-scroll
-             container, so position:sticky on the thead sticks against the
-             document instead of an internal mini-scroll-viewport. No
-             max-height means no reserved blank space when the table fits;
-             the document just keeps scrolling when it doesn't. -->
-        <div v-else class="overflow-x-auto overflow-y-clip">
+        <!-- overflow-x: auto only — horizontal scrollbar appears when the
+             round columns are wider than the card, otherwise no scrollbars
+             at all. No max-height, no overflow-y clip; the wrapper sizes
+             to content so nothing is hidden. (Sticky thead is sacrificed
+             here — the previous overflow-y: clip trick clipped the sticky
+             header when it tried to render above the wrapper edge in
+             Chromium.) -->
+        <div v-else class="overflow-x-auto">
           <table class="text-[12px] border-separate whitespace-nowrap" style="border-spacing: 0; min-width: 100%;">
             <colgroup>
               <col style="width: 220px" />

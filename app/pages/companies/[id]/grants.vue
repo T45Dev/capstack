@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, Trash2, Edit3, Award, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle } from 'lucide-vue-next'
+import { Plus, Trash2, Edit3, Award, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle, UploadCloud, AlertTriangle, CheckCircle2, X } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtDate, fmtPricePerShare, optionTypeOf } from '~/utils/format'
 
 const route = useRoute()
@@ -404,6 +404,99 @@ function exportBoardApproval() {
   // Browser handles the download via the endpoint's Content-Disposition header.
   window.location.href = `/api/companies/${id.value}/board-approval`
 }
+
+// ---- Smart import of proposed grants ----
+// Two-step flow so the operator can sanity-check column mapping before
+// committing: upload → /import-preview returns mapping + sample rows;
+// confirm → /import re-parses and inserts as proposed grants.
+interface ImportPreview {
+  filename: string
+  headerRow: number
+  rowsRead: number
+  mapping: Record<string, string>      // source header → target field
+  unmappedHeaders: string[]
+  warnings: string[]
+  sample: Array<{
+    recipientName: string
+    recipientType: string | null
+    quantity: number
+    strike: number | null
+    issueDate: string | null
+    vestingStart: string | null
+    vestMonths: number | null
+    cliffMonths: number | null
+    notes: string | null
+  }>
+  totalParsed: number
+}
+const showImport = ref(false)
+const importFile = ref<File | null>(null)
+const importPreview = ref<ImportPreview | null>(null)
+const importPreviewing = ref(false)
+const importCommitting = ref(false)
+const importError = ref<string | null>(null)
+const importDone = ref<{ created: number; warnings: string[] } | null>(null)
+
+function openImport() {
+  showImport.value = true
+  importFile.value = null
+  importPreview.value = null
+  importError.value = null
+  importDone.value = null
+}
+function closeImport() {
+  showImport.value = false
+}
+function onImportFile(e: Event) {
+  const t = e.target as HTMLInputElement
+  if (t.files?.[0]) { importFile.value = t.files[0]; previewImport() }
+}
+function onImportDrop(e: DragEvent) {
+  if (e.dataTransfer?.files?.[0]) { importFile.value = e.dataTransfer.files[0]; previewImport() }
+}
+async function previewImport() {
+  if (!importFile.value) return
+  importPreviewing.value = true
+  importPreview.value = null
+  importError.value = null
+  try {
+    const fd = new FormData()
+    fd.append('file', importFile.value)
+    importPreview.value = await $fetch(`/api/companies/${id.value}/grants/import-preview`, { method: 'POST', body: fd })
+  } catch (e: any) {
+    importError.value = e?.data?.message || e?.message || 'Preview failed'
+  } finally {
+    importPreviewing.value = false
+  }
+}
+async function commitImport() {
+  if (!importFile.value || importCommitting.value) return
+  importCommitting.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', importFile.value)
+    const res = await $fetch<{ ok: boolean; created: number; warnings: string[] }>(`/api/companies/${id.value}/grants/import`, { method: 'POST', body: fd })
+    importDone.value = { created: res.created, warnings: res.warnings || [] }
+    await refresh()
+  } catch (e: any) {
+    importError.value = e?.data?.message || e?.message || 'Import failed'
+  } finally {
+    importCommitting.value = false
+  }
+}
+
+// Field-name labels for the mapping table.
+const fieldLabels: Record<string, string> = {
+  recipientName: 'Recipient',
+  recipientType: 'Type',
+  quantity: 'Shares',
+  strike: 'Strike',
+  issueDate: 'Issue date',
+  vestingStart: 'Vesting start',
+  vestMonths: 'Vest months',
+  cliffMonths: 'Cliff months',
+  notes: 'Notes',
+}
 </script>
 
 <template>
@@ -417,6 +510,7 @@ function exportBoardApproval() {
         <UiButton :disabled="!proposed.length" @click="exportBoardApproval">
           <FileDown :size="14" /> Export board approval (.xlsx)
         </UiButton>
+        <UiButton @click="openImport"><UploadCloud :size="14" /> Import proposed</UiButton>
         <UiButton variant="primary" @click="reset(); showCreate = true"><Plus :size="14" /> Propose grant</UiButton>
       </div>
     </div>
@@ -660,6 +754,122 @@ function exportBoardApproval() {
             <Award :size="14" /> {{ saving ? 'Saving…' : 'Save grant' }}
           </UiButton>
         </div>
+      </div>
+    </div>
+
+    <!-- Smart import modal — drop a file with whatever column layout, we
+         match headers against an alias bank and surface what we found. -->
+    <div v-if="showImport" class="fixed inset-0 z-50 bg-ink-900/40 backdrop-blur-sm grid place-items-center p-4" @click.self="closeImport">
+      <div class="w-full max-w-3xl rounded-lg border border-ink-300 bg-white shadow-card-hover">
+        <header class="px-5 py-3 border-b border-ink-200 flex items-center justify-between gap-2">
+          <div>
+            <h2 class="text-base font-semibold text-ink-900">Import proposed grants</h2>
+            <p class="text-xs text-ink-500 mt-0.5">Drop in an HR / finance spreadsheet — we'll match headers like "Name", "Shares", "Strike" automatically. Imports as Proposed.</p>
+          </div>
+          <button class="p-1.5 hover:bg-ink-200 rounded" @click="closeImport"><X :size="16" /></button>
+        </header>
+
+        <div class="p-5 space-y-4">
+          <!-- Step 1: drop / pick file -->
+          <div
+            v-if="!importPreview && !importDone"
+            class="rounded-md border-2 border-dashed transition-colors p-8 text-center border-ink-300 bg-ink-100/30"
+            @dragover.prevent @drop.prevent="onImportDrop"
+          >
+            <UploadCloud :size="28" class="mx-auto text-ink-500" />
+            <p class="mt-2 text-sm text-ink-700">
+              <span class="font-medium">Drop a file here</span> or
+              <label class="text-accent-600 hover:text-accent-700 cursor-pointer underline font-medium">
+                browse
+                <input type="file" accept=".xlsx,.xlsm,.csv,.tsv" class="hidden" @change="onImportFile" />
+              </label>
+            </p>
+            <p v-if="importFile" class="mt-1 text-xs text-ink-600">{{ importFile.name }} ({{ Math.round(importFile.size / 1024) }} KB)</p>
+            <p class="mt-2 text-[11px] text-ink-500">xlsx / xlsm / csv / tsv. Headers can appear anywhere in the first 8 rows.</p>
+            <p v-if="importPreviewing" class="mt-3 text-xs text-accent-700">Analyzing…</p>
+          </div>
+
+          <!-- Step 2: detected mapping + sample preview -->
+          <div v-else-if="importPreview && !importDone" class="space-y-4">
+            <div v-if="importPreview.warnings.length" class="rounded-md border border-amber-200 bg-amber-50 p-3">
+              <h4 class="text-[11px] font-semibold uppercase tracking-wide text-amber-700 mb-1 flex items-center gap-1">
+                <AlertTriangle :size="12" /> Heads up
+              </h4>
+              <ul class="text-xs text-amber-900 list-disc pl-5 space-y-0.5">
+                <li v-for="(w, i) in importPreview.warnings" :key="i">{{ w }}</li>
+              </ul>
+            </div>
+
+            <div>
+              <h4 class="text-[11px] font-semibold uppercase tracking-wide text-ink-500 mb-2">Column mapping</h4>
+              <div class="text-xs grid grid-cols-2 gap-x-4 gap-y-1">
+                <template v-for="(field, header) in importPreview.mapping" :key="header">
+                  <div class="text-ink-600 truncate" :title="header">{{ header }}</div>
+                  <div class="text-ink-900 font-medium">→ {{ fieldLabels[field] || field }}</div>
+                </template>
+              </div>
+              <p v-if="importPreview.unmappedHeaders.length" class="mt-2 text-[11px] text-ink-500 italic">
+                Ignored: {{ importPreview.unmappedHeaders.join(', ') }}
+              </p>
+            </div>
+
+            <div v-if="importPreview.sample.length">
+              <h4 class="text-[11px] font-semibold uppercase tracking-wide text-ink-500 mb-2">
+                Preview ({{ importPreview.totalParsed }} total{{ importPreview.totalParsed > importPreview.sample.length ? ` — first ${importPreview.sample.length} shown` : '' }})
+              </h4>
+              <div class="border border-ink-200 rounded overflow-x-auto">
+                <table class="text-[12px] w-full">
+                  <thead class="bg-ink-100 text-ink-700">
+                    <tr>
+                      <th class="px-2 py-1 text-left text-[10px] uppercase tracking-wide">Recipient</th>
+                      <th class="px-2 py-1 text-left text-[10px] uppercase tracking-wide">Type</th>
+                      <th class="px-2 py-1 text-right text-[10px] uppercase tracking-wide">Shares</th>
+                      <th class="px-2 py-1 text-right text-[10px] uppercase tracking-wide">Strike</th>
+                      <th class="px-2 py-1 text-left text-[10px] uppercase tracking-wide">Issue date</th>
+                    </tr>
+                  </thead>
+                  <tbody class="num">
+                    <tr v-for="(r, i) in importPreview.sample" :key="i" class="border-t border-ink-200 odd:bg-ink-50/30">
+                      <td class="px-2 py-1 text-ink-900 font-medium">{{ r.recipientName }}</td>
+                      <td class="px-2 py-1 text-ink-700">{{ r.recipientType || '—' }}</td>
+                      <td class="px-2 py-1 text-right text-ink-900">{{ fmtShares(r.quantity) }}</td>
+                      <td class="px-2 py-1 text-right text-ink-700">{{ r.strike != null ? fmtPricePerShare(r.strike) : '—' }}</td>
+                      <td class="px-2 py-1 text-ink-700">{{ r.issueDate || '—' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <p v-if="importError" class="text-sm text-red-700">{{ importError }}</p>
+          </div>
+
+          <!-- Step 3: done -->
+          <div v-else-if="importDone" class="space-y-3">
+            <div class="flex items-center gap-2 text-emerald-700">
+              <CheckCircle2 :size="20" />
+              <span class="font-medium">Imported {{ importDone.created }} proposed grant{{ importDone.created === 1 ? '' : 's' }}.</span>
+            </div>
+            <div v-if="importDone.warnings.length" class="rounded-md border border-amber-200 bg-amber-50 p-3">
+              <h4 class="text-[11px] font-semibold uppercase tracking-wide text-amber-700 mb-1">Notes</h4>
+              <ul class="text-xs text-amber-900 list-disc pl-5 space-y-0.5">
+                <li v-for="(w, i) in importDone.warnings" :key="i">{{ w }}</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <footer class="px-5 py-3 border-t border-ink-200 flex items-center justify-end gap-2">
+          <UiButton variant="ghost" @click="closeImport">{{ importDone ? 'Done' : 'Cancel' }}</UiButton>
+          <UiButton
+            v-if="importPreview && !importDone"
+            variant="primary"
+            :disabled="!importPreview.totalParsed || importCommitting"
+            @click="commitImport"
+          >
+            <UploadCloud :size="14" /> {{ importCommitting ? 'Importing…' : `Import ${importPreview.totalParsed} grant${importPreview.totalParsed === 1 ? '' : 's'}` }}
+          </UiButton>
+        </footer>
       </div>
     </div>
   </div>

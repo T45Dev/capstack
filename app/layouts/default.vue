@@ -3,7 +3,7 @@
 // on the Companies index page (entry point). Drop the "Overview" tab; route
 // labels follow the spec vocabulary (Option Grants, Exit Scenarios, etc.).
 import {
-  FileSpreadsheet, Sliders, Award, GitCompare, TrendingDown,
+  FileSpreadsheet, Award, GitCompare, TrendingDown,
   FlaskConical, Building2, Upload, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-vue-next'
 const route = useRoute()
@@ -32,9 +32,12 @@ function toggleNav() { navCollapsed.value = !navCollapsed.value }
 // Spec §4 nav order. Routes use the spec page names where they differ from
 // the legacy filenames (e.g. /grants is still /grants on disk, but labelled
 // "Option Grants" everywhere in the UI).
+// Assumptions page was deprecated — round math now lives inline on the
+// Financings table (one column per round, type the values, auto-save).
+// Routes still exist in the backend for the rare bookmark hit, but the
+// nav doesn't surface them.
 const tabs = computed(() => companyId.value ? [
   { to: `/companies/${companyId.value}/cap-table`,         label: 'Financings',         icon: FileSpreadsheet },
-  { to: `/companies/${companyId.value}/assumptions`,       label: 'Assumptions',        icon: Sliders },
   { to: `/companies/${companyId.value}/grants`,            label: 'Option Grants',      icon: Award },
   { to: `/companies/${companyId.value}/dilution`,          label: 'Overall Dilution',   icon: GitCompare },
   { to: `/companies/${companyId.value}/pool`,              label: 'Option Pool Impact', icon: TrendingDown },
