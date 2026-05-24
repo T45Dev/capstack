@@ -36,6 +36,10 @@ interface RoundColumn {
   option_pool_issued: number
   total_shares_fds: number
   cumulated_financing: number
+  liq_pref_multiple: number
+  participation: 'none' | 'full' | 'capped'
+  participation_cap: number | null
+  pref_tier: number
 }
 
 const { data: roundSummary, refresh: refreshRoundSummary } = await useFetch<{ rounds: RoundColumn[] }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
@@ -87,6 +91,10 @@ interface RoundDraft {
   preferred_issued?: number
   preferred_issued_override?: number | null
   option_pool_issued?: number
+  liq_pref_multiple?: number
+  participation?: 'none' | 'full' | 'capped'
+  participation_cap?: number | null
+  pref_tier?: number
 }
 const drafts = ref<Record<string, RoundDraft>>({})
 const isSaving = ref(false)

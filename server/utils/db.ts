@@ -233,10 +233,12 @@ function migrate(d: Database.Database): void {
   // new_money / share_price". A numeric value (including 0) overrides for
   // rounds where the math doesn't apply, e.g. debt-only or bridge rounds.
   ensureColumn('rounds', 'preferred_issued_override', 'REAL')
-  // Liquidation preference terms. Default to 1x non-participating with
-  // everyone pari passu (tier 0) — the modern-term-sheet baseline that
-  // the exit waterfall starts from.
-  ensureColumn('rounds', 'liq_pref_multiple', 'REAL NOT NULL DEFAULT 1.0')
+  // Liquidation preference terms. Default to 0x — i.e. no preference,
+  // tranche participates pro-rata only — so that the default exit math
+  // matches the user's existing spreadsheet practice (pure pro-rata).
+  // When the operator dials a round up to 1x non-participating (or
+  // anything else), the waterfall engine kicks in and respects the terms.
+  ensureColumn('rounds', 'liq_pref_multiple', 'REAL NOT NULL DEFAULT 0')
   ensureColumn('rounds', 'participation', "TEXT NOT NULL DEFAULT 'none'")  // 'none' | 'full' | 'capped'
   ensureColumn('rounds', 'participation_cap', 'REAL')                       // multiple, e.g. 3.0 = 3x invested cap
   ensureColumn('rounds', 'pref_tier', 'INTEGER NOT NULL DEFAULT 0')         // higher tier = paid first; pari passu within tier
