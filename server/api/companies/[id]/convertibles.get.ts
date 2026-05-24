@@ -89,11 +89,16 @@ export default defineEventHandler((event) => {
     conversion_price: number | null;
   }>
 
+  // Live-accrue interest: when the user edits rate/principal/dates, the
+  // Interest amt. column re-derives from principal × rate × days / 365.
+  // Falls back to "today" when conversion_date isn't set so in-flight
+  // notes also reflect rate changes.
   function accruedInterestFor(c: typeof cnRows[number]): number {
-    if (!c.conversion_date || !c.issue_date || !c.interest_rate || c.interest_rate <= 0) {
+    if (!c.issue_date || !c.interest_rate || c.interest_rate <= 0) {
       return c.interest_accrued || 0
     }
-    const conv = new Date(c.conversion_date).getTime()
+    const endStr = c.conversion_date || new Date().toISOString().slice(0, 10)
+    const conv = new Date(endStr).getTime()
     const iss = new Date(c.issue_date).getTime()
     if (!isFinite(conv) || !isFinite(iss)) return c.interest_accrued || 0
     const days = (conv - iss) / (1000 * 60 * 60 * 24)
@@ -105,26 +110,24 @@ export default defineEventHandler((event) => {
     const interest = accruedInterestFor(c)
     const total = (c.principal || 0) + interest
     const codeKey = c.destination_class_code ? String(c.destination_class_code).toUpperCase() : ''
-    // Prefer the stored conversion_price (Carta-imported or user-typed)
-    // over the round's share price. Falls back to round.share_price when
-    // the CN has no explicit conv price recorded.
+    // Share price (basis for the effective calc): user-typed conversion_price
+    // overrides the attributed round's share_price. Editing the Share price
+    // cell flows through to Effective price and Shares.
     const storedConvPrice = c.conversion_price && c.conversion_price > 0 ? c.conversion_price : 0
     const roundPPS = codeKey ? (priceByCode.get(codeKey) || 0) : 0
     const convPrice = storedConvPrice || roundPPS
 
-    // Effective conv price — what the cap/discount math would compute given
-    // the attributed round. Use the lower of:
-    //   - roundPPS × (1 − discount)         when a discount is set
+    // Effective conv price uses the Share price as its basis, then applies
+    // cap/discount adjustments:
+    //   - convPrice × (1 − discount)        when a discount is set
     //   - cap / pre-money FDS at this round when a cap is set + FDS known
-    // When neither cap nor discount is set, the effective price is just the
-    // round PPS. We surface this alongside the stored price so the operator
-    // can sanity-check whether Carta's recorded price matches the math.
+    // Whichever is lower wins (best price for the noteholder).
     const discount = c.conversion_discount || 0
     const cap = c.valuation_cap || 0
     const preFDS = codeKey ? (preFDSByCode.get(codeKey) || 0) : 0
     let effectiveConvPrice = 0
-    if (roundPPS > 0) {
-      const discountPrice = discount > 0 ? roundPPS * (1 - discount) : roundPPS
+    if (convPrice > 0) {
+      const discountPrice = discount > 0 ? convPrice * (1 - discount) : convPrice
       const capPrice = cap > 0 && preFDS > 0 ? cap / preFDS : 0
       effectiveConvPrice = capPrice > 0 ? Math.min(discountPrice, capPrice) : discountPrice
     } else if (cap > 0 && preFDS > 0) {

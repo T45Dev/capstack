@@ -86,7 +86,7 @@ const cnCols = computed<EditableCol[]>(() => {
     { key: 'conversionDate',       label: 'Conv. date',     width: 130, sortable: true, align: 'left',  type: 'date',   editable: true },
     { key: 'principal',            label: 'Principal',      width: 120, sortable: true, align: 'right', type: 'usd',    editable: true, step: '1000' },
     { key: 'interestRate',         label: 'Interest rate',  width: 90,  sortable: true, align: 'right', type: 'pct',    editable: true, step: '0.001' },
-    { key: 'interestAccrued',      label: 'Interest amt.',  width: 110, sortable: true, align: 'right', type: 'usd',    editable: true, step: '100' },
+    { key: 'interestAccrued',      label: 'Interest amt.',  width: 110, sortable: true, align: 'right' },
     { key: 'totalInvestment',      label: 'Total inv.',     width: 120, sortable: true, align: 'right' },
     { key: 'convPrice',            label: 'Share price',    width: 110, sortable: true, align: 'right', type: 'usd',    editable: true, step: '0.01' },
     { key: 'conversionDiscount',   label: 'Discount',       width: 80,  sortable: true, align: 'right', type: 'pct',    editable: true, step: '0.01' },
