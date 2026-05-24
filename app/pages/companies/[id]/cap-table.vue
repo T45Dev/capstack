@@ -41,16 +41,32 @@ const { data: roundSummary, refresh: refreshRoundSummary } = await useFetch<{ ro
 const roundCols = computed<RoundColumn[]>(() => roundSummary.value?.rounds || [])
 
 // Display label for a round. The user names it; if blank, fall back to the
-// code. Draft override wins when there's an in-flight edit. The synthesized
-// open round reads its name from assumptions.round_name (which is what
-// `r.name` carries on that row) but supports the same draft override so the
-// header reflects an in-progress rename.
+// code. Draft override wins when there's an in-flight edit.
 function friendlyRoundLabel(r: RoundColumn): string {
   const d = drafts.value[r.round_id]
   const draftName = d && 'name' in d ? d.name : undefined
   const name = (draftName ?? r.name ?? '')
-  if (r.round_id === 'open') return name.trim() || 'Open round'
   return name.trim() || r.code
+}
+
+// Effective kind for a round (draft override wins).
+function effectiveKind(r: RoundColumn): 'formation' | 'closed' | 'open' {
+  const d = drafts.value[r.round_id]
+  if (d && 'kind' in d && d.kind) return d.kind
+  return r.kind
+}
+
+// Toggle a round between open / closed. Single-open invariant: setting one
+// open drafts every other currently-open round (server-side or draft-side)
+// back to 'closed' in the same buffer so Save commits the swap atomically.
+function setKind(roundId: string, newKind: 'closed' | 'open'): void {
+  if (newKind === 'open') {
+    for (const r of roundCols.value) {
+      if (r.round_id === roundId) continue
+      if (effectiveKind(r) === 'open') setDraft(r.round_id, 'kind', 'closed')
+    }
+  }
+  setDraft(roundId, 'kind', newKind)
 }
 
 // ---- Edit/save state ----
@@ -61,6 +77,7 @@ function friendlyRoundLabel(r: RoundColumn): string {
 // immediately so the row set itself stays in sync.
 interface RoundDraft {
   name?: string | null
+  kind?: 'formation' | 'closed' | 'open'
   close_date?: string | null
   pre_money?: number | null
   new_money?: number
@@ -98,24 +115,7 @@ async function saveDrafts() {
       // Normalize close_date before saving (Chrome 2-digit-year gotcha).
       const payload: any = { ...body }
       if ('close_date' in payload) payload.close_date = normalizeDate(payload.close_date || '') || null
-      if (roundId === 'open') {
-        // Synthesized open column writes to assumptions; only some fields
-        // are meaningful there. share_price / share counts on open are
-        // derived in the endpoint and not directly settable. The name
-        // routes to assumptions.round_name — if the new name happens to
-        // match an existing round's code or name on the next refresh, the
-        // endpoint will resolve THAT row as the open one instead of
-        // synthesizing this column.
-        const a: any = {}
-        if ('pre_money' in payload) a.pre_money = payload.pre_money ?? 0
-        if ('new_money' in payload) a.new_money = payload.new_money ?? 0
-        if ('name' in payload) a.round_name = (payload.name ?? '').trim() || 'Open round'
-        if (Object.keys(a).length) {
-          await $fetch(`/api/companies/${id.value}/assumptions`, { method: 'POST', body: a })
-        }
-      } else {
-        await $fetch(`/api/rounds/${roundId}`, { method: 'PATCH', body: payload })
-      }
+      await $fetch(`/api/rounds/${roundId}`, { method: 'PATCH', body: payload })
     }
     drafts.value = {}
     await refreshRoundSummary()
@@ -134,17 +134,6 @@ function cancelDrafts() {
 // can tell at a glance which numbers they own vs which are derived from the
 // ledger import. Focus state clears the tint and switches to the accent ring.
 const inputCellClass = 'w-full bg-amber-50 border border-amber-300 hover:border-amber-500 focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-accent-500 rounded px-1 py-0.5 text-right text-[12px] text-ink-900 num'
-
-// All per-cell editors now write into the drafts buffer instead of
-// PATCHing immediately. The user clicks "Save" to commit the batch and
-// trigger the close-date re-sort. Open round's pre_money/new_money still
-// route to assumptions on save.
-function parseNumeric(value: string, allowNull = false): number | null | undefined {
-  if (value === '') return allowNull ? null : 0
-  const n = Number(value)
-  if (!isFinite(n) || n < 0) return undefined
-  return n
-}
 
 // Add a new round. The server picks a unique code (R1, R2, …); the user can
 // rename inline. Close date defaults to today so the row sorts predictably.
@@ -165,7 +154,7 @@ async function addRound() {
 // transient render between the DELETE returning and the refresh fetching
 // can't reach into a stale draft for a no-longer-existing round.
 async function deleteRound(roundId: string, label: string) {
-  if (!roundId || roundId === 'open') return
+  if (!roundId) return
   if (!confirm(`Delete round "${label}"? Any CNs attributed here will become unassigned.`)) return
   // Optimistically clear the draft first.
   if (drafts.value[roundId]) {
@@ -499,13 +488,13 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
     </UiEmpty>
 
     <div class="space-y-6">
-      <!-- Per-round Summary Cap Table (spec §5.1) — chronological columns
-           recreated from each share-class ledger plus the Open Round from
-           Assumptions. Rows are the line items the user expects to see at a
-           glance: close date, money / share-price math at the top, then the
-           per-round share contributions, with cumulative FDS + financing at
-           the bottom. The Open Round column is highlighted; closed rounds are
-           plain. -->
+      <!-- Per-round Summary Cap Table — one column per user-entered round.
+           Rows are the line items the user expects to see at a glance: close
+           date, money / share-price math at the top, then the per-round
+           share contributions, with cumulative FDS + financing at the
+           bottom. The Open round column is highlighted; closed rounds are
+           plain. Single-open invariant: only one round can be flagged Open
+           at a time. -->
       <UiCard
         title="Summary cap table"
         subtitle="One column per round — type the values; Save commits and re-sorts by close date."
@@ -539,11 +528,10 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                   v-for="r in roundCols"
                   :key="r.round_id"
                   class="px-3 py-2 border-b border-ink-300 text-right text-[11px] font-semibold group"
-                  :class="r.kind === 'open' ? 'bg-accent-50 text-accent-700' : 'text-ink-700'"
+                  :class="effectiveKind(r) === 'open' ? 'bg-accent-50 text-accent-700' : 'text-ink-700'"
                 >
                   <div class="flex items-center justify-end gap-1.5">
                     <button
-                      v-if="r.round_id !== 'open'"
                       type="button"
                       class="shrink-0 text-ink-400 hover:text-red-600 transition-colors p-0.5 rounded hover:bg-red-50"
                       @click="deleteRound(r.round_id, friendlyRoundLabel(r))"
@@ -554,46 +542,51 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     </button>
                     <input
                       type="text"
-                      :value="effective(r, 'name') ?? (r.round_id === 'open' ? (r.name || '') : r.code)"
-                      :placeholder="r.round_id === 'open' ? 'Open round' : ''"
+                      :value="effective(r, 'name') ?? r.code"
                       class="flex-1 min-w-0 bg-transparent text-right font-semibold text-[11px] border border-transparent hover:border-ink-300 focus:border-accent-500 focus:bg-white focus:outline-none rounded px-1 py-0.5"
-                      :class="r.kind === 'open' ? 'text-accent-700' : ''"
+                      :class="effectiveKind(r) === 'open' ? 'text-accent-700' : ''"
                       @input="setDraft(r.round_id, 'name', ($event.target as HTMLInputElement).value)"
                     />
                   </div>
-                  <div v-if="r.kind === 'open'" class="text-[9px] font-medium uppercase tracking-wider text-accent-600">open</div>
+                  <div class="mt-1 flex items-center justify-end gap-1">
+                    <button
+                      type="button"
+                      class="text-[9px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors"
+                      :class="effectiveKind(r) === 'closed'
+                        ? 'bg-ink-200 text-ink-800 border-ink-300'
+                        : 'bg-white text-ink-500 border-ink-200 hover:border-ink-300'"
+                      @click="setKind(r.round_id, 'closed')"
+                    >Closed</button>
+                    <button
+                      type="button"
+                      class="text-[9px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors"
+                      :class="effectiveKind(r) === 'open'
+                        ? 'bg-accent-600 text-white border-accent-600'
+                        : 'bg-white text-ink-500 border-ink-200 hover:border-ink-300'"
+                      @click="setKind(r.round_id, 'open')"
+                    >Open</button>
+                  </div>
                 </th>
               </tr>
             </thead>
             <tbody class="num">
-              <!-- Round-level money math (top group). Closing date is an
-                   inline date input on every persisted round; the synthesized
-                   open column (round_id === 'open') has no DB row to PATCH so
-                   it falls through to a dash. -->
+              <!-- Round-level money math (top group). Every cell is a real
+                   user-input value on the round row. -->
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">Closing date of funding</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[r.kind === 'open' ? 'bg-accent-50/40' : '', false ? 'bg-ink-50/60' : '']" >
-                  <template v-if="r.kind === 'open'">
-                    <span class="text-ink-400">—</span>
-                  </template>
-                  <template v-else>
-                    <input
-                      type="date"
-                      :value="(effective(r, 'close_date') ?? r.close_date) || ''"
-                      :class="inputCellClass + ' cursor-pointer'"
-                      @change="setDraft(r.round_id, 'close_date', ($event.target as HTMLInputElement).value || null)"
-                    />
-                  </template>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
+                  <input
+                    type="date"
+                    :value="(effective(r, 'close_date') ?? r.close_date) || ''"
+                    :class="inputCellClass + ' cursor-pointer'"
+                    @change="setDraft(r.round_id, 'close_date', ($event.target as HTMLInputElement).value || null)"
+                  />
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">Pre-money valuation ($)</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[r.kind === 'open' ? 'bg-accent-50/40' : '', false ? 'bg-ink-50/60' : '']" >
-                  <template v-if="false">
-                    <span class="text-ink-400 italic text-[11px]">inherited</span>
-                  </template>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
                   <NumberInput
-                    v-else
                     variant="bare"
                     prefix="$"
                     :model-value="effective(r, 'pre_money') ?? r.pre_money"
@@ -606,7 +599,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">New money ($)</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[r.kind === 'open' ? 'bg-accent-50/40' : '', false ? 'bg-ink-50/60' : '']" >
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
                   <NumberInput
                     variant="bare"
                     prefix="$"
@@ -620,24 +613,20 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">Notes financing ($)</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[r.kind === 'open' ? 'bg-accent-50/40' : '', false ? 'bg-ink-50/60' : '']" >
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
                   {{ r.notes_financing ? fmtUSD(r.notes_financing) : '—' }}
                 </td>
               </tr>
               <tr class="font-medium">
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-800 sticky left-0 z-10 bg-white">Post-money valuation ($)</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-900" :class="[r.kind === 'open' ? 'bg-accent-50/40 text-accent-700' : '', false ? 'bg-ink-50/60' : '']" >
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-900" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40 text-accent-700' : ''">
                   {{ r.post_money ? fmtUSD(r.post_money) : '—' }}
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">Share price ($)</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
-                  <template v-if="r.round_id === 'open'">
-                    {{ r.share_price ? fmtPricePerShare(r.share_price) : '—' }}
-                  </template>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
                   <NumberInput
-                    v-else
                     variant="bare"
                     prefix="$"
                     :digits="5"
@@ -650,7 +639,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">Cumulated financing</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[r.kind === 'open' ? 'bg-accent-50/40' : '', false ? 'bg-ink-50/60' : '']" >
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
                   {{ fmtUSD(r.cumulated_financing) }}
                 </td>
               </tr>
@@ -661,18 +650,14 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               <!-- Per-round share contributions -->
               <tr class="font-medium">
                 <td class="px-3 py-1.5 border-b border-ink-300 border-t-2 text-ink-900 sticky left-0 z-10 bg-white">Total shares issued (#) — fully diluted</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-300 border-t-2 text-right text-ink-900" :class="[r.kind === 'open' ? 'bg-accent-50/40 text-accent-700' : '', false ? 'bg-ink-50/60' : '']" >
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-300 border-t-2 text-right text-ink-900" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40 text-accent-700' : ''">
                   {{ r.total_shares_fds ? fmtShares(r.total_shares_fds) : '—' }}
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6 sticky left-0 z-10 bg-white">Common</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
-                  <template v-if="r.round_id === 'open'">
-                    {{ r.common ? fmtShares(r.common) : '—' }}
-                  </template>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
                   <NumberInput
-                    v-else
                     variant="bare"
                     :model-value="effective(r, 'common') ?? (r.common || null)"
                     placeholder="—"
@@ -683,12 +668,8 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6 sticky left-0 z-10 bg-white">Preferred issued</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">
-                  <template v-if="r.round_id === 'open'">
-                    {{ r.preferred_issued ? fmtShares(r.preferred_issued) : '—' }}
-                  </template>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
                   <NumberInput
-                    v-else
                     variant="bare"
                     :model-value="effective(r, 'preferred_issued') ?? (r.preferred_issued || null)"
                     placeholder="—"
@@ -699,18 +680,14 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6 sticky left-0 z-10 bg-white">Notes converted</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[r.kind === 'open' ? 'bg-accent-50/40' : '', false ? 'bg-ink-50/60' : '']" >
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
                   {{ r.notes_converted ? fmtShares(r.notes_converted) : '—' }}
                 </td>
               </tr>
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6 sticky left-0 z-10 bg-white">Option pool issued</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="[r.kind === 'open' ? 'bg-accent-50/40' : '', false ? 'bg-ink-50/60' : '']" >
-                  <template v-if="r.round_id === 'open'">
-                    <span class="text-ink-400">—</span>
-                  </template>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
                   <NumberInput
-                    v-else
                     variant="bare"
                     :model-value="effective(r, 'option_pool_issued') ?? (r.option_pool_issued || null)"
                     placeholder="—"
@@ -724,7 +701,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
           </table>
         </div>
         <p class="px-4 py-2 text-[11px] text-ink-500 bg-ink-50/60 border-t border-ink-200">
-          Closed-round values derived from per-class ledgers + Convertible Ledger; Open round mirrors Assumptions. Re-import to refresh closed-round data.
+          Values are user-entered. Toggle a column to Open to mark it as the round currently being modeled — only one round can be Open at a time.
         </p>
       </UiCard>
 
