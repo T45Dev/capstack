@@ -24,6 +24,25 @@ export default defineEventHandler(async (event) => {
   const replaceFlag = parts.find(p => p.name === 'replace')
   const replace = replaceFlag?.data ? String(replaceFlag.data).trim() === 'true' : true
 
+  // Per-category opt-out flags so the operator can re-import without
+  // overwriting categories they've curated manually. Default = import
+  // everything (preserves existing behavior). Rounds + assumptions +
+  // pool_events + round_investors are NEVER touched by re-import
+  // regardless of these flags.
+  function flagFor(name: string, dflt = true): boolean {
+    const p = parts!.find(x => x.name === name)
+    if (!p?.data) return dflt
+    return String(p.data).trim() !== 'false'
+  }
+  const include = {
+    shareClasses: flagFor('include_share_classes'),
+    stakeholders: flagFor('include_stakeholders'),
+    holdings:     flagFor('include_holdings'),
+    grants:       flagFor('include_grants'),
+    convertibles: flagFor('include_convertibles'),
+    optionPools:  flagFor('include_option_pools'),
+  }
+
   let parsed
   try {
     parsed = await parseCartaXlsx(Buffer.from(file.data))
@@ -37,18 +56,31 @@ export default defineEventHandler(async (event) => {
       // with default ON DELETE RESTRICT, so all referencing rows must go
       // first. Same logic for holdings (which references both stakeholders
       // and share_classes) and grants. Then we can remove the parents.
-      db().prepare('DELETE FROM convertibles WHERE company_id = ?').run(id)
-      db().prepare('DELETE FROM grants WHERE company_id = ?').run(id)
-      db().prepare('DELETE FROM holdings WHERE company_id = ?').run(id)
-      db().prepare('DELETE FROM share_classes WHERE company_id = ?').run(id)
-      db().prepare('DELETE FROM stakeholders WHERE company_id = ?').run(id)
-      db().prepare('DELETE FROM option_pools WHERE company_id = ?').run(id)
-      // Rounds are user-managed via the Summary card; the importer leaves
-      // them alone. Stakeholders / holdings / grants / CNs / pool size are
-      // sourced from Carta.
+      //
+      // Per-category opt-out: skipping a category means we keep the
+      // existing rows AND don't insert new ones for it (the importer's
+      // category section short-circuits below).
+      if (include.convertibles) db().prepare('DELETE FROM convertibles WHERE company_id = ?').run(id)
+      if (include.grants)       db().prepare('DELETE FROM grants WHERE company_id = ?').run(id)
+      if (include.holdings)     db().prepare('DELETE FROM holdings WHERE company_id = ?').run(id)
+      if (include.shareClasses) db().prepare('DELETE FROM share_classes WHERE company_id = ?').run(id)
+      // Stakeholders: only safe to delete when EVERYTHING that references
+      // them is also being replaced — otherwise the FK constraints fail.
+      // The operator can leave stakeholders alone individually only if
+      // they also keep grants + holdings + convertibles + round_investors.
+      const safeToDeleteStakeholders = include.stakeholders && include.grants && include.holdings && include.convertibles
+      if (safeToDeleteStakeholders) db().prepare('DELETE FROM stakeholders WHERE company_id = ?').run(id)
+      else if (include.stakeholders) {
+        parsed.warnings.push('Stakeholders kept (referenced by holdings/grants/CNs you opted out of). They will be merged, not replaced.')
+      }
+      if (include.optionPools) db().prepare('DELETE FROM option_pools WHERE company_id = ?').run(id)
+      // Rounds, assumptions, pool_events, round_investors are NEVER
+      // touched by re-import — they're user-managed via the Financings
+      // page and Option Pool Impact page.
     }
 
     // Share classes
+    if (include.shareClasses) {
     const insSC = db().prepare(`
       INSERT INTO share_classes (id, company_id, code, name, kind, seniority, authorized, issue_price)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -74,8 +106,11 @@ export default defineEventHandler(async (event) => {
         parsed.warnings.push(`Couldn't import share class "${sc.code}": ${err?.message || err}`)
       }
     }
+    }  // end if include.shareClasses
 
-    // Stakeholders
+    // Stakeholders — always populate the lookup map (downstream sections
+    // need to link grants/holdings/CNs to stakeholders by name), but only
+    // INSERT new rows when the operator opted to include them.
     const insSH = db().prepare(`
       INSERT INTO stakeholders (id, company_id, name, external_id) VALUES (?, ?, ?, ?)
     `)
@@ -83,6 +118,7 @@ export default defineEventHandler(async (event) => {
     const existingSH = db().prepare('SELECT id, name FROM stakeholders WHERE company_id = ?').all(id) as any[]
     for (const r of existingSH) nameToId.set(r.name, r.id)
 
+    if (include.stakeholders) {
     for (const sh of parsed.stakeholders) {
       if (nameToId.has(sh.name)) continue
       const shId = newId('sh')
@@ -93,8 +129,10 @@ export default defineEventHandler(async (event) => {
         parsed.warnings.push(`Couldn't import stakeholder "${sh.name}": ${err?.message || err}`)
       }
     }
+    }  // end if include.stakeholders
 
     // Holdings
+    if (include.holdings) {
     const insH = db().prepare(`
       INSERT INTO holdings (company_id, stakeholder_id, share_class_id, shares) VALUES (?, ?, ?, ?)
       ON CONFLICT(stakeholder_id, share_class_id) DO UPDATE SET shares = excluded.shares
@@ -109,12 +147,13 @@ export default defineEventHandler(async (event) => {
         parsed.warnings.push(`Couldn't import holding for "${h.stakeholderName}" / ${h.shareClassCode}: ${err?.message || err}`)
       }
     }
+    }  // end if include.holdings
 
     // Grants — when the Carta Stock Option Plan sheet was found, every
     // parsed grant comes through with strike + issue date + vesting +
     // (issued / exercised / forfeited) counts. Otherwise we have just the
     // qty-rolled-up-per-stakeholder stub from the Detailed Cap Table.
-    if (parsed.grants.length) {
+    if (include.grants && parsed.grants.length) {
       const insG = db().prepare(`
         INSERT INTO grants (
           id, company_id, stakeholder_id, recipient_name, recipient_type, round,
@@ -151,7 +190,7 @@ export default defineEventHandler(async (event) => {
     }
 
     // Convertibles
-    if (parsed.convertibles.length) {
+    if (include.convertibles && parsed.convertibles.length) {
       // Notes with a conversion date are attributed to that round; notes
       // without one default to Deferred (the user can flip either via the
       // Convertible notes ledger or by setting a conversion date inline).
@@ -207,7 +246,7 @@ export default defineEventHandler(async (event) => {
       const derived = grantTotal + (parsed.poolAvailable || 0)
       if (derived > 0) poolSize = derived
     }
-    if (poolSize > 0) {
+    if (include.optionPools && poolSize > 0) {
       const poolId = newId('pl')
       try {
         db().prepare(`
@@ -265,12 +304,16 @@ export default defineEventHandler(async (event) => {
   return {
     ok: true,
     counts: {
-      stakeholders: parsed.stakeholders.length,
-      shareClasses: parsed.shareClasses.length,
-      holdings: parsed.holdings.length,
-      grants: parsed.grants.length,
-      convertibles: parsed.convertibles.length,
+      // Reported as 0 for categories the operator opted out of so the
+      // import-result UI can show "Skipped" instead of inflating numbers
+      // from the parsed file.
+      stakeholders: include.stakeholders ? parsed.stakeholders.length : 0,
+      shareClasses: include.shareClasses ? parsed.shareClasses.length : 0,
+      holdings:     include.holdings     ? parsed.holdings.length     : 0,
+      grants:       include.grants       ? parsed.grants.length       : 0,
+      convertibles: include.convertibles ? parsed.convertibles.length : 0,
     },
+    skipped: Object.entries(include).filter(([, v]) => !v).map(([k]) => k),
     warnings: parsed.warnings,
   }
 })
