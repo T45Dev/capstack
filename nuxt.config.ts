@@ -28,5 +28,6 @@ export default defineNuxtConfig({
     { path: '~/components/captable', prefix: 'Cap' },
     { path: '~/components/grants', prefix: 'Grant' },
     { path: '~/components/scenarios', prefix: 'Scenario' },
+    { path: '~/components', pattern: '*.vue', prefix: '' },
   ],
 })
