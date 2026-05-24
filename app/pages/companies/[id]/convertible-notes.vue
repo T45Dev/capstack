@@ -6,6 +6,7 @@
 // column). The Open round is whichever Cap Table row has kind='open'.
 // Click any row to edit inline; use the add-row affordance at the
 // bottom for bridge notes.
+import { CheckSquare, Square } from 'lucide-vue-next'
 import { fmtUSD, fmtPricePerShare, fmtPct } from '~/utils/format'
 import type { EditableCol } from '~/components/ui/UiEditableTable.vue'
 
@@ -27,6 +28,7 @@ interface CnRow {
   effectiveConvPrice: number
   shares: number
   basisApplied: string
+  includeInSummary: boolean
 }
 
 const { data: roundSummary } = await useFetch<{ rounds: Array<{ code: string; name: string | null; kind: 'formation' | 'closed' | 'open' }> }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
@@ -82,6 +84,7 @@ const destinationOptions = computed(() => {
 const cnCols = computed<EditableCol[]>(() => {
   const cols: EditableCol[] = [
     { key: 'stakeholderName',      label: 'Holder',         width: 180, sortable: true, align: 'left',  type: 'text',   editable: true, placeholder: 'VCT Investments' },
+    { key: 'includeInSummary',     label: 'In summary',     width: 90,  sortable: true, align: 'center' },
     { key: 'destinationClassCode', label: 'Destination',    width: 130, sortable: true, align: 'left',  type: 'select', editable: true, options: destinationOptions.value },
     { key: 'conversionDate',       label: 'Conv. date',     width: 130, sortable: true, align: 'left',  type: 'date',   editable: true },
     { key: 'principal',            label: 'Principal',      width: 120, sortable: true, align: 'right', type: 'usd',    editable: true, step: '1000' },
@@ -185,6 +188,17 @@ async function onCreate(draft: Partial<CnRow>) {
   await refreshAll()
 }
 
+// Toggle whether this CN flows into the cap table's Notes financing /
+// Notes converted aggregates. Saves immediately (no draft state) so the
+// Summary card reflects the change on its next refresh.
+async function toggleInclude(row: CnRow) {
+  await $fetch(`/api/convertibles/${row.id}`, {
+    method: 'PATCH',
+    body: { include_in_summary: !row.includeInSummary },
+  })
+  await refreshAll()
+}
+
 async function onDelete(row: CnRow) {
   if (!confirm(`Delete the ${row.stakeholderName} convertible (${fmtUSD(row.principal)})?`)) return
   await $fetch(`/api/convertibles/${row.id}`, { method: 'DELETE' })
@@ -226,6 +240,18 @@ async function onDelete(row: CnRow) {
             class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border border-amber-300 bg-amber-100 text-amber-800 align-middle"
             title="Not yet attributed to a round (or attributed round has no share price)."
           >unassigned</span>
+        </template>
+        <template #cell-includeInSummary="{ row }">
+          <button
+            type="button"
+            class="inline-flex items-center justify-center w-6 h-6 rounded hover:bg-ink-100 transition-colors"
+            :class="row.includeInSummary ? 'text-accent-600' : 'text-ink-400'"
+            :title="row.includeInSummary ? 'Excluded notes don\'t roll up into the cap table — click to include' : 'Click to include in the cap table'"
+            @click.stop="toggleInclude(row)"
+          >
+            <CheckSquare v-if="row.includeInSummary" :size="16" />
+            <Square v-else :size="16" />
+          </button>
         </template>
         <template #cell-destinationClassCode="{ value }">
           <template v-if="!value"><span class="text-ink-400">—</span></template>

@@ -82,7 +82,8 @@ export default defineEventHandler((event) => {
   const cnRows = db().prepare(`
     SELECT principal, interest_accrued, interest_rate, issue_date, conversion_date,
            destination_class_code, conversion_discount, valuation_cap, conversion_price
-    FROM convertibles WHERE company_id = ? AND status = 'outstanding'
+    FROM convertibles
+    WHERE company_id = ? AND status = 'outstanding' AND include_in_summary != 0
   `).all(id) as Array<{
     principal: number; interest_accrued: number; interest_rate: number;
     issue_date: string | null; conversion_date: string | null;

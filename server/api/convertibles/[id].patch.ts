@@ -10,15 +10,17 @@ export default defineEventHandler(async (event) => {
     'issue_date', 'maturity_date', 'conversion_date',
     'valuation_cap', 'conversion_discount', 'conversion_price',
     'destination_class_code',
-    'converts_at_round', 'status', 'external_id', 'stakeholder_id',
+    'converts_at_round', 'include_in_summary',
+    'status', 'external_id', 'stakeholder_id',
   ]
+  const boolFields = new Set(['converts_at_round', 'include_in_summary'])
   const updates: string[] = []
   const params: any[] = []
   for (const f of fields) {
     if (f in body) {
       updates.push(`${f} = ?`)
-      // converts_at_round is a boolean in the request but INTEGER in SQLite
-      params.push(f === 'converts_at_round' ? (body[f] ? 1 : 0) : body[f])
+      // Booleans in the request map to 0/1 INTEGER in SQLite.
+      params.push(boolFields.has(f) ? (body[f] ? 1 : 0) : body[f])
     }
   }
   if (!updates.length) return db().prepare('SELECT * FROM convertibles WHERE id = ?').get(id)
