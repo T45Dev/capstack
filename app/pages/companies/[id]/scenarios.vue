@@ -133,10 +133,11 @@ const { data: result } = await useFetch(() => selected.value ? `/api/scenarios/$
   default: () => null,
 })
 
-// Fixed payout columns per spec §5.7: stakeholder, post-round FDS, post-%,
-// and $ at each exit value. The exit columns get the subdued L/M/H label
-// alongside the dollar amount so the sequence is unambiguous.
-interface PoutCol { key: string; label: string; sublabel?: string; width: number; sortable: boolean; align: 'left' | 'right'; exitIdx?: number }
+// Fixed payout columns: stakeholder, post-round FDS, post-%, invested,
+// plus per-exit columns ($ + MOIC). The Invested + MOIC columns are the
+// metrics the spreadsheet centers its analysis on — proceeds tell you
+// what cash lands; MOIC tells you whether the round was worth doing.
+interface PoutCol { key: string; label: string; sublabel?: string; width: number; sortable: boolean; align: 'left' | 'right'; exitIdx?: number; kind?: 'proceeds' | 'moic' }
 
 const exitLabels = ['Low', 'Mid', 'High'] as const
 
@@ -144,16 +145,24 @@ const payoutCols = computed<PoutCol[]>(() => {
   const cols: PoutCol[] = [
     { key: 'name',       label: 'Stakeholder', width: 240, sortable: true, align: 'left' },
     { key: 'postShares', label: 'Post-FDS',    width: 130, sortable: true, align: 'right' },
-    { key: 'postPct',    label: 'Post-%',      width: 100, sortable: true, align: 'right' },
+    { key: 'postPct',    label: 'Post-%',      width: 90,  sortable: true, align: 'right' },
+    { key: 'invested',   label: 'Invested',    width: 120, sortable: true, align: 'right' },
   ]
   const exits = result.value?.exitValues || []
   exits.slice(0, 3).forEach((ev: number, i: number) => {
     cols.push({
       key: `ev_${i}`,
-      label: `$ at ${exitLabels[i]}`,
+      label: `$ ${exitLabels[i]}`,
       sublabel: fmtUSD(ev),
-      exitIdx: i,
-      width: 150, sortable: true, align: 'right',
+      exitIdx: i, kind: 'proceeds',
+      width: 130, sortable: true, align: 'right',
+    })
+    cols.push({
+      key: `moic_${i}`,
+      label: `MOIC`,
+      sublabel: exitLabels[i],
+      exitIdx: i, kind: 'moic',
+      width: 70, sortable: true, align: 'right',
     })
   })
   return cols
@@ -177,10 +186,20 @@ const sortedPayouts = computed(() => {
   const rows = result.value?.dilution || []
   const k = payoutTable.sort.key
   const sign = payoutTable.sort.dir === 'asc' ? 1 : -1
-  const m = /^ev_(\d+)$/.exec(k)
-  if (m) {
-    const idx = Number(m[1])
+  const evM = /^ev_(\d+)$/.exec(k)
+  if (evM) {
+    const idx = Number(evM[1])
     return [...rows].sort((a: any, b: any) => ((a.exits?.[idx] || 0) - (b.exits?.[idx] || 0)) * sign)
+  }
+  const moicM = /^moic_(\d+)$/.exec(k)
+  if (moicM) {
+    const idx = Number(moicM[1])
+    return [...rows].sort((a: any, b: any) => {
+      // null MOICs sort to the bottom (no invested capital → no return rate)
+      const av = a.moic?.[idx] ?? -Infinity
+      const bv = b.moic?.[idx] ?? -Infinity
+      return (av - bv) * sign
+    })
   }
   return [...rows].sort((a: any, b: any) => {
     const av = a[k] ?? 0
@@ -319,7 +338,14 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
                       </td>
                       <td v-else-if="c.key === 'postShares'" class="px-2.5 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200">{{ fmtShares(r.postShares) }}</td>
                       <td v-else-if="c.key === 'postPct'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ result.round.postRoundFDS > 0 ? fmtPct(r.postShares / result.round.postRoundFDS, 2) : '—' }}</td>
-                      <td v-else-if="c.exitIdx != null" class="px-2.5 py-1.5 text-right border-b border-ink-200 text-ink-800">{{ fmtUSD(r.exits?.[c.exitIdx] || 0) }}</td>
+                      <td v-else-if="c.key === 'invested'" class="px-2.5 py-1.5 text-right border-b border-ink-200" :class="r.invested ? 'text-ink-700' : 'text-ink-400'">
+                        {{ r.invested ? fmtUSD(r.invested) : '—' }}
+                      </td>
+                      <td v-else-if="c.kind === 'proceeds' && c.exitIdx != null" class="px-2.5 py-1.5 text-right border-b border-ink-200 text-ink-800">{{ fmtUSD(r.exits?.[c.exitIdx] || 0) }}</td>
+                      <td v-else-if="c.kind === 'moic' && c.exitIdx != null" class="px-2.5 py-1.5 text-right border-b border-ink-200" :class="(r.moic?.[c.exitIdx] ?? null) == null ? 'text-ink-400' : (r.moic?.[c.exitIdx] ?? 0) >= 1 ? 'text-emerald-700 font-medium' : 'text-red-600 font-medium'">
+                        <template v-if="(r.moic?.[c.exitIdx] ?? null) == null">—</template>
+                        <template v-else>{{ (r.moic?.[c.exitIdx] ?? 0).toFixed(2) }}x</template>
+                      </td>
                     </template>
                   </tr>
                 </tbody>
