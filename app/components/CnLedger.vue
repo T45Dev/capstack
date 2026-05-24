@@ -49,8 +49,13 @@ async function refreshAll() {
 
 const cnUnits = useTableUnits('capstack:cn-detail:units')
 
+// Round label for the CN destination dropdown / badge. Show the friendly
+// name when there is one; only fall back to the bare code (R1, R2, …)
+// when the round hasn't been named yet. The "R# – name" double-label was
+// noisy in the dropdown — the name alone tells the operator everything.
 function roundLabel(r: { code: string; name: string | null; kind: string }): string {
-  const base = r.name && r.name.trim() && r.name.trim() !== r.code ? `${r.code} – ${r.name.trim()}` : r.code
+  const name = r.name?.trim()
+  const base = name || r.code
   return r.kind === 'open' ? `${base} • Open` : base
 }
 

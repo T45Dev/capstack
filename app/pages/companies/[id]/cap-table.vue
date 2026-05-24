@@ -536,12 +536,9 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
 
 <template>
   <div v-if="data">
-    <div class="flex items-end justify-between mb-4 gap-3 flex-wrap">
+    <div class="flex items-end justify-between mb-2 gap-3 flex-wrap">
       <div>
         <h1 class="text-xl font-semibold tracking-tight text-ink-900">Financings</h1>
-        <p class="text-sm text-ink-600 mt-1">
-          Funding rounds (top) and convertible notes (below). Round values are user-entered; CNs roll up into the round they're attributed to.
-        </p>
       </div>
       <div class="flex items-center gap-2 flex-wrap">
         <NuxtLink :to="`/companies/${id}/import`">
@@ -580,18 +577,21 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
         <div v-if="!roundCols.length" class="px-4 py-8 text-center text-sm text-ink-500">
           No rounds yet. Click <span class="font-medium text-ink-700">Add round</span> to start typing your funding history.
         </div>
-        <!-- overflow-x: auto only — horizontal scrollbar appears when the
-             round columns are wider than the card, otherwise no scrollbars
-             at all. No max-height, no overflow-y clip; the wrapper sizes
-             to content so nothing is hidden. (Sticky thead is sacrificed
-             here — the previous overflow-y: clip trick clipped the sticky
-             header when it tried to render above the wrapper edge in
-             Chromium.) -->
-        <div v-else class="overflow-x-auto">
-          <table class="text-[12px] border-separate whitespace-nowrap" style="border-spacing: 0; min-width: 100%;">
+        <!-- Wrapper IS the scroll context. overflow: auto + a max-height
+             bounded by the viewport means: the wrapper sizes to content when
+             the table is short (no blank space), but caps at viewport when
+             the table is tall (scroll inside, sticky thead pins to the top
+             of the table area instead of floating over rows). The 14rem
+             deduction leaves room for the page nav + h1 + card header above. -->
+        <div v-else class="overflow-auto max-h-[calc(100vh-14rem)]">
+          <!-- Table sized to its content (no min-width: 100%) so the round
+               columns stay at a tight, dollar-figure-friendly width instead
+               of stretching to fill wide monitors. Wrapper handles overflow
+               when the natural width exceeds viewport. -->
+          <table class="text-[12px] border-separate whitespace-nowrap" style="border-spacing: 0;">
             <colgroup>
-              <col style="width: 220px" />
-              <col v-for="r in roundCols" :key="r.round_id" style="min-width: 140px" />
+              <col style="width: 200px" />
+              <col v-for="r in roundCols" :key="r.round_id" style="width: 130px" />
             </colgroup>
             <thead class="text-ink-700 bg-ink-100">
               <tr>
@@ -601,11 +601,11 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                      sticky-top here actually sticks against the viewport.
                      The corner cell is sticky both ways so it owns the
                      row/column intersection. -->
-                <th class="px-3 py-2 border-b border-ink-300 text-left text-[11px] font-semibold uppercase tracking-wide sticky left-0 top-14 z-30 bg-ink-100">Capitalization table</th>
+                <th class="px-3 py-2 border-b border-ink-300 text-left text-[11px] font-semibold uppercase tracking-wide sticky left-0 top-0 z-30 bg-ink-100">Capitalization table</th>
                 <th
                   v-for="r in roundCols"
                   :key="r.round_id"
-                  class="px-3 py-2 border-b border-ink-300 text-right text-[11px] font-semibold group sticky top-14 z-20"
+                  class="px-3 py-2 border-b border-ink-300 text-right text-[11px] font-semibold group sticky top-0 z-20"
                   :class="effectiveKind(r) === 'open' ? 'bg-accent-50 text-accent-700' : 'text-ink-700 bg-ink-100'"
                 >
                   <div class="flex items-center justify-end gap-1.5">
