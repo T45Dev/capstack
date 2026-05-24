@@ -258,7 +258,7 @@ const holdUnits = useTableUnits('capstack:cap-table:holdings:units')
 // Convertible notes are NOT counted here — they're either already represented
 // in holdings via their destination share class (historical conversions) or
 // they live in the Convertible-notes ledger below + are modeled dynamically
-// on the Assumptions page. Showing them again here would double-count.
+// on the Financings table. Showing them again here would double-count.
 interface PivotRow {
   id: string
   stakeholderId: string
@@ -427,7 +427,7 @@ const summaryRows = computed<SummaryRow[]>(() => {
 // of the same metric share a `group` label that's used to render a two-row
 // header that visually distinguishes "CS / CS % / CS $" as one group.
 // Convertible notes don't appear here — see the Convertible notes card
-// below and the Assumptions page for CN math.
+// below for CN math.
 interface HoldCol {
   key: string
   label: string             // full e.g. "CS %" (still used for accessibility / sorted-by-key)

@@ -1,8 +1,8 @@
 import { db } from '~~/server/utils/db'
 
-// Partial update for a company. Currently used by the Assumptions page to
-// change the "Most Recently Closed Round" (companies.starting_round) — see
-// spec §5.2. Add more fields here as needed.
+// Partial update for a company. Used by the workspace breadcrumb to switch
+// the "Most Recently Closed Round" (companies.starting_round) — the pre-
+// baseline that drives compute math. Add more fields here as needed.
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
   if (!id) throw createError({ statusCode: 400, message: 'id required' })
