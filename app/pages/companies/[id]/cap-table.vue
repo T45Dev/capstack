@@ -40,6 +40,13 @@ interface RoundColumn {
   participation: 'none' | 'full' | 'capped'
   participation_cap: number | null
   pref_tier: number
+  notes_attributed: Array<{
+    id: string
+    stakeholderName: string
+    destinationCode: string | null
+    dollars: number
+    shares: number
+  }>
 }
 
 interface CnReconciliation {
@@ -88,6 +95,19 @@ function friendlyRoundLabel(r: RoundColumn): string {
 }
 
 // Effective kind for a round (draft override wins).
+// Hover tooltip for the Notes-converted cell — lists each CN attributed
+// to this round with its destination code + resulting shares so the
+// operator can audit which CNs are rolling in (e.g. find a misattributed
+// one that's inflating the total).
+function notesAttributedTooltip(r: RoundColumn): string {
+  if (!r.notes_attributed?.length) return ''
+  const header = `${r.notes_attributed.length} CN${r.notes_attributed.length === 1 ? '' : 's'} attributed:`
+  const lines = r.notes_attributed.map(n =>
+    `${n.stakeholderName} [${n.destinationCode || '—'}]: ${fmtUSD(n.dollars)} → ${fmtShares(n.shares)} sh`,
+  )
+  return [header, ...lines].join('\n')
+}
+
 function effectiveKind(r: RoundColumn): 'formation' | 'closed' | 'open' {
   const d = drafts.value[r.round_id]
   if (d && 'kind' in d && d.kind) return d.kind
@@ -792,7 +812,8 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
               <tr>
                 <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6 sticky left-0 z-10 bg-white">Notes converted</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
-                  {{ r.notes_converted ? fmtShares(r.notes_converted) : '—' }}
+                  <span v-if="r.notes_converted" class="cursor-help underline decoration-dotted decoration-ink-400" :title="notesAttributedTooltip(r)">{{ fmtShares(r.notes_converted) }}</span>
+                  <template v-else>—</template>
                 </td>
               </tr>
               <tr>

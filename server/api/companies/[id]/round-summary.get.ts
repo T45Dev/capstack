@@ -38,6 +38,17 @@ interface RoundColumn {
   participation: 'none' | 'full' | 'capped'
   participation_cap: number | null
   pref_tier: number               // higher = paid first
+  // Per-cell diagnostic: which CNs got rolled into this round's
+  // Notes-converted total, with their resulting shares + raw destination.
+  // Empty array when nothing's attributed. Powers the Notes-converted
+  // tooltip on the cap-table page so the operator can audit attribution.
+  notes_attributed: Array<{
+    id: string
+    stakeholderName: string
+    destinationCode: string | null
+    dollars: number
+    shares: number
+  }>
 }
 
 export default defineEventHandler((event) => {
@@ -133,10 +144,13 @@ export default defineEventHandler((event) => {
   const validRoundCodes = new Set(roundCodeByAttribKey.keys())
 
   interface CnAttrib {
+    id: string                  // for the per-cell tooltip diagnostic
+    stakeholderName: string
     total: number               // principal + accrued interest
     storedConvPrice: number     // Carta-imported or user-typed
     discount: number
     cap: number
+    destinationCode: string | null  // the raw destination_class_code that matched
   }
   const cnByCode = new Map<string, CnAttrib[]>()
 
@@ -180,10 +194,13 @@ export default defineEventHandler((event) => {
     const bucketKey = resolvedRoundCode.toUpperCase()
     const bucket = cnByCode.get(bucketKey) || []
     bucket.push({
+      id: c.id,
+      stakeholderName: c.stakeholder_name || '',
       total,
       storedConvPrice: c.conversion_price && c.conversion_price > 0 ? c.conversion_price : 0,
       discount: c.conversion_discount || 0,
       cap: c.valuation_cap || 0,
+      destinationCode: c.destination_class_code,
     })
     cnByCode.set(bucketKey, bucket)
     attributedCnDollars += total
@@ -221,6 +238,7 @@ export default defineEventHandler((event) => {
 
     let cnDollars = 0
     let cnShares = 0
+    const notesAttributed: RoundColumn['notes_attributed'] = []
     for (const a of attribs) {
       cnDollars += a.total
       // Share price basis: stored conv_price (Carta or user-typed) wins
@@ -236,7 +254,15 @@ export default defineEventHandler((event) => {
       } else if (a.cap > 0 && preFDS > 0) {
         eff = a.cap / preFDS
       }
-      if (eff > 0) cnShares += a.total / eff
+      const sharesForThisCn = eff > 0 ? a.total / eff : 0
+      if (sharesForThisCn > 0) cnShares += sharesForThisCn
+      notesAttributed.push({
+        id: a.id,
+        stakeholderName: a.stakeholderName,
+        destinationCode: a.destinationCode,
+        dollars: a.total,
+        shares: sharesForThisCn,
+      })
     }
 
     const preMoney = (r.pre_money != null && r.pre_money !== 0) ? r.pre_money : null
@@ -273,6 +299,7 @@ export default defineEventHandler((event) => {
       participation: (r.participation as any) || 'none',
       participation_cap: r.participation_cap != null ? Number(r.participation_cap) : null,
       pref_tier: Number(r.pref_tier ?? 0),
+      notes_attributed: notesAttributed,
     })
   }
 
