@@ -101,7 +101,10 @@ const totalExercised = computed(() => outstanding.value.reduce((a, g) => a + (g.
 const totalForfeited = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_forfeited || 0), 0))
 const totalIssued = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_issued || g.quantity), 0))
 const poolAuthorized = computed(() => data.value!.pools.reduce((a, p) => a + p.authorized, 0))
-const poolAvailable = computed(() => Math.max(0, poolAuthorized.value - totalOutstanding.value - totalProposed.value))
+// Per user spec the headline is: Available = Authorized + Forfeited − Exercised.
+// Allowed to go negative (over-allocated) — the equation visual colors the
+// number red when it does.
+const poolAvailable = computed(() => poolAuthorized.value + totalForfeited.value - totalExercised.value)
 
 // FDS denominator for the % toggle. Holdings + outstanding options + available pool.
 const fdsAnchor = computed(() => {
@@ -576,55 +579,55 @@ const fieldLabels: Record<string, string> = {
       </div>
     </div>
 
-    <!-- Pool math as a literal equation — the only way to make pool
-         accounting obvious without explaining: authorized = outstanding +
-         proposed + available, plus a lifetime row for exercised / forfeited
-         so the operator can see where shares have gone historically. -->
+    <!-- Pool math, Available-centric per user spec:
+           Available  =  Authorized + Forfeited − Exercised
+         Available is the big headline (green when positive, red when
+         negative — i.e. the pool's been over-spent). The three
+         operands are subdued. Outstanding + Proposed move to a
+         secondary line below since they're still relevant context for
+         the allocation tables down the page. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-6 p-4">
-      <div class="flex flex-wrap items-end gap-3 text-ink-900 num">
+      <div class="flex flex-wrap items-end gap-4 num">
         <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Pool authorized</span>
-          <span class="text-2xl font-semibold">{{ fmtShares(poolAuthorized) }}</span>
+          <span class="text-[11px] uppercase tracking-wider text-ink-500">Available</span>
+          <span
+            class="text-4xl font-semibold leading-none"
+            :class="poolAvailable >= 0 ? 'text-emerald-700' : 'text-red-700'"
+          >{{ fmtShares(poolAvailable) }}</span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">=</span>
         <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Outstanding</span>
-          <span class="text-2xl font-semibold">{{ fmtShares(totalOutstanding) }}</span>
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Authorized</span>
+          <span class="text-xl font-medium text-ink-700">{{ fmtShares(poolAuthorized) }}</span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">+</span>
         <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Proposed</span>
-          <span class="text-2xl font-semibold text-amber-700">{{ fmtShares(totalProposed) }}</span>
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Forfeited</span>
+          <span class="text-xl font-medium text-ink-700">{{ fmtShares(totalForfeited) }}</span>
         </div>
-        <span class="text-2xl text-ink-400 pb-1">+</span>
+        <span class="text-2xl text-ink-400 pb-1">−</span>
         <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Available</span>
-          <span class="text-2xl font-semibold text-emerald-700">{{ fmtShares(poolAvailable) }}</span>
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Exercised <span class="opacity-60 normal-case">(→ CS)</span></span>
+          <span class="text-xl font-medium text-ink-700">{{ fmtShares(totalExercised) }}</span>
         </div>
       </div>
-      <!-- Lifetime equation (always shown — exercises shrink the pool,
-           forfeits return shares to Available, so the operator needs to
-           see these numbers even when they're zero today). -->
+      <!-- Allocation context (kept visible because the tables below are
+           organized around these two buckets). -->
       <div class="mt-3 pt-3 border-t border-ink-200 flex flex-wrap items-end gap-3 text-ink-700 num text-sm">
-        <span class="text-[10px] uppercase tracking-wider text-ink-500">Lifetime</span>
-        <div class="flex items-end gap-1.5">
-          <span class="text-ink-500">Issued</span>
-          <span class="font-medium">{{ fmtShares(totalIssued) }}</span>
-        </div>
-        <span class="text-ink-400">=</span>
+        <span class="text-[10px] uppercase tracking-wider text-ink-500">Currently allocated</span>
         <div class="flex items-end gap-1.5">
           <span class="text-ink-500">Outstanding</span>
           <span class="font-medium">{{ fmtShares(totalOutstanding) }}</span>
         </div>
-        <span class="text-ink-400">+</span>
+        <span class="text-ink-400">·</span>
         <div class="flex items-end gap-1.5">
-          <span class="text-ink-500">Exercised</span>
-          <span class="font-medium" :class="totalExercised > 0 ? 'text-accent-700' : 'text-ink-400'">{{ fmtShares(totalExercised) }}</span>
+          <span class="text-ink-500">Proposed</span>
+          <span class="font-medium text-amber-700">{{ fmtShares(totalProposed) }}</span>
         </div>
-        <span class="text-ink-400">+</span>
+        <span class="text-ink-400">·</span>
         <div class="flex items-end gap-1.5">
-          <span class="text-ink-500">Forfeited</span>
-          <span class="font-medium" :class="totalForfeited > 0 ? 'text-red-700' : 'text-ink-400'">{{ fmtShares(totalForfeited) }}</span>
+          <span class="text-ink-500">Issued (lifetime)</span>
+          <span class="font-medium">{{ fmtShares(totalIssued) }}</span>
         </div>
       </div>
     </div>
