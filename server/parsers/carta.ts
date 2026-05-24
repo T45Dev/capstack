@@ -38,6 +38,7 @@ export interface ParsedGrant {
   quantityIssued?: number | null       // original grant size
   quantityExercised?: number | null
   quantityForfeited?: number | null
+  quantityExpired?: number | null      // vested options that lapsed (separate from Forfeited)
   acceleration?: string | null         // 'single' | 'double' | null
 }
 
@@ -624,7 +625,14 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
       const cQtyIssued = findHeader(/^quantity ?issued$/, /^shares? ?issued$/, /^granted$/)
       const cQtyOutstanding = findHeader(/^quantity ?outstanding$/, /^outstanding$/)
       const cQtyExercised = findHeader(/^quantity ?exercised$/, /^exercised$/)
+      // Forfeited and Expired are tracked separately in Carta:
+      //   Forfeited = unvested at termination (cancelled/forfeited are
+      //               commonly used synonyms in different Carta templates).
+      //   Expired   = vested but not exercised within the exercise window.
+      // Both return shares to the pool, but the operator audits them
+      // independently so we keep two columns.
       const cQtyCancelled = findHeader(/^quantity ?(cancelled|canceled|forfeited)$/, /^(cancelled|canceled|forfeited)$/)
+      const cQtyExpired = findHeader(/^quantity ?expired$/, /^expired$/, /lapsed/)
       const cStrike = findHeader(/^(strike|exercise) ?price( ?\(\$\))?$/, /^strike$/, /^exercise$/)
       const cIssueDate = findHeader(/^(issue|award|grant) ?date$/, /^date( ?issued| ?granted| ?awarded)?$/, /^date$/)
       const cVestStart = findHeader(/^vesting ?start( ?date)?$/, /^vest ?start$/)
@@ -662,6 +670,7 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
             quantityIssued: qtyIssued > 0 ? Math.round(qtyIssued) : null,
             quantityExercised: cQtyExercised > 0 ? Math.round(asNumber(row.getCell(cQtyExercised).value)) || null : null,
             quantityForfeited: cQtyCancelled > 0 ? Math.round(asNumber(row.getCell(cQtyCancelled).value)) || null : null,
+            quantityExpired: cQtyExpired > 0 ? Math.round(asNumber(row.getCell(cQtyExpired).value)) || null : null,
             acceleration,
           })
           parsed++

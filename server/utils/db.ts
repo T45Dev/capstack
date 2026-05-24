@@ -252,6 +252,10 @@ function migrate(d: Database.Database): void {
   ensureColumn('grants', 'quantity_issued', 'INTEGER')
   ensureColumn('grants', 'quantity_exercised', 'INTEGER')
   ensureColumn('grants', 'quantity_forfeited', 'INTEGER')
+  // Carta tracks Expired separately from Forfeited (vested-but-not-exercised
+  // vs. unvested-at-termination). Both return shares to the pool, but the
+  // operator wants to see them broken out for audit.
+  ensureColumn('grants', 'quantity_expired', 'INTEGER')
   ensureColumn('grants', 'award_type', 'TEXT')
   ensureColumn('grants', 'acceleration', 'TEXT')
   ensureColumn('rounds', 'option_pool_issued', 'REAL NOT NULL DEFAULT 0')

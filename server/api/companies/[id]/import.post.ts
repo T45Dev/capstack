@@ -158,9 +158,9 @@ export default defineEventHandler(async (event) => {
         INSERT INTO grants (
           id, company_id, stakeholder_id, recipient_name, recipient_type, round,
           quantity, strike, issue_date, vesting_start, vest_months, cliff_months,
-          quantity_issued, quantity_exercised, quantity_forfeited,
+          quantity_issued, quantity_exercised, quantity_forfeited, quantity_expired,
           award_type, acceleration, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outstanding')
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outstanding')
       `)
       for (const g of parsed.grants) {
         try {
@@ -180,6 +180,7 @@ export default defineEventHandler(async (event) => {
             g.quantityIssued ?? null,
             g.quantityExercised ?? null,
             g.quantityForfeited ?? null,
+            g.quantityExpired ?? null,
             g.awardType ?? null,
             g.acceleration ?? null,
           )
