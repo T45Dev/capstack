@@ -791,10 +791,11 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
         </p>
       </UiCard>
 
-      <!-- Investors-by-round matrix — captures the per-investor cash
-           contributions the Summary card aggregates as new_money. Edits
-           refresh the round summary so the totals stay reconciled. -->
-      <InvestorMatrix :company-id="id" @refreshed="refreshRoundSummary" />
+      <!-- Investors-by-round matrix hidden by default — backend lives in
+           round_investors + /api/companies/:id/investor-matrix when we
+           need it. Drop <InvestorMatrix :company-id="id" /> back in here
+           to surface it. MOIC on Exit Scenarios still works without it
+           (CN-holder invested capital comes from principal + interest). -->
 
       <!-- Convertible Notes ledger — extracted into a shared component so
            the dollars/shares always render right next to the rounds they
