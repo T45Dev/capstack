@@ -110,6 +110,74 @@ const cnCols = computed<EditableCol[]>(() => {
 
 const rows = computed<CnRow[]>(() => convertibles.value?.convertibles || [])
 
+// ---- Bulk-reassign tools ----
+// Common workflow: after a Carta re-import, dozens of CNs land with
+// share-class destination codes (SA2-1, PB1, etc.) that don't match the
+// user-typed round codes. Filter to the offending group + one-click
+// reassign them all to the right round, instead of clicking each row's
+// dropdown individually.
+type DestFilter = 'all' | 'unassigned' | 'stale' | string  // string = round code
+const destFilter = ref<DestFilter>('all')
+
+// Classify a CN's destination state: unassigned (no destination set),
+// stale (destination doesn't match any round on the cap table), or the
+// canonical round code it resolves to.
+function destStateOf(r: CnRow): 'unassigned' | 'stale' | string {
+  if (!r.destinationClassCode) return 'unassigned'
+  const cleaned = String(r.destinationClassCode).replace(/-\d+$/, '')
+  const matched = roundsByCode.value.get(cleaned) || roundsByCode.value.get(r.destinationClassCode)
+  if (!matched) return 'stale'
+  return matched.code
+}
+
+// Group counts for the filter chips — every distinct state (unassigned,
+// stale, each round code) gets a chip with its CN count.
+const destCounts = computed(() => {
+  const counts = new Map<string, number>()
+  for (const r of rows.value) {
+    const s = destStateOf(r)
+    counts.set(s, (counts.get(s) || 0) + 1)
+  }
+  return counts
+})
+
+const filteredRows = computed<CnRow[]>(() => {
+  if (destFilter.value === 'all') return rows.value
+  return rows.value.filter(r => destStateOf(r) === destFilter.value)
+})
+
+// Bulk-reassign target picker. Disabled until at least one CN is in the
+// filtered view; otherwise we'd send PATCHes against nothing.
+const bulkTarget = ref<string>('')
+const bulkSaving = ref(false)
+async function applyBulkReassign() {
+  const target = bulkTarget.value || null  // empty string → null (unassign)
+  if (filteredRows.value.length === 0 || bulkSaving.value) return
+  const noun = filteredRows.value.length === 1 ? 'note' : 'notes'
+  const targetLabel = target
+    ? (roundsByCode.value.get(target)?.name || target)
+    : 'Unassigned'
+  if (!confirm(`Reassign ${filteredRows.value.length} ${noun} to "${targetLabel}"?`)) return
+  bulkSaving.value = true
+  try {
+    for (const r of filteredRows.value) {
+      await $fetch(`/api/convertibles/${r.id}`, {
+        method: 'PATCH',
+        body: {
+          destination_class_code: target,
+          converts_at_round: !!target,
+        },
+      })
+    }
+    await refreshAll()
+    bulkTarget.value = ''
+  } catch (e) {
+    console.error('Bulk reassign failed', e)
+  } finally {
+    bulkSaving.value = false
+  }
+}
+
 function priceMismatchClass(stored: number, effective: number): string {
   if (!stored || !effective) return 'text-ink-700'
   const diff = Math.abs(stored - effective) / effective
@@ -231,10 +299,75 @@ async function onDelete(row: CnRow) {
       <TableUnitsToggle storage-key="capstack:cn-detail:units" />
     </div>
 
+    <!-- Bulk-reassign toolbar: filter by current destination state, then
+         one-click reassign every visible CN to a target round. Faster than
+         editing the per-row Destination dropdown when many notes share
+         the same problem (e.g. after a Carta re-import where dozens of
+         CNs come in with stale share-class codes). -->
+    <div v-if="rows.length > 0" class="flex flex-wrap items-center gap-1.5 mb-2">
+      <span class="text-[10px] uppercase tracking-wider text-ink-500 font-semibold mr-1">Filter</span>
+      <button
+        type="button"
+        class="text-[11px] font-medium px-2 py-0.5 rounded border transition-colors"
+        :class="destFilter === 'all'
+          ? 'bg-accent-500 text-white border-accent-500'
+          : 'bg-white text-ink-600 border-ink-300 hover:border-ink-400'"
+        @click="destFilter = 'all'"
+      >All <span class="opacity-70">{{ rows.length }}</span></button>
+      <button
+        v-if="(destCounts.get('unassigned') || 0) > 0"
+        type="button"
+        class="text-[11px] font-medium px-2 py-0.5 rounded border transition-colors"
+        :class="destFilter === 'unassigned'
+          ? 'bg-amber-500 text-white border-amber-500'
+          : 'bg-amber-50 text-amber-700 border-amber-200 hover:border-amber-300'"
+        @click="destFilter = 'unassigned'"
+      >Unassigned <span class="opacity-70">{{ destCounts.get('unassigned') }}</span></button>
+      <button
+        v-if="(destCounts.get('stale') || 0) > 0"
+        type="button"
+        class="text-[11px] font-medium px-2 py-0.5 rounded border transition-colors"
+        :class="destFilter === 'stale'
+          ? 'bg-amber-700 text-white border-amber-700'
+          : 'bg-amber-50 text-amber-800 border-amber-300 hover:border-amber-400'"
+        @click="destFilter = 'stale'"
+        title="Destination doesn't match any round (typical after a Carta re-import where the destination is a share-class code)"
+      >Stale <span class="opacity-70">{{ destCounts.get('stale') }}</span></button>
+      <button
+        v-for="r in (roundSummary?.rounds || [])"
+        :key="r.code"
+        v-show="(destCounts.get(r.code) || 0) > 0"
+        type="button"
+        class="text-[11px] font-medium px-2 py-0.5 rounded border transition-colors"
+        :class="destFilter === r.code
+          ? 'bg-accent-500 text-white border-accent-500'
+          : 'bg-white text-ink-600 border-ink-300 hover:border-ink-400'"
+        @click="destFilter = r.code"
+      >{{ r.name || r.code }} <span class="opacity-70">{{ destCounts.get(r.code) }}</span></button>
+
+      <div class="ml-auto flex items-center gap-2" v-if="filteredRows.length > 0">
+        <span class="text-[10px] uppercase tracking-wider text-ink-500 font-semibold">Reassign visible to</span>
+        <select
+          v-model="bulkTarget"
+          class="rounded border border-ink-300 bg-white text-[11px] px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-accent-500"
+        >
+          <option value="">— Unassigned</option>
+          <option v-for="r in (roundSummary?.rounds || [])" :key="r.code" :value="r.code">{{ roundLabel(r) }}</option>
+        </select>
+        <UiButton
+          variant="primary"
+          :disabled="bulkSaving || filteredRows.length === 0"
+          @click="applyBulkReassign"
+        >
+          {{ bulkSaving ? 'Reassigning…' : `Apply (${filteredRows.length})` }}
+        </UiButton>
+      </div>
+    </div>
+
     <div class="rounded-lg border border-ink-300 bg-white shadow-card overflow-hidden">
       <UiEditableTable
         :columns="cnCols"
-        :rows="rows"
+        :rows="filteredRows"
         :default-sort="{ key: 'shares_shares', dir: 'desc' }"
         :sort-value="sortValue"
         storage-key="capstack:cn-detail"
