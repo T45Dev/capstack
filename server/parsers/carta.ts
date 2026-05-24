@@ -97,8 +97,16 @@ function asString(v: unknown): string {
   if (v == null) return ''
   if (typeof v === 'string') return v.trim()
   if (typeof v === 'number') return String(v)
-  if (typeof v === 'object' && v && 'text' in (v as any)) return String((v as any).text).trim()
-  if (typeof v === 'object' && v && 'result' in (v as any)) return String((v as any).result).trim()
+  if (typeof v === 'object' && v) {
+    const obj = v as any
+    // ExcelJS richText cells: { richText: [{ font, text }, ...] }. Carta
+    // routinely stores headers and stakeholder names as richText, so we
+    // MUST handle this case — otherwise String(v) coerces to
+    // "[object Object]" and every header-match regex fails.
+    if (Array.isArray(obj.richText)) return obj.richText.map((r: any) => String(r?.text || '')).join('').trim()
+    if ('text' in obj) return String(obj.text).trim()
+    if ('result' in obj) return String(obj.result).trim()
+  }
   return String(v).trim()
 }
 
@@ -644,10 +652,15 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
       /^(issue|award|grant) ?date$/i,
       /^vest(ing)? ?(start|schedule|months)?( ?date)?$/i,
     ]
-    for (let i = 1; i <= Math.min(planSheet.rowCount, 8); i++) {
+    for (let i = 1; i <= Math.min(planSheet.rowCount, 12); i++) {
       const row = planSheet.getRow(i)
       const headers: string[] = []
-      for (let c = 1; c <= planSheet.columnCount; c++) headers.push(asString(row.getCell(c).value))
+      for (let c = 1; c <= planSheet.columnCount; c++) {
+        // Collapse newlines + repeated whitespace inside header cells —
+        // Carta wraps long labels like "Issue\nDate" into multi-line
+        // headers, which broke ^...$ regex matches before.
+        headers.push(asString(row.getCell(c).value).replace(/\s+/g, ' ').trim())
+      }
       const score = headerSigs.filter(re => headers.some(h => re.test(h))).length
       if (score >= 3) { planHeaderRow = i; break }
     }
@@ -655,7 +668,9 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
     if (planHeaderRow < 0) {
       warnings.push(`Found "${planSheet.name}" but couldn't identify a grant-detail header row (need name + qty + at least one of strike/date/vesting).`)
     } else {
-      const headers = (planSheet.getRow(planHeaderRow).values as any[]).map(v => asString(v).toLowerCase())
+      const headers = (planSheet.getRow(planHeaderRow).values as any[]).map(v =>
+        asString(v).replace(/\s+/g, ' ').trim().toLowerCase(),
+      )
       const findHeader = (...patterns: RegExp[]) => {
         for (const p of patterns) {
           const idx = headers.findIndex(h => p.test(h))
@@ -684,7 +699,7 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
       // "Grant Date", "Date Issued", "Date Granted", "Issuance Date",
       // "Board Approval Date", "Original Issue Date", "Vesting
       // Commencement Date" (sometimes the only available column).
-      const cIssueDate = findHeader(
+      let cIssueDate = findHeader(
         /^(issue|award|grant|issuance|effective|board\s*approval) ?date$/,
         /^original ?issue ?date$/,
         /^vesting ?commencement ?date$/,
@@ -693,6 +708,26 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
         /^(issued|granted|awarded)$/,
         /^date$/,
       )
+      // Positional fallback for "[Year] Stock Option and Incentive Plan"
+      // exports: Carta drops the Issue Date in column H on those sheets,
+      // and the header label can be weird enough (formatting, abbreviation,
+      // banner-merge) to slip past every header regex above. If a sample
+      // value from column H parses as a date, treat it as the issue date.
+      if (cIssueDate < 0 && /(stock\s*option|equity).+(plan|incentive)/i.test(planSheet.name || '')) {
+        for (let probe = planHeaderRow + 1; probe <= Math.min(planSheet.rowCount, planHeaderRow + 6); probe++) {
+          const v = planSheet.getRow(probe).getCell(8).value
+          const d = asDate(v)
+          if (d) {
+            cIssueDate = 8
+            const hLabel = asString(planSheet.getRow(planHeaderRow).getCell(8).value)
+            warnings.push(
+              `"${planSheet.name}": Issue Date column matched by position (column H). `
+              + `Header was "${hLabel}" — didn't match any known label pattern; using positional fallback.`,
+            )
+            break
+          }
+        }
+      }
       const cVestStart = findHeader(/^vesting ?start( ?date)?$/, /^vest ?start$/)
       const cVestSchedule = findHeader(/^vesting ?schedule$/, /^schedule$/)
       const cAwardType = findHeader(/^(award|grant) ?type$/, /^(iso|nso|rsu)/)

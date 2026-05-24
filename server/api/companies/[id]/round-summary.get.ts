@@ -23,7 +23,7 @@ interface RoundColumn {
   new_money: number
   notes_financing: number         // sum of CN principal+interest with destination = this round's code
   pre_money: number | null
-  post_money: number              // pre + new + notes
+  post_money: number              // pre + new (notes financing is tracked separately)
   // Per-round share contributions (user-typed; not derived from holdings).
   common: number                  // currently always 0 in the response — user types into preferred_issued
   preferred_issued: number        // effective value (override ?? new_money / share_price)
@@ -304,7 +304,10 @@ export default defineEventHandler((event) => {
     }
 
     const preMoney = (r.pre_money != null && r.pre_money !== 0) ? r.pre_money : null
-    const postMoney = (preMoney || 0) + newMoney + cnDollars
+    // Post-money = pre-money + new money only. Notes financing is reported
+    // separately below post-money; it doesn't roll into the post-money
+    // valuation per the operator's accounting convention.
+    const postMoney = (preMoney || 0) + newMoney
 
     // Cumulative FDS sums the user-typed equity contributions for this
     // round PLUS the CN-converted shares attributed to it. The "Notes

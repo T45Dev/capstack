@@ -109,6 +109,69 @@ function notesAttributedTooltip(r: RoundColumn): string {
   return [header, ...lines].join('\n')
 }
 
+// ---- Per-cell diagnostic tooltips ----
+// Same style as the Notes-converted breakdown: explain where each value
+// came from. For inputs, hint at what they drive. For calculated cells,
+// show the formula AND the operand values so the operator can verify the
+// math at a glance.
+function tooltipClosingDate(_r: RoundColumn): string {
+  return 'Round close date — user input. Drives chronological sort + preFDS for CN cap math at subsequent rounds.'
+}
+function tooltipTrancheOf(r: RoundColumn): string {
+  if (!r.parent_round_code) {
+    return 'When this round is a tranche of an earlier Qualified Financing, set the parent here. The CN cap formula then uses the parent\'s preFDS (state immediately before the QF\'s initial closing).'
+  }
+  return `Tranche of: ${r.parent_round_code}. CN cap math uses ${r.parent_round_code}'s preFDS instead of this round's.`
+}
+function tooltipPreMoney(_r: RoundColumn): string {
+  return 'Pre-money valuation — user input.'
+}
+function tooltipNewMoney(_r: RoundColumn): string {
+  return 'New money raised this round — user input. Combined with Share price to derive Preferred issued.'
+}
+function tooltipNotesFinancing(r: RoundColumn): string {
+  if (!r.notes_attributed?.length) return 'No CNs attributed to this round.'
+  const header = `${fmtUSD(r.notes_financing)} = sum of ${r.notes_attributed.length} CN${r.notes_attributed.length === 1 ? '' : 's'} (principal + accrued interest):`
+  const lines = r.notes_attributed.map(n => `  ${n.stakeholderName} [${n.destinationCode || '—'}]: ${fmtUSD(n.dollars)}`)
+  return [header, ...lines].join('\n')
+}
+function tooltipPostMoney(r: RoundColumn): string {
+  const pre = r.pre_money || 0
+  return `Post-money = Pre-money + New money\n${fmtUSD(pre)} + ${fmtUSD(r.new_money)} = ${fmtUSD(r.post_money)}\n(Notes financing is reported separately below.)`
+}
+function tooltipSharePrice(_r: RoundColumn): string {
+  return 'Share price ($) — user input. Drives Preferred issued (new_money ÷ share_price) when no override is set.'
+}
+function tooltipCumulatedFinancing(r: RoundColumn): string {
+  const idx = roundCols.value.findIndex(x => x.round_id === r.round_id)
+  const parts = roundCols.value.slice(0, idx + 1).map(x => `  ${x.name || x.code}: ${fmtUSD((x.new_money || 0) + (x.notes_financing || 0))}`)
+  return [`Sum of (New money + Notes financing) through ${r.name || r.code}:`, ...parts, `= ${fmtUSD(r.cumulated_financing)}`].join('\n')
+}
+function tooltipTotalFDS(r: RoundColumn): string {
+  const idx = roundCols.value.findIndex(x => x.round_id === r.round_id)
+  const parts = roundCols.value.slice(0, idx + 1).map(x =>
+    `  ${x.name || x.code}: ${fmtShares((x.common || 0) + (x.preferred_issued || 0) + (x.notes_converted || 0) + (x.option_pool_issued || 0))}`
+    + ` (common ${fmtShares(x.common || 0)} + pref ${fmtShares(x.preferred_issued || 0)} + notes ${fmtShares(x.notes_converted || 0)} + pool ${fmtShares(x.option_pool_issued || 0)})`,
+  )
+  return [`Cumulative FDS through ${r.name || r.code}:`, ...parts, `= ${fmtShares(r.total_shares_fds)}`].join('\n')
+}
+function tooltipCommon(_r: RoundColumn): string {
+  return 'Common shares issued this round — user input. Counts toward Total FDS.'
+}
+function tooltipPreferredIssued(r: RoundColumn): string {
+  if (r.preferred_issued_override != null) {
+    const formula = (r.share_price || 0) > 0 ? r.new_money / (r.share_price || 1) : 0
+    return `Manual override: ${fmtShares(r.preferred_issued_override)}\nFormula would give: ${fmtUSD(r.new_money)} ÷ ${fmtPricePerShare(r.share_price || 0)} = ${fmtShares(formula)}\nClear the override to revert to formula.`
+  }
+  if ((r.share_price || 0) > 0 && r.new_money > 0) {
+    return `Formula: New money ÷ Share price\n${fmtUSD(r.new_money)} ÷ ${fmtPricePerShare(r.share_price || 0)} = ${fmtShares(r.preferred_issued)}\nType a value to override.`
+  }
+  return 'No formula yet — needs both New money and Share price. Type a value to set manually.'
+}
+function tooltipOptionPoolIssued(_r: RoundColumn): string {
+  return 'Option pool issued this round — user input. Counts toward Total FDS. Drives the Pool Impact timeline\'s top-up event at this round\'s close date.'
+}
+
 function effectiveKind(r: RoundColumn): 'formation' | 'closed' | 'open' {
   const d = drafts.value[r.round_id]
   if (d && 'kind' in d && d.kind) return d.kind
@@ -554,6 +617,29 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
   if (table.sort.key !== key) return null
   return table.sort.dir
 }
+
+// ----- Round columns: per-column resizable widths -----
+// Each Financings round-card is a column whose right edge can be dragged
+// to resize. We piggyback on useSortableTable for its persistence + drag
+// state (sort is irrelevant here). Keys are round_id; widths persist in
+// localStorage so the operator's layout sticks across sessions.
+const roundTable = useSortableTable({
+  key: 'capstack:cap-table:financings',
+  columns: (roundCols.value || []).map(r => ({ key: r.round_id, label: r.code, width: 220, sortable: false, align: 'left' as const })),
+})
+
+// Keep roundTable.cols in sync with roundCols on add/delete, preserving
+// any widths the operator dragged into place.
+watch(roundCols, (cols) => {
+  const widthMap: Record<string, number> = {}
+  for (const c of roundTable.cols) widthMap[c.key] = c.width
+  const next = cols.map(r => ({ key: r.round_id, label: r.code, width: widthMap[r.round_id] ?? 220, sortable: false, align: 'left' as const }))
+  roundTable.cols.splice(0, roundTable.cols.length, ...(next as any))
+}, { immediate: true })
+
+function colWidthFor(roundId: string): number {
+  return roundTable.cols.find(c => c.key === roundId)?.width || 220
+}
 </script>
 
 <template>
@@ -599,106 +685,100 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
         <div v-if="!roundCols.length" class="px-4 py-8 text-center text-sm text-ink-500">
           No rounds yet. Click <span class="font-medium text-ink-700">Add round</span> to start typing your funding history.
         </div>
-        <!-- Wrapper IS the scroll context. overflow: auto + a max-height
-             bounded by the viewport means: the wrapper sizes to content when
-             the table is short (no blank space), but caps at viewport when
-             the table is tall (scroll inside, sticky thead pins to the top
-             of the table area instead of floating over rows). The 14rem
-             deduction leaves room for the page nav + h1 + card header above. -->
-        <div v-else class="overflow-auto max-h-[calc(100vh-14rem)]">
-          <!-- Table sized to its content (no min-width: 100%) so the round
-               columns stay at a tight, dollar-figure-friendly width instead
-               of stretching to fill wide monitors. Wrapper handles overflow
-               when the natural width exceeds viewport. -->
-          <table class="text-[12px] border-separate whitespace-nowrap" style="border-spacing: 0;">
-            <colgroup>
-              <col style="width: 200px" />
-              <col v-for="r in roundCols" :key="r.round_id" style="width: 130px" />
-            </colgroup>
-            <thead class="text-ink-700 bg-ink-100">
-              <tr>
-                <!-- Sticky top-14 lands the header just under the page's
-                     h-14 nav bar as the document scrolls. Y-scroll context
-                     is the document (the wrapper is overflow-y: clip), so
-                     sticky-top here actually sticks against the viewport.
-                     The corner cell is sticky both ways so it owns the
-                     row/column intersection. -->
-                <th class="px-3 py-2 border-b border-ink-300 text-left text-[11px] font-semibold uppercase tracking-wide sticky left-0 top-0 z-30 bg-ink-100">Capitalization table</th>
-                <th
-                  v-for="r in roundCols"
-                  :key="r.round_id"
-                  class="px-3 py-2 border-b border-ink-300 text-right text-[11px] font-semibold group sticky top-0 z-20"
-                  :class="effectiveKind(r) === 'open' ? 'bg-accent-50 text-accent-700' : 'text-ink-700 bg-ink-100'"
-                >
-                  <div class="flex items-center justify-end gap-1.5">
-                    <button
-                      type="button"
-                      class="shrink-0 text-ink-400 hover:text-red-600 transition-colors p-0.5 rounded hover:bg-red-50"
-                      @click="deleteRound(r.round_id, friendlyRoundLabel(r))"
-                      title="Delete round"
-                      aria-label="Delete round"
-                    >
-                      <Trash2 :size="13" />
-                    </button>
-                    <input
-                      type="text"
-                      :value="effective(r, 'name') ?? r.code"
-                      class="flex-1 min-w-0 bg-transparent text-right font-semibold text-[11px] border border-transparent hover:border-ink-300 focus:border-accent-500 focus:bg-white focus:outline-none rounded px-1 py-0.5"
-                      :class="effectiveKind(r) === 'open' ? 'text-accent-700' : ''"
-                      @input="setDraft(r.round_id, 'name', ($event.target as HTMLInputElement).value)"
-                      @blur="commitRound(r.round_id)"
-                      @keydown.enter="($event.target as HTMLInputElement).blur()"
-                    />
-                  </div>
-                  <div class="mt-1 flex items-center justify-end gap-1">
-                    <button
-                      type="button"
-                      class="text-[9px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors"
-                      :class="effectiveKind(r) === 'closed'
-                        ? 'bg-ink-200 text-ink-800 border-ink-300'
-                        : 'bg-white text-ink-500 border-ink-200 hover:border-ink-300'"
-                      @click="setKind(r.round_id, 'closed')"
-                    >Closed</button>
-                    <button
-                      type="button"
-                      class="text-[9px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors"
-                      :class="effectiveKind(r) === 'open'
-                        ? 'bg-accent-600 text-white border-accent-600'
-                        : 'bg-white text-ink-500 border-ink-200 hover:border-ink-300'"
-                      @click="setKind(r.round_id, 'open')"
-                    >Open</button>
-                  </div>
-                </th>
-              </tr>
-            </thead>
-            <tbody class="num">
-              <!-- Round-level money math (top group). Every cell is a real
-                   user-input value on the round row. -->
-              <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">Closing date of funding</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
+        <!-- Round cards. Each round is a vertical card with all fields
+             stacked label-above-value, so the operator can read any cell
+             without sweeping their eyes left to find the row name. Cards
+             flex horizontally; the outer div scrolls X+Y. Each card's
+             width is individually resizable via the right-edge drag
+             handle — persisted in localStorage by useSortableTable. -->
+        <div v-else>
+          <div class="flex gap-3 overflow-auto px-4 pt-4 pb-2" style="max-height: calc(100vh - 16rem);">
+            <div
+              v-for="r in roundCols"
+              :key="r.round_id"
+              class="shrink-0 relative rounded border flex flex-col"
+              :class="effectiveKind(r) === 'open' ? 'border-accent-300 bg-accent-50/30 ring-1 ring-accent-200' : 'border-ink-200 bg-white'"
+              :style="{ width: colWidthFor(r.round_id) + 'px' }"
+            >
+              <!-- Card header: round name + Closed/Open toggle + delete.
+                   Sticky-top so it stays visible if the card body scrolls. -->
+              <div
+                class="sticky top-0 z-10 px-2 py-2 border-b rounded-t"
+                :class="effectiveKind(r) === 'open' ? 'border-accent-200 bg-accent-50' : 'border-ink-200 bg-ink-100'"
+              >
+                <div class="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    class="shrink-0 text-ink-400 hover:text-red-600 transition-colors p-0.5 rounded hover:bg-red-50"
+                    @click="deleteRound(r.round_id, friendlyRoundLabel(r))"
+                    title="Delete round"
+                    aria-label="Delete round"
+                  >
+                    <Trash2 :size="13" />
+                  </button>
+                  <input
+                    type="text"
+                    :value="effective(r, 'name') ?? r.code"
+                    class="flex-1 min-w-0 bg-transparent font-semibold text-[12px] border border-transparent hover:border-ink-300 focus:border-accent-500 focus:bg-white focus:outline-none rounded px-1 py-0.5"
+                    :class="effectiveKind(r) === 'open' ? 'text-accent-700' : 'text-ink-800'"
+                    @input="setDraft(r.round_id, 'name', ($event.target as HTMLInputElement).value)"
+                    @blur="commitRound(r.round_id)"
+                    @keydown.enter="($event.target as HTMLInputElement).blur()"
+                  />
+                </div>
+                <div class="mt-1.5 flex items-center gap-1">
+                  <button
+                    type="button"
+                    class="text-[9px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors"
+                    :class="effectiveKind(r) === 'closed'
+                      ? 'bg-ink-200 text-ink-800 border-ink-300'
+                      : 'bg-white text-ink-500 border-ink-200 hover:border-ink-300'"
+                    @click="setKind(r.round_id, 'closed')"
+                  >Closed</button>
+                  <button
+                    type="button"
+                    class="text-[9px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors"
+                    :class="effectiveKind(r) === 'open'
+                      ? 'bg-accent-600 text-white border-accent-600'
+                      : 'bg-white text-ink-500 border-ink-200 hover:border-ink-300'"
+                    @click="setKind(r.round_id, 'open')"
+                  >Open</button>
+                </div>
+                <!-- Right-edge drag handle. Spans full card height so the
+                     user can grab it from anywhere along the right side. -->
+                <span
+                  class="resize-handle"
+                  style="height: 100%;"
+                  @mousedown.prevent.stop="roundTable.startResize($event, r.round_id)"
+                  @click.stop
+                />
+              </div>
+
+              <!-- Field stack. Each field-row carries its own label + the
+                   tooltip diagnostic (hover anywhere on the row to see
+                   the formula / breakdown). -->
+              <div class="p-2 space-y-2 num">
+                <!-- Closing date -->
+                <div :title="tooltipClosingDate(r)">
+                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Closing date</div>
                   <input
                     type="date"
                     :value="(effective(r, 'close_date') ?? r.close_date) || ''"
-                    :class="inputCellClass + ' cursor-pointer'"
+                    :class="inputCellClass + ' cursor-pointer text-left'"
                     @change="setDraft(r.round_id, 'close_date', ($event.target as HTMLInputElement).value || null)"
                     @blur="commitRound(r.round_id)"
                   />
-                </td>
-              </tr>
-              <!-- Tranche-of: when this round is a later tranche of an
-                   earlier round's Qualified Financing (e.g. B-2 is part of
-                   the same Series B raise that started at B-1), pick the
-                   parent here so the CN cap formula uses the QF's initial-
-                   closing preFDS instead of this tranche's. Per the
-                   promissory note's "immediately prior to the initial
-                   closing of the Qualified Financing" convention. -->
-              <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white" title="When this round is a tranche of an earlier round's Qualified Financing, set the parent here. The CN cap formula will use the parent's pre-FDS.">Tranche of</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
+                </div>
+
+                <!-- Tranche of: when this round is a later tranche of an
+                     earlier round's Qualified Financing, pick the parent
+                     here so CN cap math uses the QF's initial-closing
+                     preFDS. -->
+                <div :title="tooltipTrancheOf(r)">
+                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Tranche of</div>
                   <select
                     :value="(effective(r, 'parent_round_code') ?? r.parent_round_code) || ''"
-                    :class="inputCellClass"
+                    :class="inputCellClass + ' text-left'"
                     @change="setDraft(r.round_id, 'parent_round_code', ($event.target as HTMLSelectElement).value || null); commitRound(r.round_id)"
                   >
                     <option value="">— standalone</option>
@@ -706,53 +786,61 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                       {{ other.name || other.code }}
                     </option>
                   </select>
-                </td>
-              </tr>
-              <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">Pre-money valuation ($)</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
+                </div>
+
+                <!-- Pre-money valuation -->
+                <div :title="tooltipPreMoney(r)">
+                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Pre-money ($)</div>
                   <NumberInput
                     variant="bare"
                     prefix="$"
                     :model-value="effective(r, 'pre_money') ?? r.pre_money"
                     placeholder="—"
                     :input-class="inputCellClass"
-                    title="Pre-money valuation — user input"
                     @update:model-value="(v) => setDraft(r.round_id, 'pre_money', v)"
                     @blur="commitRound(r.round_id)"
                   />
-                </td>
-              </tr>
-              <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">New money ($)</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
+                </div>
+
+                <!-- New money -->
+                <div :title="tooltipNewMoney(r)">
+                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">New money ($)</div>
                   <NumberInput
                     variant="bare"
                     prefix="$"
                     :model-value="effective(r, 'new_money') ?? (r.new_money || null)"
                     placeholder="—"
                     :input-class="inputCellClass"
-                    title="New money — user input"
                     @update:model-value="(v) => setDraft(r.round_id, 'new_money', v ?? 0)"
                     @blur="commitRound(r.round_id)"
                   />
-                </td>
-              </tr>
-              <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">Notes financing ($)</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
-                  {{ r.notes_financing ? fmtUSD(r.notes_financing) : '—' }}
-                </td>
-              </tr>
-              <tr class="font-medium">
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-800 sticky left-0 z-10 bg-white">Post-money valuation ($)</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-900" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40 text-accent-700' : ''">
-                  {{ r.post_money ? fmtUSD(r.post_money) : '—' }}
-                </td>
-              </tr>
-              <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">Share price ($)</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
+                </div>
+
+                <!-- Post-money (computed). Pre-money + New money;
+                     Notes financing is reported below as its own line. -->
+                <div :title="tooltipPostMoney(r)">
+                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Post-money ($)</div>
+                  <div class="px-1 py-0.5 text-right text-[13px] font-medium" :class="effectiveKind(r) === 'open' ? 'text-accent-700' : 'text-ink-900'">
+                    <span v-if="r.post_money" class="cursor-help underline decoration-dotted decoration-ink-400">{{ fmtUSD(r.post_money) }}</span>
+                    <template v-else><span class="text-ink-400 font-normal">—</span></template>
+                  </div>
+                </div>
+
+                <!-- Notes financing (computed). Reported below Post-money
+                     so the operator can see what's flowing through the round
+                     in conjunction with — but not folded into — the
+                     post-money valuation. -->
+                <div :title="tooltipNotesFinancing(r)">
+                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Notes financing ($)</div>
+                  <div class="px-1 py-0.5 text-right text-[12px] text-ink-700">
+                    <span v-if="r.notes_financing" class="cursor-help underline decoration-dotted decoration-ink-400">{{ fmtUSD(r.notes_financing) }}</span>
+                    <template v-else><span class="text-ink-400">—</span></template>
+                  </div>
+                </div>
+
+                <!-- Share price -->
+                <div :title="tooltipSharePrice(r)">
+                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Share price ($)</div>
                   <NumberInput
                     variant="bare"
                     prefix="$"
@@ -763,52 +851,30 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     @update:model-value="(v) => setDraft(r.round_id, 'share_price', v)"
                     @blur="commitRound(r.round_id)"
                   />
-                </td>
-              </tr>
-              <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white">Cumulated financing</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
-                  {{ fmtUSD(r.cumulated_financing) }}
-                </td>
-              </tr>
-              <!-- CN reconciliation: when Cumulated financing doesn't equal
-                   the CN ledger total, surface the gap with a clickable
-                   breakdown so the operator can fix it. Hidden when the
-                   two reconcile. -->
-              <tr v-if="cnReconciliation.unattributed_dollars > 0">
-                <td class="px-3 py-1.5 border-b border-amber-200 bg-amber-50/40 text-amber-800 sticky left-0 z-10" :title="cnReconcileTitle">
-                  + CNs not rolled up
-                  <span class="ml-1 text-[10px] uppercase tracking-wide text-amber-700 font-semibold">{{ cnReconciliation.unreconciled.length }}</span>
-                </td>
-                <td :colspan="roundCols.length" class="px-3 py-1.5 border-b border-amber-200 bg-amber-50/40 text-right text-amber-900 num">
-                  <span class="font-medium">{{ fmtUSD(cnReconciliation.unattributed_dollars) }}</span>
-                  <span class="ml-2 text-[10px] text-amber-700">
-                    <span v-if="cnReconciliation.by_reason.stale_destination > 0">{{ fmtUSD(cnReconciliation.by_reason.stale_destination) }} bad destination</span>
-                    <span v-if="cnReconciliation.by_reason.deferred > 0" class="ml-2">{{ fmtUSD(cnReconciliation.by_reason.deferred) }} unassigned</span>
-                    <span v-if="cnReconciliation.by_reason.excluded > 0" class="ml-2">{{ fmtUSD(cnReconciliation.by_reason.excluded) }} excluded</span>
-                  </span>
-                </td>
-              </tr>
-              <tr v-if="cnReconciliation.total_dollars > 0">
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-500 text-[11px] italic sticky left-0 z-10 bg-white">All financings incl. unrolled-up CNs</td>
-                <td :colspan="roundCols.length" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-600 text-[11px] num italic">
-                  {{ fmtUSD((roundCols[roundCols.length - 1]?.cumulated_financing || 0) + cnReconciliation.unattributed_dollars) }}
-                </td>
-              </tr>
+                </div>
 
-              <!-- Spacer -->
-              <tr aria-hidden="true"><td colspan="99" class="h-3 p-0 bg-transparent" /></tr>
+                <!-- Cumulated financing (computed) -->
+                <div :title="tooltipCumulatedFinancing(r)">
+                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Cumulated financing</div>
+                  <div class="px-1 py-0.5 text-right text-[12px] text-ink-700">
+                    <span class="cursor-help underline decoration-dotted decoration-ink-400">{{ fmtUSD(r.cumulated_financing) }}</span>
+                  </div>
+                </div>
 
-              <!-- Per-round share contributions -->
-              <tr class="font-medium">
-                <td class="px-3 py-1.5 border-b border-ink-300 border-t-2 text-ink-900 sticky left-0 z-10 bg-white">Total shares issued (#) — fully diluted</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-300 border-t-2 text-right text-ink-900" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40 text-accent-700' : ''">
-                  {{ r.total_shares_fds ? fmtShares(r.total_shares_fds) : '—' }}
-                </td>
-              </tr>
-              <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6 sticky left-0 z-10 bg-white">Common</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
+                <!-- Divider between the money group and the shares group -->
+                <div class="border-t border-ink-300 -mx-2 my-2" />
+
+                <!-- Total fully diluted (cumulative through this round) -->
+                <div :title="tooltipTotalFDS(r)">
+                  <div class="text-[9px] uppercase tracking-wider text-ink-700 font-semibold mb-0.5">Total FDS</div>
+                  <div class="px-1 py-0.5 text-right text-[14px] font-semibold" :class="effectiveKind(r) === 'open' ? 'text-accent-700' : 'text-ink-900'">
+                    {{ r.total_shares_fds ? fmtShares(r.total_shares_fds) : '—' }}
+                  </div>
+                </div>
+
+                <!-- Common -->
+                <div :title="tooltipCommon(r)">
+                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Common</div>
                   <NumberInput
                     variant="bare"
                     :model-value="effective(r, 'common') ?? (r.common || null)"
@@ -817,45 +883,77 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     @update:model-value="(v) => setDraft(r.round_id, 'common', v ?? 0)"
                     @blur="commitRound(r.round_id)"
                   />
-                </td>
-              </tr>
-              <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6 sticky left-0 z-10 bg-white" title="Defaults to New money ÷ Share price. Type a value to override (use 0 for debt-only rounds); clear to revert.">Preferred issued</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
+                </div>
+
+                <!-- Preferred issued (formula w/ override) -->
+                <div :title="tooltipPreferredIssued(r)">
+                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">
+                    Preferred issued
+                    <span v-if="isPreferredOverridden(r)" class="ml-1 text-[8px] text-accent-600 normal-case font-medium">override</span>
+                  </div>
                   <NumberInput
                     variant="bare"
                     :model-value="preferredIssuedDisplay(r)"
                     :placeholder="r.preferred_issued ? fmtShares(r.preferred_issued) : '—'"
                     :input-class="preferredIssuedInputClass(r)"
-                    :title="isPreferredOverridden(r) ? 'Manual override — clear to revert to formula' : 'Formula: new_money ÷ share_price (auto). Type to override.'"
                     @update:model-value="(v) => setDraft(r.round_id, 'preferred_issued_override', v ?? null)"
                     @blur="commitRound(r.round_id)"
                   />
-                </td>
-              </tr>
-              <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6 sticky left-0 z-10 bg-white">Notes converted</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
-                  <span v-if="r.notes_converted" class="cursor-help underline decoration-dotted decoration-ink-400" :title="notesAttributedTooltip(r)">{{ fmtShares(r.notes_converted) }}</span>
-                  <template v-else>—</template>
-                </td>
-              </tr>
-              <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6 sticky left-0 z-10 bg-white">Option pool issued</td>
-                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
+                </div>
+
+                <!-- Notes converted (computed) -->
+                <div :title="notesAttributedTooltip(r) || 'No CNs attributed to this round.'">
+                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Notes converted</div>
+                  <div class="px-1 py-0.5 text-right text-[12px] text-ink-700">
+                    <span v-if="r.notes_converted" class="cursor-help underline decoration-dotted decoration-ink-400">{{ fmtShares(r.notes_converted) }}</span>
+                    <template v-else><span class="text-ink-400">—</span></template>
+                  </div>
+                </div>
+
+                <!-- Option pool issued -->
+                <div :title="tooltipOptionPoolIssued(r)">
+                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Option pool issued</div>
                   <NumberInput
                     variant="bare"
                     :model-value="effective(r, 'option_pool_issued') ?? (r.option_pool_issued || null)"
                     placeholder="—"
                     :input-class="inputCellClass"
-                    title="Option pool issued — user input"
                     @update:model-value="(v) => setDraft(r.round_id, 'option_pool_issued', v ?? 0)"
                     @blur="commitRound(r.round_id)"
                   />
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- CN reconciliation banner. When the CN ledger total doesn't
+               equal Cumulated financing, surface the gap here (used to be
+               an in-table footer row with colspan). -->
+          <div
+            v-if="cnReconciliation.unattributed_dollars > 0"
+            class="mx-4 mb-2 px-3 py-2 rounded border border-amber-200 bg-amber-50/60 text-amber-900 text-[12px] flex items-center justify-between gap-3 num"
+            :title="cnReconcileTitle"
+          >
+            <div class="flex items-center gap-2">
+              <span class="font-medium">CNs not rolled up</span>
+              <span class="text-[10px] uppercase tracking-wide text-amber-700 font-semibold">{{ cnReconciliation.unreconciled.length }}</span>
+            </div>
+            <div class="text-right">
+              <span class="font-semibold">{{ fmtUSD(cnReconciliation.unattributed_dollars) }}</span>
+              <span class="ml-2 text-[10px] text-amber-700">
+                <span v-if="cnReconciliation.by_reason.stale_destination > 0">{{ fmtUSD(cnReconciliation.by_reason.stale_destination) }} bad destination</span>
+                <span v-if="cnReconciliation.by_reason.deferred > 0" class="ml-2">{{ fmtUSD(cnReconciliation.by_reason.deferred) }} unassigned</span>
+                <span v-if="cnReconciliation.by_reason.excluded > 0" class="ml-2">{{ fmtUSD(cnReconciliation.by_reason.excluded) }} excluded</span>
+              </span>
+            </div>
+          </div>
+          <div
+            v-if="cnReconciliation.total_dollars > 0"
+            class="mx-4 mb-3 px-3 py-1.5 text-[11px] text-ink-500 italic flex items-center justify-between gap-3 num"
+          >
+            <span>All financings incl. unrolled-up CNs</span>
+            <span>{{ fmtUSD((roundCols[roundCols.length - 1]?.cumulated_financing || 0) + cnReconciliation.unattributed_dollars) }}</span>
+          </div>
         </div>
         <p class="px-4 py-2 text-[11px] text-ink-500 bg-ink-50/60 border-t border-ink-200">
           Values are user-entered. Toggle a column to Open to mark it as the round currently being modeled — only one round can be Open at a time.
