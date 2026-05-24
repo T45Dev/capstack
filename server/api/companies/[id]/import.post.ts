@@ -43,9 +43,24 @@ export default defineEventHandler(async (event) => {
     optionPools:  flagFor('include_option_pools'),
   }
 
+  // Sheet-role overrides from the import UI. Empty string = "auto-
+  // detect"; any other value is the explicit sheet name to use.
+  function sheetFor(name: string): string | null {
+    const p = parts!.find(x => x.name === name)
+    if (!p?.data) return null
+    const v = String(p.data).trim()
+    return v.length ? v : null
+  }
+  const sheetOverrides = {
+    detailedCapTableSheet: sheetFor('sheet_detailed_cap_table'),
+    convertibleNotesSheet: sheetFor('sheet_convertible_notes'),
+    optionPlanSheet:       sheetFor('sheet_option_plan'),
+    summaryCapTableSheet:  sheetFor('sheet_summary_cap_table'),
+  }
+
   let parsed
   try {
-    parsed = await parseCartaXlsx(Buffer.from(file.data))
+    parsed = await parseCartaXlsx(Buffer.from(file.data), sheetOverrides)
   } catch (e: any) {
     throw createError({ statusCode: 400, message: `Failed to parse xlsx: ${e?.message || e}` })
   }

@@ -83,6 +83,27 @@ export interface ParsedCartaCapTable {
   warnings: string[]
 }
 
+// Explicit sheet-name overrides. When set, the parser uses these
+// instead of auto-detecting by regex — so the operator can point us
+// at the right sheet when Carta's labelling slips past our patterns
+// (the user's pain: "2019 Stock Option and Incentive Plan" not being
+// recognized as the option-grants source).
+export interface CartaParseOverrides {
+  detailedCapTableSheet?: string | null
+  convertibleNotesSheet?: string | null
+  optionPlanSheet?: string | null
+  summaryCapTableSheet?: string | null
+}
+
+// Auto-detected sheet roles. The inspect endpoint surfaces these so
+// the UI can pre-fill the role dropdowns with sensible defaults.
+export interface CartaSheetRoles {
+  detailedCapTableSheet?: string | null
+  convertibleNotesSheet?: string | null
+  optionPlanSheet?: string | null
+  summaryCapTableSheet?: string | null
+}
+
 function asNumber(v: unknown): number {
   if (v == null) return 0
   if (typeof v === 'number') return v
@@ -282,7 +303,56 @@ export function parseVestingSchedule(text: string): { months: number | null; cli
   return { months, cliff }
 }
 
-export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> {
+// Apply the role-detection regexes against an open workbook. Used by
+// both the inspect endpoint (to surface defaults to the UI) and by
+// parseCartaXlsx (to find sheets when no override is given).
+export function detectCartaSheetRoles(wb: ExcelJS.Workbook): CartaSheetRoles {
+  const detailed = wb.getWorksheet('Detailed Cap Table')
+                || wb.getWorksheet('Intermediate Cap Table')
+                || wb.worksheets[0]
+  const cn = wb.worksheets.find((ws) => {
+    const n = (ws.name || '').toLowerCase()
+    return /convertible|^notes?\b|note\s*ledger|safes?/.test(n)
+  })
+  const plan = wb.worksheets.find(ws => {
+    const n = (ws.name || '').toLowerCase()
+    return /(stock\s*option|equity).+(plan|incentive|ledger)/.test(n)
+      || /option.+ledger/.test(n)
+      || /option.+detail/.test(n)
+      || /^stock\s*options?$/.test(n)
+      || /option\s*(grants?|awards?)/.test(n)
+      || /outstanding\s*options?/.test(n)
+      || /grants?\s*(detail|ledger)/.test(n)
+      || /^awards?$/.test(n)
+  })
+  const summary = wb.getWorksheet('Summary Cap Table')
+  return {
+    detailedCapTableSheet: detailed?.name || null,
+    convertibleNotesSheet: cn?.name || null,
+    optionPlanSheet: plan?.name || null,
+    summaryCapTableSheet: summary?.name || null,
+  }
+}
+
+// Inspect-only entrypoint: load the workbook and report sheet names +
+// auto-detected role mapping. No parsing or DB work — used by the
+// import UI to pre-populate the sheet-role dropdowns before the
+// operator commits to a full import.
+export async function inspectCartaXlsx(buf: Buffer): Promise<{
+  sheets: Array<{ name: string; rowCount: number; columnCount: number }>
+  detected: CartaSheetRoles
+}> {
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.load(buf as any)
+  const sheets = wb.worksheets.map(ws => ({
+    name: ws.name,
+    rowCount: ws.rowCount,
+    columnCount: ws.columnCount,
+  }))
+  return { sheets, detected: detectCartaSheetRoles(wb) }
+}
+
+export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides = {}): Promise<ParsedCartaCapTable> {
   const wb = new ExcelJS.Workbook()
   await wb.xlsx.load(buf as any)
 
@@ -314,12 +384,19 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
   }
 
   // ----- Detailed Cap Table -----
-  const detailed = wb.getWorksheet('Detailed Cap Table')
+  // Override wins over auto-detection. The override is the actual
+  // sheet name from the UI dropdown (which the operator picked from
+  // the inspect-result list), so we look it up directly.
+  const detailed = (overrides.detailedCapTableSheet ? wb.getWorksheet(overrides.detailedCapTableSheet) : null)
+                || wb.getWorksheet('Detailed Cap Table')
                 || wb.getWorksheet('Intermediate Cap Table')
                 || wb.worksheets[0]
   if (!detailed) {
     warnings.push('No detailed cap-table sheet found.')
     return result
+  }
+  if (overrides.detailedCapTableSheet) {
+    warnings.push(`Detailed cap table sheet: "${detailed.name}" (operator selection).`)
   }
 
   // Header is in the row containing 'Stakeholder ID' / 'Name'. Carta puts metadata above.
@@ -470,7 +547,8 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
 
   // ----- Summary Cap Table: pull authorized counts & total pool -----
   // Layout: col 1 = label, col 2 = Shares Authorized, col 3 = Issued, col 4 = FDS
-  const summary = wb.getWorksheet('Summary Cap Table')
+  const summary = (overrides.summaryCapTableSheet ? wb.getWorksheet(overrides.summaryCapTableSheet) : null)
+                || wb.getWorksheet('Summary Cap Table')
   if (summary) {
     for (let i = 1; i <= summary.rowCount; i++) {
       const row = summary.getRow(i)
@@ -497,15 +575,19 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
   // Carta exports vary the sheet name across templates: "Convertible Notes",
   // "Convertible Note Ledger", "Convertibles", "SAFEs", "Promissory Notes", etc.
   // Match any worksheet whose name mentions convertibles, notes, or SAFEs.
-  const cnSheet = wb.worksheets.find((ws) => {
-    const n = (ws.name || '').toLowerCase()
-    return /convertible|^notes?\b|note\s*ledger|safes?/.test(n)
-  })
+  const cnSheet = (overrides.convertibleNotesSheet ? wb.getWorksheet(overrides.convertibleNotesSheet) : null)
+               || wb.worksheets.find((ws) => {
+                 const n = (ws.name || '').toLowerCase()
+                 return /convertible|^notes?\b|note\s*ledger|safes?/.test(n)
+               })
   if (!cnSheet) {
     warnings.push(
       'No convertible-notes sheet found. Looked for a tab named "Convertible Notes", '
       + '"Convertible Note Ledger", "Convertibles", "Notes", "SAFEs", or similar.',
     )
+  }
+  if (cnSheet && overrides.convertibleNotesSheet) {
+    warnings.push(`Convertible notes sheet: "${cnSheet.name}" (operator selection).`)
   }
   if (cnSheet) {
     // Find header row by scanning the first ~25 rows for the "principal" + interest/cap pair.
@@ -618,22 +700,26 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
   // grant with the columns we actually need to display + drive vesting.
   // When present, we overlay the per-grant data onto whatever the cap
   // table already gave us — and add any grant rows the cap table missed.
-  const planSheet = wb.worksheets.find(ws => {
-    const n = (ws.name || '').toLowerCase()
-    // Broad pattern bank so we catch the many ways Carta labels this
-    // sheet across templates and customers. Real-world names seen:
-    //   "2019 Stock Option and Incentive Plan", "Equity Incentive Plan",
-    //   "Option Ledger", "ANT Post A-4 Option Detail", "Stock Options",
-    //   "Option Grants", "Grants Detail", "Awards", "Outstanding Options".
-    return /(stock\s*option|equity).+(plan|incentive|ledger)/.test(n)
-      || /option.+ledger/.test(n)
-      || /option.+detail/.test(n)
-      || /^stock\s*options?$/.test(n)
-      || /option\s*(grants?|awards?)/.test(n)
-      || /outstanding\s*options?/.test(n)
-      || /grants?\s*(detail|ledger)/.test(n)
-      || /^awards?$/.test(n)
-  })
+  const planSheet = (overrides.optionPlanSheet ? wb.getWorksheet(overrides.optionPlanSheet) : null)
+                 || wb.worksheets.find(ws => {
+                   const n = (ws.name || '').toLowerCase()
+                   // Broad pattern bank so we catch the many ways Carta labels this
+                   // sheet across templates and customers. Real-world names seen:
+                   //   "2019 Stock Option and Incentive Plan", "Equity Incentive Plan",
+                   //   "Option Ledger", "ANT Post A-4 Option Detail", "Stock Options",
+                   //   "Option Grants", "Grants Detail", "Awards", "Outstanding Options".
+                   return /(stock\s*option|equity).+(plan|incentive|ledger)/.test(n)
+                     || /option.+ledger/.test(n)
+                     || /option.+detail/.test(n)
+                     || /^stock\s*options?$/.test(n)
+                     || /option\s*(grants?|awards?)/.test(n)
+                     || /outstanding\s*options?/.test(n)
+                     || /grants?\s*(detail|ledger)/.test(n)
+                     || /^awards?$/.test(n)
+                 })
+  if (planSheet && overrides.optionPlanSheet) {
+    warnings.push(`Option grants sheet: "${planSheet.name}" (operator selection).`)
+  }
   // Track which grants came from the Detailed Cap Table so we can drop
   // them wholesale if the Option Plan sheet provides richer per-grant
   // data for the same stakeholders (the Plan sheet wins). With Issue
