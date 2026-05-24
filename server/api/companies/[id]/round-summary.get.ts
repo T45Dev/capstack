@@ -92,11 +92,10 @@ export default defineEventHandler((event) => {
   }>
 
   function accruedInterestFor(c: typeof cnRows[number]): number {
-    if (!c.issue_date || !c.interest_rate || c.interest_rate <= 0) {
+    if (!c.conversion_date || !c.issue_date || !c.interest_rate || c.interest_rate <= 0) {
       return c.interest_accrued || 0
     }
-    const endStr = c.conversion_date || new Date().toISOString().slice(0, 10)
-    const conv = new Date(endStr).getTime()
+    const conv = new Date(c.conversion_date).getTime()
     const iss = new Date(c.issue_date).getTime()
     if (!isFinite(conv) || !isFinite(iss)) return c.interest_accrued || 0
     const days = (conv - iss) / (1000 * 60 * 60 * 24)

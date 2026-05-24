@@ -89,16 +89,15 @@ export default defineEventHandler((event) => {
     conversion_price: number | null;
   }>
 
-  // Live-accrue interest: when the user edits rate/principal/dates, the
-  // Interest amt. column re-derives from principal × rate × days / 365.
-  // Falls back to "today" when conversion_date isn't set so in-flight
-  // notes also reflect rate changes.
+  // Accrued interest = principal × rate × (conversion_date − issue_date) / 365.
+  // Accrual stops at the conversion date; if one of issue_date,
+  // conversion_date, or interest_rate is missing we fall back to the
+  // stored interest_accrued value (e.g. Carta's snapshot).
   function accruedInterestFor(c: typeof cnRows[number]): number {
-    if (!c.issue_date || !c.interest_rate || c.interest_rate <= 0) {
+    if (!c.conversion_date || !c.issue_date || !c.interest_rate || c.interest_rate <= 0) {
       return c.interest_accrued || 0
     }
-    const endStr = c.conversion_date || new Date().toISOString().slice(0, 10)
-    const conv = new Date(endStr).getTime()
+    const conv = new Date(c.conversion_date).getTime()
     const iss = new Date(c.issue_date).getTime()
     if (!isFinite(conv) || !isFinite(iss)) return c.interest_accrued || 0
     const days = (conv - iss) / (1000 * 60 * 60 * 24)
