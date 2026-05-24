@@ -26,7 +26,8 @@ interface RoundColumn {
   post_money: number              // pre + new + notes
   // Per-round share contributions (user-typed; not derived from holdings).
   common: number                  // currently always 0 in the response — user types into preferred_issued
-  preferred_issued: number
+  preferred_issued: number        // effective value (override ?? new_money / share_price)
+  preferred_issued_override: number | null  // null = formula in effect; number = manual override
   notes_converted: number         // informational: notes_financing / share_price
   option_pool_issued: number
   // Cumulative totals through and including this round:
@@ -44,14 +45,15 @@ export default defineEventHandler((event) => {
   const rounds = db().prepare(`
     SELECT id, code, name, kind, close_date, share_class_code, share_price,
            new_money, debt_canceled, option_pool_issued, pre_money,
-           preferred_issued, common, seniority
+           preferred_issued, preferred_issued_override, common, seniority
     FROM rounds WHERE company_id = ?
   `).all(id) as Array<{
     id: string; code: string; name: string | null; kind: 'formation' | 'closed' | 'open';
     close_date: string | null; share_class_code: string | null;
     share_price: number | null; new_money: number; debt_canceled: number;
     option_pool_issued: number; pre_money: number | null;
-    preferred_issued: number; common: number; seniority: number;
+    preferred_issued: number; preferred_issued_override: number | null;
+    common: number; seniority: number;
   }>
 
   // The `kind` column on each round is the source of truth for whether
@@ -135,14 +137,16 @@ export default defineEventHandler((event) => {
     if (!r) continue
     const effectiveKind: 'formation' | 'closed' | 'open' = r.kind
 
-    // Preferred issued is derived from new_money / share_price — the
-    // dollars the investors put in, divided by the per-share price, gives
-    // the share count. Falls back to the stored value when share_price
-    // isn't set yet (so the user can type a placeholder until they enter
-    // the round's PPS). common and option_pool_issued remain user-typed.
+    // Preferred issued defaults to new_money / share_price — the dollars
+    // the investors put in, divided by the per-share price. The user can
+    // override per round (preferred_issued_override) for debt-only or
+    // bridge rounds where the formula doesn't apply. NULL override =
+    // use the formula. common and option_pool_issued remain user-typed.
     const roundPPS = r.share_price && r.share_price > 0 ? r.share_price : 0
     const newMoney = r.new_money || 0
-    const preferredIssued = roundPPS > 0 ? newMoney / roundPPS : (Number(r.preferred_issued) || 0)
+    const preferredIssued = r.preferred_issued_override != null
+      ? Number(r.preferred_issued_override)
+      : (roundPPS > 0 ? newMoney / roundPPS : (Number(r.preferred_issued) || 0))
     const common = Number(r.common) || 0
     const poolIssued = Number(r.option_pool_issued) || 0
 
@@ -199,6 +203,7 @@ export default defineEventHandler((event) => {
       post_money: postMoney,
       common,
       preferred_issued: preferredIssued,
+      preferred_issued_override: r.preferred_issued_override != null ? Number(r.preferred_issued_override) : null,
       notes_converted: cnShares,
       option_pool_issued: poolIssued,
       total_shares_fds: cumulativeFDS,

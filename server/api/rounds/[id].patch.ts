@@ -11,7 +11,7 @@ export default defineEventHandler(async (event) => {
   const fields = [
     'code', 'name', 'kind', 'close_date', 'share_class_code',
     'share_price', 'new_money', 'debt_canceled', 'option_pool_issued',
-    'pre_money', 'preferred_issued', 'common',
+    'pre_money', 'preferred_issued', 'preferred_issued_override', 'common',
     'parent_round_code', 'seniority', 'notes',
   ]
   const updates: string[] = []

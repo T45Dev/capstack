@@ -31,6 +31,7 @@ interface RoundColumn {
   post_money: number
   common: number
   preferred_issued: number
+  preferred_issued_override: number | null
   notes_converted: number
   option_pool_issued: number
   total_shares_fds: number
@@ -84,6 +85,7 @@ interface RoundDraft {
   share_price?: number | null
   common?: number
   preferred_issued?: number
+  preferred_issued_override?: number | null
   option_pool_issued?: number
 }
 const drafts = ref<Record<string, RoundDraft>>({})
@@ -134,6 +136,28 @@ function cancelDrafts() {
 // can tell at a glance which numbers they own vs which are derived from the
 // ledger import. Focus state clears the tint and switches to the accent ring.
 const inputCellClass = 'w-full bg-amber-50 border border-amber-300 hover:border-amber-500 focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-accent-500 rounded px-1 py-0.5 text-right text-[12px] text-ink-900 num'
+// Cells that show a computed value but allow override (Preferred issued).
+// When the formula's in effect we render in a muted style so the user can
+// see at a glance which cells are derived vs manually set.
+const formulaCellClass = 'w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-accent-500 rounded px-1 py-0.5 text-right text-[12px] text-ink-500 italic num'
+
+// Preferred issued: when the user has overridden the formula, show the
+// override value with the standard amber input chrome. Otherwise display
+// the computed value (or nothing) with the muted formula chrome.
+function isPreferredOverridden(r: RoundColumn): boolean {
+  const d = drafts.value[r.round_id]
+  if (d && 'preferred_issued_override' in d) return d.preferred_issued_override != null
+  return r.preferred_issued_override != null
+}
+function preferredIssuedDisplay(r: RoundColumn): number | null {
+  const d = drafts.value[r.round_id]
+  if (d && 'preferred_issued_override' in d) return d.preferred_issued_override ?? null
+  if (r.preferred_issued_override != null) return r.preferred_issued_override
+  return r.preferred_issued ? r.preferred_issued : null
+}
+function preferredIssuedInputClass(r: RoundColumn): string {
+  return isPreferredOverridden(r) ? inputCellClass : formulaCellClass
+}
 
 // Add a new round. The server picks a unique code (R1, R2, …); the user can
 // rename inline. Close date defaults to today so the row sorts predictably.
@@ -667,9 +691,16 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                 </td>
               </tr>
               <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6 sticky left-0 z-10 bg-white" title="New money ÷ Share price">Preferred issued</td>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6 sticky left-0 z-10 bg-white" title="Defaults to New money ÷ Share price. Type a value to override (use 0 for debt-only rounds); clear to revert.">Preferred issued</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
-                  {{ r.preferred_issued ? fmtShares(r.preferred_issued) : '—' }}
+                  <NumberInput
+                    variant="bare"
+                    :model-value="preferredIssuedDisplay(r)"
+                    :placeholder="r.preferred_issued ? fmtShares(r.preferred_issued) : '—'"
+                    :input-class="preferredIssuedInputClass(r)"
+                    :title="isPreferredOverridden(r) ? 'Manual override — clear to revert to formula' : 'Formula: new_money ÷ share_price (auto). Type to override.'"
+                    @update:model-value="(v) => setDraft(r.round_id, 'preferred_issued_override', v ?? null)"
+                  />
                 </td>
               </tr>
               <tr>
