@@ -41,12 +41,15 @@ const { data: roundSummary, refresh: refreshRoundSummary } = await useFetch<{ ro
 const roundCols = computed<RoundColumn[]>(() => roundSummary.value?.rounds || [])
 
 // Display label for a round. The user names it; if blank, fall back to the
-// code. Synthesized open column gets a generic label. Draft override wins
-// when there's an in-flight edit.
+// code. Draft override wins when there's an in-flight edit. The synthesized
+// open round reads its name from assumptions.round_name (which is what
+// `r.name` carries on that row) but supports the same draft override so the
+// header reflects an in-progress rename.
 function friendlyRoundLabel(r: RoundColumn): string {
-  if (r.round_id === 'open') return r.name || 'Open round'
   const d = drafts.value[r.round_id]
-  const name = (d && 'name' in d ? d.name : r.name) || ''
+  const draftName = d && 'name' in d ? d.name : undefined
+  const name = (draftName ?? r.name ?? '')
+  if (r.round_id === 'open') return name.trim() || 'Open round'
   return name.trim() || r.code
 }
 
@@ -98,10 +101,15 @@ async function saveDrafts() {
       if (roundId === 'open') {
         // Synthesized open column writes to assumptions; only some fields
         // are meaningful there. share_price / share counts on open are
-        // derived in the endpoint and not directly settable.
+        // derived in the endpoint and not directly settable. The name
+        // routes to assumptions.round_name — if the new name happens to
+        // match an existing round's code or name on the next refresh, the
+        // endpoint will resolve THAT row as the open one instead of
+        // synthesizing this column.
         const a: any = {}
         if ('pre_money' in payload) a.pre_money = payload.pre_money ?? 0
         if ('new_money' in payload) a.new_money = payload.new_money ?? 0
+        if ('name' in payload) a.round_name = (payload.name ?? '').trim() || 'Open round'
         if (Object.keys(a).length) {
           await $fetch(`/api/companies/${id.value}/assumptions`, { method: 'POST', body: a })
         }
@@ -545,13 +553,13 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                       <Trash2 :size="13" />
                     </button>
                     <input
-                      v-if="r.round_id !== 'open'"
                       type="text"
-                      :value="effective(r, 'name') ?? r.code"
+                      :value="effective(r, 'name') ?? (r.round_id === 'open' ? (r.name || '') : r.code)"
+                      :placeholder="r.round_id === 'open' ? 'Open round' : ''"
                       class="flex-1 min-w-0 bg-transparent text-right font-semibold text-[11px] border border-transparent hover:border-ink-300 focus:border-accent-500 focus:bg-white focus:outline-none rounded px-1 py-0.5"
+                      :class="r.kind === 'open' ? 'text-accent-700' : ''"
                       @input="setDraft(r.round_id, 'name', ($event.target as HTMLInputElement).value)"
                     />
-                    <span v-else>{{ friendlyRoundLabel(r) }}</span>
                   </div>
                   <div v-if="r.kind === 'open'" class="text-[9px] font-medium uppercase tracking-wider text-accent-600">open</div>
                 </th>
