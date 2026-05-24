@@ -8,7 +8,8 @@ export default defineEventHandler(async (event) => {
   const fields = [
     'stakeholder_name', 'principal', 'interest_accrued', 'interest_rate',
     'issue_date', 'maturity_date', 'conversion_date',
-    'valuation_cap', 'conversion_discount', 'destination_class_code',
+    'valuation_cap', 'conversion_discount', 'conversion_price',
+    'destination_class_code',
     'converts_at_round', 'status', 'external_id', 'stakeholder_id',
   ]
   const updates: string[] = []

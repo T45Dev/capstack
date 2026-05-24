@@ -52,6 +52,7 @@ export interface ParsedConvertible {
   destinationClassCode?: string | null   // raw from Carta (e.g. "SA2-1")
   valuationCap?: number | null
   conversionDiscount: number
+  conversionPrice?: number | null        // per-share conversion price from Carta
 }
 
 export interface ParsedCartaCapTable {
@@ -459,6 +460,10 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
       const cRate = col(/interest\s*rate|rate$/i)
       const cCap = col(/valuation\s*cap|^cap$/i)
       const cDiscount = col(/conversion\s*discount|^discount$/i)
+      // Per-note conversion price (PPS the note converted at). Carta labels
+      // this "Conversion Price" or sometimes "Issue Price" on the CN sheet
+      // (distinct from the share-class issue price elsewhere).
+      const cConvPrice = col(/conversion\s*price|conv\s*price|issue\s*price|price\s*per\s*share/i)
 
       if (cPrincipal < 0 || cName < 0) {
         warnings.push(
@@ -494,6 +499,7 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
               : null,
             valuationCap: cCap > 0 ? asNumber(row.getCell(cCap).value) || null : null,
             conversionDiscount: cDiscount > 0 ? asNumber(row.getCell(cDiscount).value) : 0,
+            conversionPrice: cConvPrice > 0 ? asNumber(row.getCell(cConvPrice).value) || null : null,
           })
           cnRowsRead++
         } catch (err: any) {

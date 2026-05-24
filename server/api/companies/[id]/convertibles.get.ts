@@ -18,6 +18,9 @@ interface CnLine {
   conversionDate: string | null
   principal: number
   interestAccrued: number
+  interestRate: number
+  conversionDiscount: number
+  valuationCap: number | null
   convPrice: number
   shares: number
   basisApplied: 'destination' | 'deferred'
@@ -39,13 +42,16 @@ export default defineEventHandler((event) => {
 
   const cnRows = db().prepare(`
     SELECT id, stakeholder_name, principal, interest_accrued, interest_rate,
-           issue_date, conversion_date, destination_class_code
+           issue_date, conversion_date, destination_class_code,
+           conversion_discount, valuation_cap, conversion_price
     FROM convertibles WHERE company_id = ? AND status = 'outstanding'
   `).all(id) as Array<{
     id: string; stakeholder_name: string | null; principal: number;
     interest_accrued: number; interest_rate: number;
     issue_date: string | null; conversion_date: string | null;
     destination_class_code: string | null;
+    conversion_discount: number; valuation_cap: number | null;
+    conversion_price: number | null;
   }>
 
   function accruedInterestFor(c: typeof cnRows[number]): number {
@@ -64,7 +70,12 @@ export default defineEventHandler((event) => {
     const interest = accruedInterestFor(c)
     const total = (c.principal || 0) + interest
     const codeKey = c.destination_class_code ? String(c.destination_class_code).toUpperCase() : ''
-    const convPrice = codeKey ? (priceByCode.get(codeKey) || 0) : 0
+    // Prefer the stored conversion_price (Carta-imported or user-typed)
+    // over the round's share price. Falls back to round.share_price when
+    // the CN has no explicit conv price recorded.
+    const storedConvPrice = c.conversion_price && c.conversion_price > 0 ? c.conversion_price : 0
+    const roundConvPrice = codeKey ? (priceByCode.get(codeKey) || 0) : 0
+    const convPrice = storedConvPrice || roundConvPrice
     const shares = convPrice > 0 ? total / convPrice : 0
     return {
       id: c.id,
@@ -73,9 +84,12 @@ export default defineEventHandler((event) => {
       conversionDate: c.conversion_date || null,
       principal: c.principal || 0,
       interestAccrued: interest,
+      interestRate: c.interest_rate || 0,
+      conversionDiscount: c.conversion_discount || 0,
+      valuationCap: c.valuation_cap || null,
       convPrice,
       shares,
-      basisApplied: shares > 0 ? 'destination' : 'deferred',
+      basisApplied: c.destination_class_code ? 'destination' : 'deferred',
     }
   })
 
