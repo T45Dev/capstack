@@ -220,6 +220,7 @@ function migrate(d: Database.Database): void {
   ensureColumn('convertibles', 'destination_class_code', 'TEXT')
   ensureColumn('convertibles', 'converts_at_round', 'INTEGER NOT NULL DEFAULT 1')
   ensureColumn('convertibles', 'conversion_price', 'REAL')
+  ensureColumn('convertibles', 'include_in_summary', 'INTEGER NOT NULL DEFAULT 1')
   ensureColumn('companies', 'starting_round', 'TEXT')
   ensureColumn('companies', 'starting_round_date', 'TEXT')
   ensureColumn('grants', 'approval_status', 'TEXT')
