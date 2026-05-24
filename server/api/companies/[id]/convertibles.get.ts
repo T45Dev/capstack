@@ -21,7 +21,8 @@ interface CnLine {
   interestRate: number
   conversionDiscount: number
   valuationCap: number | null
-  convPrice: number
+  convPrice: number              // stored (Carta or user) ?? round.share_price
+  effectiveConvPrice: number     // min(round PPS × (1 - discount), cap / pre-money FDS)
   shares: number
   basisApplied: 'destination' | 'deferred'
 }
@@ -33,11 +34,44 @@ export default defineEventHandler((event) => {
   const co = db().prepare('SELECT id FROM companies WHERE id = ?').get(id)
   if (!co) throw createError({ statusCode: 404, message: 'Company not found' })
 
+  // Round timeline + cumulative pre-money FDS per round. Pre-money FDS for
+  // round X = cumulative FDS through round X-1, which is what the cap-based
+  // effective conv price uses as its denominator. Sort matches
+  // round-summary.get (open rounds last, otherwise close_date ascending).
+  const rounds = db().prepare(`
+    SELECT code, share_price, common, preferred_issued, option_pool_issued,
+           close_date, seniority, kind
+    FROM rounds WHERE company_id = ?
+  `).all(id) as Array<{
+    code: string; share_price: number | null;
+    common: number; preferred_issued: number; option_pool_issued: number;
+    close_date: string | null; seniority: number;
+    kind: 'formation' | 'closed' | 'open';
+  }>
+
+  rounds.sort((a, b) => {
+    const aOpen = a.kind === 'open'
+    const bOpen = b.kind === 'open'
+    if (aOpen !== bOpen) return aOpen ? 1 : -1
+    const ad = a.close_date
+    const bd = b.close_date
+    if (ad && bd) {
+      if (ad !== bd) return ad.localeCompare(bd)
+      return a.seniority - b.seniority
+    }
+    if (ad) return -1
+    if (bd) return 1
+    return a.seniority - b.seniority
+  })
+
   const priceByCode = new Map<string, number>()
-  for (const r of (db().prepare(
-    'SELECT code, share_price FROM rounds WHERE company_id = ?',
-  ).all(id) as Array<{ code: string; share_price: number | null }>)) {
-    if (r.share_price) priceByCode.set(String(r.code).toUpperCase(), r.share_price)
+  const preFDSByCode = new Map<string, number>()
+  let cumulativeFDS = 0
+  for (const r of rounds) {
+    const key = String(r.code).toUpperCase()
+    preFDSByCode.set(key, cumulativeFDS)
+    if (r.share_price) priceByCode.set(key, r.share_price)
+    cumulativeFDS += (r.common || 0) + (r.preferred_issued || 0) + (r.option_pool_issued || 0)
   }
 
   const cnRows = db().prepare(`
@@ -74,8 +108,28 @@ export default defineEventHandler((event) => {
     // over the round's share price. Falls back to round.share_price when
     // the CN has no explicit conv price recorded.
     const storedConvPrice = c.conversion_price && c.conversion_price > 0 ? c.conversion_price : 0
-    const roundConvPrice = codeKey ? (priceByCode.get(codeKey) || 0) : 0
-    const convPrice = storedConvPrice || roundConvPrice
+    const roundPPS = codeKey ? (priceByCode.get(codeKey) || 0) : 0
+    const convPrice = storedConvPrice || roundPPS
+
+    // Effective conv price — what the cap/discount math would compute given
+    // the attributed round. Use the lower of:
+    //   - roundPPS × (1 − discount)         when a discount is set
+    //   - cap / pre-money FDS at this round when a cap is set + FDS known
+    // When neither cap nor discount is set, the effective price is just the
+    // round PPS. We surface this alongside the stored price so the operator
+    // can sanity-check whether Carta's recorded price matches the math.
+    const discount = c.conversion_discount || 0
+    const cap = c.valuation_cap || 0
+    const preFDS = codeKey ? (preFDSByCode.get(codeKey) || 0) : 0
+    let effectiveConvPrice = 0
+    if (roundPPS > 0) {
+      const discountPrice = discount > 0 ? roundPPS * (1 - discount) : roundPPS
+      const capPrice = cap > 0 && preFDS > 0 ? cap / preFDS : 0
+      effectiveConvPrice = capPrice > 0 ? Math.min(discountPrice, capPrice) : discountPrice
+    } else if (cap > 0 && preFDS > 0) {
+      effectiveConvPrice = cap / preFDS
+    }
+
     const shares = convPrice > 0 ? total / convPrice : 0
     return {
       id: c.id,
@@ -88,6 +142,7 @@ export default defineEventHandler((event) => {
       conversionDiscount: c.conversion_discount || 0,
       valuationCap: c.valuation_cap || null,
       convPrice,
+      effectiveConvPrice,
       shares,
       basisApplied: c.destination_class_code ? 'destination' : 'deferred',
     }
