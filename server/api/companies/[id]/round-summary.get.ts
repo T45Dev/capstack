@@ -135,10 +135,14 @@ export default defineEventHandler((event) => {
     if (!r) continue
     const effectiveKind: 'formation' | 'closed' | 'open' = r.kind
 
-    // All share counts are user-typed; we don't derive from holdings.
-    // preferred_issued, common, option_pool_issued live directly on the
-    // rounds table — the user enters them via the Summary card.
-    const preferredIssued = Number(r.preferred_issued) || 0
+    // Preferred issued is derived from new_money / share_price — the
+    // dollars the investors put in, divided by the per-share price, gives
+    // the share count. Falls back to the stored value when share_price
+    // isn't set yet (so the user can type a placeholder until they enter
+    // the round's PPS). common and option_pool_issued remain user-typed.
+    const roundPPS = r.share_price && r.share_price > 0 ? r.share_price : 0
+    const newMoney = r.new_money || 0
+    const preferredIssued = roundPPS > 0 ? newMoney / roundPPS : (Number(r.preferred_issued) || 0)
     const common = Number(r.common) || 0
     const poolIssued = Number(r.option_pool_issued) || 0
 
@@ -148,7 +152,6 @@ export default defineEventHandler((event) => {
     // contributions haven't been added yet).
     const codeKey = r.code.toUpperCase()
     const attribs = cnByCode.get(codeKey) || []
-    const roundPPS = r.share_price && r.share_price > 0 ? r.share_price : 0
     const preFDS = cumulativeFDS
 
     let cnDollars = 0
@@ -172,7 +175,6 @@ export default defineEventHandler((event) => {
     }
 
     const preMoney = (r.pre_money != null && r.pre_money !== 0) ? r.pre_money : null
-    const newMoney = r.new_money || 0
     const postMoney = (preMoney || 0) + newMoney + cnDollars
 
     // Cumulative FDS sums the user-typed equity contributions for this
