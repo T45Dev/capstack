@@ -219,7 +219,10 @@ const proposedCols = computed<GrCol[]>(() => {
 
 const outstandingTable = useSortableTable({
   key: 'capstack:grants:outstanding',
-  defaultSort: { key: 'out_post_shares', dir: 'desc' },
+  // Sort chronologically by issue date so the table mirrors the Option
+  // Pool Impact timeline (each grant is one dated event). Operators
+  // import per-grant rows from Carta — order should reflect that.
+  defaultSort: { key: 'issue_date', dir: 'asc' },
   columns: outstandingCols.value as any,
 })
 const proposedTable = useSortableTable({

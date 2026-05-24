@@ -678,10 +678,23 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
         }
         return -1
       }
-      const cName = findHeader(
+      let cName = findHeader(
         /^(stakeholder|optionee|holder|grantee|recipient|employee)( ?name)?$/,
         /^full ?name$/, /name$/,
       )
+      // Positional fallback: the name column is almost universally
+      // column A on Carta's Option Plan sheets. Without it the row loop
+      // bails on every row ("!name") and we silently produce zero grants
+      // — which then makes the page fall back to the Detailed Cap
+      // Table's aggregated-per-stakeholder rows and the operator sees
+      // one row per person instead of one per grant event.
+      if (cName < 0) {
+        const probe = asString(planSheet.getRow(planHeaderRow + 1).getCell(1).value)
+        if (probe) {
+          cName = 1
+          warnings.push(`"${planSheet.name}": name column matched by position (column A). Header was "${asString(planSheet.getRow(planHeaderRow).getCell(1).value)}".`)
+        }
+      }
       const cQtyIssued = findHeader(/^quantity ?issued$/, /^shares? ?issued$/, /^granted$/)
       const cQtyOutstanding = findHeader(/^quantity ?outstanding$/, /^outstanding$/)
       const cQtyExercised = findHeader(/^quantity ?exercised$/, /^exercised$/)
@@ -786,6 +799,15 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
           .filter(g => !planSheetStakeholders.has(g.recipientName.toLowerCase()))
         const planSheetGrants = result.grants.slice(detailedCapTableGrantCount)
         result.grants = [...keepDetailedCapTable, ...planSheetGrants]
+        warnings.push(
+          `Grants imported: ${planSheetGrants.length} per-grant events from "${planSheet.name}" `
+          + `(${planSheetStakeholders.size} unique stakeholders) + ${keepDetailedCapTable.length} aggregated rows kept from the Detailed Cap Table `
+          + `(stakeholders not covered by the Plan sheet) = ${result.grants.length} total.`,
+        )
+      } else {
+        warnings.push(
+          `"${planSheet.name}": found the sheet but parsed 0 grant rows. Falling back to the Detailed Cap Table's aggregated-per-stakeholder grants, so Option Pool Impact will show one event per person (not per grant). Check that the sheet has Quantity Issued / Quantity Outstanding columns with positive values.`,
+        )
       }
 
       // Surface a warning when a non-trivial number of grants came in
