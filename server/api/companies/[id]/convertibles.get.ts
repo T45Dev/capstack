@@ -18,12 +18,13 @@ interface CnLine {
   conversionDate: string | null
   principal: number
   interestAccrued: number
+  totalInvestment: number        // principal + accrued interest
   interestRate: number
   conversionDiscount: number
   valuationCap: number | null
   convPrice: number              // stored (Carta or user) ?? round.share_price
   effectiveConvPrice: number     // min(round PPS × (1 - discount), cap / pre-money FDS)
-  shares: number
+  shares: number                 // totalInvestment / effectiveConvPrice
   basisApplied: 'destination' | 'deferred'
 }
 
@@ -130,7 +131,9 @@ export default defineEventHandler((event) => {
       effectiveConvPrice = cap / preFDS
     }
 
-    const shares = convPrice > 0 ? total / convPrice : 0
+    // Shares come from total investment ÷ effective conversion price, so
+    // cap/discount math flows through to the resulting share count.
+    const shares = effectiveConvPrice > 0 ? total / effectiveConvPrice : 0
     return {
       id: c.id,
       stakeholderName: c.stakeholder_name || '',
@@ -138,6 +141,7 @@ export default defineEventHandler((event) => {
       conversionDate: c.conversion_date || null,
       principal: c.principal || 0,
       interestAccrued: interest,
+      totalInvestment: total,
       interestRate: c.interest_rate || 0,
       conversionDiscount: c.conversion_discount || 0,
       valuationCap: c.valuation_cap || null,

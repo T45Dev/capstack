@@ -19,6 +19,7 @@ interface CnRow {
   conversionDate: string | null
   principal: number
   interestAccrued: number
+  totalInvestment: number
   interestRate: number
   conversionDiscount: number
   valuationCap: number | null
@@ -80,15 +81,16 @@ const destinationOptions = computed(() => {
 
 const cnCols = computed<EditableCol[]>(() => {
   const cols: EditableCol[] = [
-    { key: 'stakeholderName',      label: 'Holder',      width: 180, sortable: true, align: 'left',  type: 'text',   editable: true, placeholder: 'VCT Investments' },
-    { key: 'destinationClassCode', label: 'Destination', width: 130, sortable: true, align: 'left',  type: 'select', editable: true, options: destinationOptions.value },
-    { key: 'conversionDate',       label: 'Conv. date',  width: 130, sortable: true, align: 'left',  type: 'date',   editable: true },
-    { key: 'principal',            label: 'Principal',   width: 120, sortable: true, align: 'right', type: 'usd',    editable: true, step: '1000' },
-    { key: 'interestRate',         label: 'Rate',        width: 80,  sortable: true, align: 'right', type: 'pct',    editable: true, step: '0.001' },
-    { key: 'interestAccrued',      label: 'Interest',    width: 110, sortable: true, align: 'right', type: 'usd',    editable: true, step: '100' },
-    { key: 'conversionDiscount',   label: 'Discount',    width: 80,  sortable: true, align: 'right', type: 'pct',    editable: true, step: '0.01' },
-    { key: 'convPrice',            label: 'Conv. price', width: 110, sortable: true, align: 'right', type: 'usd',    editable: true, step: '0.01' },
-    { key: 'effectiveConvPrice',   label: 'Eff. price',  width: 110, sortable: true, align: 'right' },
+    { key: 'stakeholderName',      label: 'Holder',         width: 180, sortable: true, align: 'left',  type: 'text',   editable: true, placeholder: 'VCT Investments' },
+    { key: 'destinationClassCode', label: 'Destination',    width: 130, sortable: true, align: 'left',  type: 'select', editable: true, options: destinationOptions.value },
+    { key: 'conversionDate',       label: 'Conv. date',     width: 130, sortable: true, align: 'left',  type: 'date',   editable: true },
+    { key: 'principal',            label: 'Principal',      width: 120, sortable: true, align: 'right', type: 'usd',    editable: true, step: '1000' },
+    { key: 'interestRate',         label: 'Interest rate',  width: 90,  sortable: true, align: 'right', type: 'pct',    editable: true, step: '0.001' },
+    { key: 'interestAccrued',      label: 'Interest amt.',  width: 110, sortable: true, align: 'right', type: 'usd',    editable: true, step: '100' },
+    { key: 'totalInvestment',      label: 'Total inv.',     width: 120, sortable: true, align: 'right' },
+    { key: 'convPrice',            label: 'Share price',    width: 110, sortable: true, align: 'right', type: 'usd',    editable: true, step: '0.01' },
+    { key: 'conversionDiscount',   label: 'Discount',       width: 80,  sortable: true, align: 'right', type: 'pct',    editable: true, step: '0.01' },
+    { key: 'effectiveConvPrice',   label: 'Eff. share price', width: 120, sortable: true, align: 'right' },
   ]
   for (const u of cnUnits.selected.value) {
     cols.push({
@@ -255,6 +257,9 @@ async function onDelete(row: CnRow) {
         <template #cell-interestAccrued="{ value }">
           <span class="text-ink-700">{{ fmtUSD(value) }}</span>
         </template>
+        <template #cell-totalInvestment="{ value }">
+          <span class="font-medium text-ink-900">{{ fmtUSD(value) }}</span>
+        </template>
         <template #cell-conversionDiscount="{ value }">
           <span v-if="value" class="text-ink-700">{{ fmtPct(value, 2) }}</span>
           <span v-else class="text-ink-400">—</span>
@@ -272,7 +277,7 @@ async function onDelete(row: CnRow) {
           >{{ fmtPricePerShare(value) }}</span>
         </template>
         <template v-for="u in cnUnits.selected.value" :key="`cell-shares_${u}`" #[`cell-shares_${u}`]="{ row }">
-          {{ formatBy(u, row.shares, compute?.round?.postRoundFDS || 0, row.convPrice || 0) }}
+          {{ formatBy(u, row.shares, compute?.round?.postRoundFDS || 0, row.effectiveConvPrice || 0) }}
         </template>
       </UiEditableTable>
 
