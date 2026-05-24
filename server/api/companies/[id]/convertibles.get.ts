@@ -42,7 +42,7 @@ export default defineEventHandler((event) => {
   // round-summary.get (open rounds last, otherwise close_date ascending).
   const rounds = db().prepare(`
     SELECT code, name, share_class_code, share_price, common, preferred_issued,
-           option_pool_issued, close_date, seniority, kind
+           option_pool_issued, close_date, seniority, kind, parent_round_code
     FROM rounds WHERE company_id = ?
   `).all(id) as Array<{
     code: string; name: string | null; share_class_code: string | null;
@@ -50,6 +50,7 @@ export default defineEventHandler((event) => {
     common: number; preferred_issued: number; option_pool_issued: number;
     close_date: string | null; seniority: number;
     kind: 'formation' | 'closed' | 'open';
+    parent_round_code: string | null;
   }>
 
   rounds.sort((a, b) => {
@@ -131,9 +132,31 @@ export default defineEventHandler((event) => {
   // to that round). Compute each CN's shares using that preFDS, then add
   // them to cumulativeFDS before moving on.
   const sharesByCn = new Map<string, { shares: number; effectiveConvPrice: number; convPrice: number; preFDS: number }>()
+  const preFDSByRoundCode = new Map<string, number>()
+  function qfInitialPreFDS(r: typeof rounds[number], ownPreFDS: number): number {
+    let parentCode = r.parent_round_code
+    let depth = 0
+    while (parentCode && depth < 5) {
+      const fromMap = preFDSByRoundCode.get(parentCode.toUpperCase())
+      if (fromMap !== undefined) return fromMap
+      const parentRound = rounds.find(x => x.code.toUpperCase() === parentCode!.toUpperCase())
+      if (!parentRound) break
+      parentCode = parentRound.parent_round_code
+      depth++
+    }
+    return ownPreFDS
+  }
+
   let cumulativeFDS = 0
   for (const r of rounds) {
-    const preFDS = cumulativeFDS
+    const ownPreFDS = cumulativeFDS
+    preFDSByRoundCode.set(r.code.toUpperCase(), ownPreFDS)
+    // CN cap formula uses the QF-initial preFDS (parent's preFDS when
+    // this round is a tranche of an earlier-started Qualified
+    // Financing). Mirrors the round-summary logic so the CN ledger's
+    // Resulting column agrees with the Financings table's Notes
+    // converted column.
+    const preFDS = qfInitialPreFDS(r, ownPreFDS)
     const roundPPS = r.share_price && r.share_price > 0 ? r.share_price : 0
     const bucket = cnsByRound.get(r.code.toUpperCase()) || []
     let bucketShares = 0

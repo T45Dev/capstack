@@ -38,6 +38,13 @@ interface RoundColumn {
   participation: 'none' | 'full' | 'capped'
   participation_cap: number | null
   pref_tier: number               // higher = paid first
+  // Parent round code — when this round is a later tranche of an earlier
+  // round's Qualified Financing (e.g. B-2 is a tranche of the same Series
+  // B raise that started at B-1), the cap-implied conversion price for
+  // CNs uses the PARENT's pre-FDS instead of this round's. Per the
+  // promissory note convention: "immediately prior to the initial closing
+  // of the Qualified Financing".
+  parent_round_code: string | null
   // Per-cell diagnostic: which CNs got rolled into this round's
   // Notes-converted total, with their resulting shares + raw destination.
   // Empty array when nothing's attributed. Powers the Notes-converted
@@ -62,7 +69,8 @@ export default defineEventHandler((event) => {
     SELECT id, code, name, kind, close_date, share_class_code, share_price,
            new_money, debt_canceled, option_pool_issued, pre_money,
            preferred_issued, preferred_issued_override, common, seniority,
-           liq_pref_multiple, participation, participation_cap, pref_tier
+           liq_pref_multiple, participation, participation_cap, pref_tier,
+           parent_round_code
     FROM rounds WHERE company_id = ?
   `).all(id) as Array<{
     id: string; code: string; name: string | null; kind: 'formation' | 'closed' | 'open';
@@ -73,6 +81,7 @@ export default defineEventHandler((event) => {
     common: number; seniority: number;
     liq_pref_multiple: number; participation: 'none' | 'full' | 'capped';
     participation_cap: number | null; pref_tier: number;
+    parent_round_code: string | null;
   }>
 
   // The `kind` column on each round is the source of truth for whether
@@ -209,6 +218,30 @@ export default defineEventHandler((event) => {
   const cols: RoundColumn[] = []
   let cumulativeFDS = 0
   let cumulativeFinancing = 0
+  // preFDS-by-round-code so CNs at later tranches can look up the
+  // initial-closing preFDS of their parent. Per the promissory note:
+  // "outstanding shares ... as of immediately prior to the initial
+  // closing of the Qualified Financing (assuming full conversion of
+  // all outstanding preferred ... other than the Notes)" — i.e., the
+  // state right BEFORE the first tranche of the series, not the state
+  // before this specific tranche.
+  const preFDSByRoundCode = new Map<string, number>()
+  // Resolve a round's "QF-initial preFDS" by walking parent_round_code
+  // up to the root (with a safety bound). Falls back to the round's own
+  // preFDS if no parent chain is found.
+  function qfInitialPreFDS(r: { code: string; parent_round_code: string | null }, ownPreFDS: number): number {
+    let parentCode = r.parent_round_code
+    let depth = 0
+    while (parentCode && depth < 5) {
+      const fromMap = preFDSByRoundCode.get(parentCode.toUpperCase())
+      if (fromMap !== undefined) return fromMap
+      const parentRound = rounds.find(x => x.code.toUpperCase() === parentCode!.toUpperCase())
+      if (!parentRound) break
+      parentCode = parentRound.parent_round_code
+      depth++
+    }
+    return ownPreFDS
+  }
 
   for (let i = 0; i < rounds.length; i++) {
     const r = rounds[i]
@@ -231,10 +264,15 @@ export default defineEventHandler((event) => {
     // CNs attributed to this round. preFDS for the cap-based effective
     // price denominator is the FDS through the *previous* round, which is
     // the cumulativeFDS we've accumulated so far (this round's own
-    // contributions haven't been added yet).
+    // contributions haven't been added yet). When the round is a later
+    // tranche of a multi-tranche QF (parent_round_code set), the cap
+    // formula uses the PARENT's preFDS — the state immediately prior to
+    // the initial closing of the QF, per the promissory note convention.
     const codeKey = r.code.toUpperCase()
     const attribs = cnByCode.get(codeKey) || []
-    const preFDS = cumulativeFDS
+    const ownPreFDS = cumulativeFDS
+    preFDSByRoundCode.set(codeKey, ownPreFDS)
+    const preFDS = qfInitialPreFDS(r, ownPreFDS)
 
     let cnDollars = 0
     let cnShares = 0
@@ -299,6 +337,7 @@ export default defineEventHandler((event) => {
       participation: (r.participation as any) || 'none',
       participation_cap: r.participation_cap != null ? Number(r.participation_cap) : null,
       pref_tier: Number(r.pref_tier ?? 0),
+      parent_round_code: r.parent_round_code,
       notes_attributed: notesAttributed,
     })
   }
