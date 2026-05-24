@@ -233,6 +233,13 @@ function migrate(d: Database.Database): void {
   // new_money / share_price". A numeric value (including 0) overrides for
   // rounds where the math doesn't apply, e.g. debt-only or bridge rounds.
   ensureColumn('rounds', 'preferred_issued_override', 'REAL')
+  // Liquidation preference terms. Default to 1x non-participating with
+  // everyone pari passu (tier 0) — the modern-term-sheet baseline that
+  // the exit waterfall starts from.
+  ensureColumn('rounds', 'liq_pref_multiple', 'REAL NOT NULL DEFAULT 1.0')
+  ensureColumn('rounds', 'participation', "TEXT NOT NULL DEFAULT 'none'")  // 'none' | 'full' | 'capped'
+  ensureColumn('rounds', 'participation_cap', 'REAL')                       // multiple, e.g. 3.0 = 3x invested cap
+  ensureColumn('rounds', 'pref_tier', 'INTEGER NOT NULL DEFAULT 0')         // higher tier = paid first; pari passu within tier
 
   // Backfill: for any company whose Formation round has option_pool_issued = 0
   // but whose option_pools table is non-empty, seed Formation with the
