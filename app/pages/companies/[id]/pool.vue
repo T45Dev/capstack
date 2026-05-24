@@ -217,7 +217,14 @@ const totals = computed(() => {
   const floorShares = events.value.filter(e => isIdea(e.source) && e.type === 'floor').reduce((a, e) => Math.max(a, e.shares), 0)
   const available = poolAuthorized - outstandingShares - proposedShares
   const projectedEnd = poolAuthorized + ideaTopups + ideaForfeits - outstandingShares - proposedShares - ideaGrants - ideaExercises
-  return { poolAuthorized, outstandingShares, proposedShares, ideaGrants, ideaTopups, ideaForfeits, ideaExercises, floorShares, available, projectedEnd }
+  // Lifetime grant accounting (same shape as the Option Grants page): sum
+  // quantity_exercised / quantity_forfeited across outstanding grants. These
+  // came from the Carta option-plan sheet via the per-grant detail import.
+  const ogrants = (grantsData.value?.grants || []).filter((g: any) => g.status === 'outstanding')
+  const totalExercised = ogrants.reduce((a: number, g: any) => a + (g.quantity_exercised || 0), 0)
+  const totalForfeited = ogrants.reduce((a: number, g: any) => a + (g.quantity_forfeited || 0), 0)
+  const totalIssued = ogrants.reduce((a: number, g: any) => a + (g.quantity_issued || g.quantity), 0)
+  return { poolAuthorized, outstandingShares, proposedShares, ideaGrants, ideaTopups, ideaForfeits, ideaExercises, floorShares, available, projectedEnd, totalExercised, totalForfeited, totalIssued }
 })
 
 // ---- Idea modal ----
@@ -423,8 +430,13 @@ const chart = computed(() => {
 </script>
 
 <template>
-  <div>
-    <div class="flex items-end justify-between mb-5 gap-3 flex-wrap">
+  <!-- Single-page view: the heading is static at the top, the timeline
+       table scrolls vertically inside its own card. Outer flex column +
+       calc(100vh − h-14 nav) keeps the layout pinned to the viewport so
+       the operator never has to scroll the page to see the bottom row. -->
+  <div class="flex flex-col" style="height: calc(100vh - 3.5rem - 3rem)">
+    <!-- Header bar -->
+    <div class="flex items-end justify-between mb-4 gap-3 flex-wrap shrink-0">
       <div>
         <h1 class="text-xl font-semibold tracking-tight text-ink-900">Option pool impact</h1>
         <p class="text-sm text-ink-600 mt-1">Chronological view of every event that affects the pool — pool top-ups, outstanding grants, proposed grants, and your future ideas.</p>
@@ -442,70 +454,108 @@ const chart = computed(() => {
       </div>
     </div>
 
-    <!-- Top stats + horizontal stacked bar -->
-    <div class="rounded-lg border border-ink-300 bg-white shadow-card p-4 mb-5">
-      <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-        <UiStat label="Pool authorized" :value="fmtShares(totals.poolAuthorized)" />
-        <UiStat label="Outstanding" :value="fmtShares(totals.outstandingShares)" />
-        <UiStat label="Proposed" :value="fmtShares(totals.proposedShares)" />
-        <UiStat label="Ideas (grants)" :value="fmtShares(totals.ideaGrants)" :tone="totals.ideaGrants ? 'warn' : 'default'" />
-        <UiStat label="Projected ending" :value="fmtShares(totals.projectedEnd)" emphasis :tone="totals.projectedEnd < 0 ? 'warn' : 'default'" />
+    <!-- Overall heading: pool math as equation + lifetime row + pie/line
+         charts side-by-side. Stays put while the timeline below scrolls. -->
+    <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-4 p-4 shrink-0">
+      <!-- Pool math equation (matches the Option Grants layout). -->
+      <div class="flex flex-wrap items-end gap-3 text-ink-900 num">
+        <div class="flex flex-col items-start">
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Pool authorized</span>
+          <span class="text-2xl font-semibold">{{ fmtShares(totals.poolAuthorized) }}</span>
+        </div>
+        <span class="text-2xl text-ink-400 pb-1">=</span>
+        <div class="flex flex-col items-start">
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Outstanding</span>
+          <span class="text-2xl font-semibold">{{ fmtShares(totals.outstandingShares) }}</span>
+        </div>
+        <span class="text-2xl text-ink-400 pb-1">+</span>
+        <div class="flex flex-col items-start">
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Proposed</span>
+          <span class="text-2xl font-semibold text-amber-700">{{ fmtShares(totals.proposedShares) }}</span>
+        </div>
+        <span v-if="totals.ideaGrants > 0" class="text-2xl text-ink-400 pb-1">+</span>
+        <div v-if="totals.ideaGrants > 0" class="flex flex-col items-start">
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Ideas</span>
+          <span class="text-2xl font-semibold text-amber-500">{{ fmtShares(totals.ideaGrants) }}</span>
+        </div>
+        <span class="text-2xl text-ink-400 pb-1">+</span>
+        <div class="flex flex-col items-start">
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Available</span>
+          <span class="text-2xl font-semibold" :class="totals.projectedEnd < 0 ? 'text-red-700' : 'text-emerald-700'">{{ fmtShares(totals.available) }}</span>
+        </div>
       </div>
-      <!-- Pie chart — Outstanding / Proposed / Ideas / Available (spec §5.6). -->
-      <div v-if="pieTotal > 0" class="flex items-center gap-6 flex-wrap">
-        <svg viewBox="0 0 120 120" width="120" height="120" class="shrink-0">
-          <g>
-            <path v-for="s in pieSlices" :key="s.key" :d="s.path" :fill="s.color" stroke="white" stroke-width="1" />
-          </g>
-        </svg>
-        <ul class="text-xs text-ink-700 space-y-1.5">
-          <li v-for="s in pieSlices" :key="s.key" class="flex items-center gap-2 num">
-            <span class="inline-block w-3 h-3 rounded-sm" :style="{ background: s.color }" />
-            <span class="text-ink-600 w-24">{{ s.label }}</span>
-            <span class="text-ink-900 font-medium">{{ fmtShares(s.value) }}</span>
-            <span class="text-ink-500">· {{ pieTotal > 0 ? fmtPct(s.value / pieTotal, 1) : '0%' }}</span>
-          </li>
-        </ul>
-        <div v-if="totals.floorShares > 0" class="text-xs text-ink-600 num ml-auto">
-          <div class="flex items-center gap-2">
-            <span class="inline-block w-3 h-3 rounded-sm border-2 border-dashed border-ink-400" />
-            <span class="text-ink-500">Floor</span>
-            <span class="text-ink-900 font-medium">{{ fmtShares(totals.floorShares) }}</span>
-          </div>
-          <p class="text-[10px] text-ink-500 mt-1 max-w-[200px]">Minimum the pool can fall to — informational; doesn't change the totals above.</p>
+      <!-- Lifetime equation (always shown — exercises shrink the pool,
+           forfeits return shares to Available, so the operator needs to
+           see these numbers even when they're zero today). -->
+      <div class="mt-3 pt-3 border-t border-ink-200 flex flex-wrap items-end gap-3 text-ink-700 num text-sm">
+        <span class="text-[10px] uppercase tracking-wider text-ink-500">Lifetime</span>
+        <div class="flex items-end gap-1.5">
+          <span class="text-ink-500">Issued</span>
+          <span class="font-medium">{{ fmtShares(totals.totalIssued) }}</span>
+        </div>
+        <span class="text-ink-400">=</span>
+        <div class="flex items-end gap-1.5">
+          <span class="text-ink-500">Outstanding</span>
+          <span class="font-medium">{{ fmtShares(totals.outstandingShares) }}</span>
+        </div>
+        <span class="text-ink-400">+</span>
+        <div class="flex items-end gap-1.5">
+          <span class="text-ink-500">Exercised</span>
+          <span class="font-medium" :class="totals.totalExercised > 0 ? 'text-accent-700' : 'text-ink-400'">{{ fmtShares(totals.totalExercised) }}</span>
+        </div>
+        <span class="text-ink-400">+</span>
+        <div class="flex items-end gap-1.5">
+          <span class="text-ink-500">Forfeited</span>
+          <span class="font-medium" :class="totals.totalForfeited > 0 ? 'text-red-700' : 'text-ink-400'">{{ fmtShares(totals.totalForfeited) }}</span>
+        </div>
+      </div>
+
+      <!-- Pie + line side-by-side. Pie takes a fixed column on the left;
+           line takes whatever's left to the right. Wraps on narrow screens. -->
+      <div v-if="pieTotal > 0 || chartPoints.length" class="mt-4 pt-4 border-t border-ink-200 flex gap-6 flex-wrap items-start">
+        <div v-if="pieTotal > 0" class="flex items-center gap-3 shrink-0">
+          <svg viewBox="0 0 120 120" width="100" height="100" class="shrink-0">
+            <g>
+              <path v-for="s in pieSlices" :key="s.key" :d="s.path" :fill="s.color" stroke="white" stroke-width="1" />
+            </g>
+          </svg>
+          <ul class="text-[11px] text-ink-700 space-y-1 num">
+            <li v-for="s in pieSlices" :key="s.key" class="flex items-center gap-1.5">
+              <span class="inline-block w-2.5 h-2.5 rounded-sm" :style="{ background: s.color }" />
+              <span class="text-ink-600 w-[68px]">{{ s.label }}</span>
+              <span class="text-ink-900 font-medium">{{ fmtShares(s.value) }}</span>
+            </li>
+            <li v-if="totals.floorShares > 0" class="flex items-center gap-1.5">
+              <span class="inline-block w-2.5 h-2.5 rounded-sm border-2 border-dashed border-ink-400" />
+              <span class="text-ink-600 w-[68px]">Floor</span>
+              <span class="text-ink-900 font-medium">{{ fmtShares(totals.floorShares) }}</span>
+            </li>
+          </ul>
+        </div>
+        <div v-if="chartPoints.length" class="flex-1 min-w-[320px]">
+          <div class="text-[10px] uppercase tracking-wider text-ink-500 mb-1">Pool balance over time</div>
+          <svg :viewBox="`0 0 ${chartW} ${chartH}`" class="w-full" :style="{ height: chartH + 'px' }">
+            <g v-for="(t, i) in chart.yTicks" :key="i">
+              <line :x1="padL" :x2="chartW - padR" :y1="t.y" :y2="t.y" stroke="#e2e8f0" stroke-width="1" />
+              <text :x="padL - 6" :y="t.y + 3" text-anchor="end" font-size="9" fill="#64748b" class="num">{{ t.label }}</text>
+            </g>
+            <g v-for="(t, i) in chart.xTicks" :key="`x-${i}`">
+              <text :x="t.x" :y="chartH - 8" text-anchor="middle" font-size="9" fill="#64748b">{{ t.label }}</text>
+            </g>
+            <line v-if="chart.yMin < 0" :x1="padL" :x2="chartW - padR" :y1="chart.yTicks[0]?.y" :y2="chart.yTicks[0]?.y" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 3" />
+            <path :d="chart.path" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round" />
+            <circle v-for="(d, i) in chart.dots" :key="`d-${i}`" :cx="d.x" :cy="d.y" r="3" fill="#2563eb">
+              <title>{{ d.label }} — {{ fmtDate(d.t) }} → balance {{ fmtShares(d.balance) }}</title>
+            </circle>
+          </svg>
         </div>
       </div>
     </div>
 
-    <!-- Line chart -->
-    <div v-if="chartPoints.length" class="rounded-lg border border-ink-300 bg-white shadow-card p-4 mb-5">
-      <h2 class="text-[11px] font-semibold uppercase tracking-wider text-ink-500 mb-2">Pool balance over time</h2>
-      <div class="overflow-x-auto">
-        <svg :viewBox="`0 0 ${chartW} ${chartH}`" class="w-full" :style="{ minWidth: '600px', height: chartH + 'px' }">
-          <!-- y grid -->
-          <g v-for="(t, i) in chart.yTicks" :key="i">
-            <line :x1="padL" :x2="chartW - padR" :y1="t.y" :y2="t.y" stroke="#e2e8f0" stroke-width="1" />
-            <text :x="padL - 6" :y="t.y + 3" text-anchor="end" font-size="9" fill="#64748b" class="num">{{ t.label }}</text>
-          </g>
-          <!-- x ticks -->
-          <g v-for="(t, i) in chart.xTicks" :key="`x-${i}`">
-            <text :x="t.x" :y="chartH - 8" text-anchor="middle" font-size="9" fill="#64748b">{{ t.label }}</text>
-          </g>
-          <!-- zero baseline -->
-          <line v-if="chart.yMin < 0" :x1="padL" :x2="chartW - padR" :y1="chart.yTicks[0]?.y" :y2="chart.yTicks[0]?.y" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 3" />
-          <!-- line -->
-          <path :d="chart.path" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round" />
-          <!-- markers -->
-          <circle v-for="(d, i) in chart.dots" :key="`d-${i}`" :cx="d.x" :cy="d.y" r="3" fill="#2563eb">
-            <title>{{ d.label }} — {{ fmtDate(d.t) }} → balance {{ fmtShares(d.balance) }}</title>
-          </circle>
-        </svg>
-      </div>
-    </div>
-
-    <!-- Timeline table -->
-    <div class="rounded-lg border border-ink-300 bg-white shadow-card overflow-hidden">
-      <div class="flex items-center justify-between px-4 py-3 border-b border-ink-200">
+    <!-- Timeline table: takes the remaining viewport height, scrolls
+         vertically inside, sticky header so the column labels stay put. -->
+    <div class="rounded-lg border border-ink-300 bg-white shadow-card flex flex-col min-h-0 flex-1">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-ink-200 shrink-0">
         <div>
           <h2 class="text-sm font-semibold text-ink-900">Timeline</h2>
           <p class="text-xs text-ink-500">All events in chronological order. "Single-event" mode shown — vest curves only affect the chart above.</p>
@@ -514,8 +564,9 @@ const chart = computed(() => {
       <div v-if="!events.length" class="px-4 py-8 text-sm text-ink-500 text-center">
         No events yet. The first pool top-up or grant will appear here.
       </div>
-      <table v-else class="w-full text-[13px] num">
-        <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
+      <div v-else class="overflow-y-auto min-h-0 flex-1">
+        <table class="w-full text-[13px] num">
+        <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100 sticky top-0 z-10">
           <tr>
             <th class="px-2.5 py-1.5 font-semibold w-28">Date</th>
             <th class="px-2.5 py-1.5 font-semibold">Event</th>
@@ -563,6 +614,7 @@ const chart = computed(() => {
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
 
     <!-- Idea modal -->

@@ -602,7 +602,10 @@ const fieldLabels: Record<string, string> = {
           <span class="text-2xl font-semibold text-emerald-700">{{ fmtShares(poolAvailable) }}</span>
         </div>
       </div>
-      <div v-if="totalExercised > 0 || totalForfeited > 0 || totalIssued > totalOutstanding" class="mt-3 pt-3 border-t border-ink-200 flex flex-wrap items-end gap-3 text-ink-700 num text-sm">
+      <!-- Lifetime equation (always shown — exercises shrink the pool,
+           forfeits return shares to Available, so the operator needs to
+           see these numbers even when they're zero today). -->
+      <div class="mt-3 pt-3 border-t border-ink-200 flex flex-wrap items-end gap-3 text-ink-700 num text-sm">
         <span class="text-[10px] uppercase tracking-wider text-ink-500">Lifetime</span>
         <div class="flex items-end gap-1.5">
           <span class="text-ink-500">Issued</span>
@@ -616,12 +619,12 @@ const fieldLabels: Record<string, string> = {
         <span class="text-ink-400">+</span>
         <div class="flex items-end gap-1.5">
           <span class="text-ink-500">Exercised</span>
-          <span class="font-medium text-accent-700">{{ fmtShares(totalExercised) }}</span>
+          <span class="font-medium" :class="totalExercised > 0 ? 'text-accent-700' : 'text-ink-400'">{{ fmtShares(totalExercised) }}</span>
         </div>
         <span class="text-ink-400">+</span>
         <div class="flex items-end gap-1.5">
           <span class="text-ink-500">Forfeited</span>
-          <span class="font-medium text-red-700">{{ fmtShares(totalForfeited) }}</span>
+          <span class="font-medium" :class="totalForfeited > 0 ? 'text-red-700' : 'text-ink-400'">{{ fmtShares(totalForfeited) }}</span>
         </div>
       </div>
     </div>
