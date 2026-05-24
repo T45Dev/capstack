@@ -19,6 +19,9 @@ const { data: company } = await useFetch(() => `/api/companies/${id.value}`, { w
 const { data: capTable } = await useFetch(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => null as any })
 const { data: grantsData } = await useFetch(() => `/api/companies/${id.value}/grants`, { watch: [id], default: () => ({ grants: [], pools: [] } as any) })
 const { data: ideas, refresh: refreshIdeas } = await useFetch<any[]>(() => `/api/companies/${id.value}/pool-events`, { watch: [id], default: () => [] })
+// Round-summary supplies per-round option_pool_issued + close_date, which
+// is what drives the chronological pool top-up events on the timeline.
+const { data: roundSummary } = await useFetch<{ rounds: Array<{ round_id: string; code: string; name: string | null; close_date: string | null; option_pool_issued: number }> }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
 
 // Sensible fallback date used when an event has no date in the source data.
 // Prefer the company's starting-round date (the closest "anchor" we have),
@@ -85,14 +88,30 @@ interface TimelineEvent {
 const events = computed<TimelineEvent[]>(() => {
   const out: TimelineEvent[] = []
 
-  // Pool top-ups (option_pools rows). When the source has no adopted_date,
-  // anchor to the company's starting-round date so the event lands in a
-  // sensible spot on the timeline instead of 1970.
-  for (const p of (grantsData.value?.pools || [])) {
+  // Pool top-ups derived from the Financings table — each round whose
+  // "Option pool issued" cell is non-zero contributes a pool_topup event
+  // anchored to that round's close_date. This is the chronological source
+  // the operator manages on the Financings page (initial authorization,
+  // top-ups at later rounds, etc.).
+  for (const r of (roundSummary.value?.rounds || [])) {
+    if (!r.option_pool_issued || r.option_pool_issued <= 0) continue
     out.push({
-      id: `pool:${p.id}`, date: p.adopted_date || fallbackDate.value, name: p.name || 'Option pool',
-      type: 'pool_topup', kind: null, shares: p.authorized || 0, direction: 1, source: 'pool',
+      id: `pool:${r.round_id}`,
+      date: r.close_date || fallbackDate.value,
+      name: `${r.name || r.code} pool top-up`,
+      type: 'pool_topup', kind: null, shares: r.option_pool_issued, direction: 1, source: 'pool',
     })
+  }
+  // Fallback: if no per-round pool issuances are typed in yet, fall back
+  // to the option_pools table (single lump from Carta import). Keeps the
+  // page useful before the operator has filled in per-round cells.
+  if (out.length === 0) {
+    for (const p of (grantsData.value?.pools || [])) {
+      out.push({
+        id: `pool:${p.id}`, date: p.adopted_date || fallbackDate.value, name: p.name || 'Option pool',
+        type: 'pool_topup', kind: null, shares: p.authorized || 0, direction: 1, source: 'pool',
+      })
+    }
   }
 
   // Existing grants: outstanding + proposed
