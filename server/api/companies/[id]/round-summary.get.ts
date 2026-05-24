@@ -47,7 +47,7 @@ export default defineEventHandler((event) => {
            preferred_issued, common, seniority
     FROM rounds WHERE company_id = ?
   `).all(id) as Array<{
-    id: string; code: string; name: string | null; kind: 'formation' | 'closed';
+    id: string; code: string; name: string | null; kind: 'formation' | 'closed' | 'open';
     close_date: string | null; share_class_code: string | null;
     share_price: number | null; new_money: number; debt_canceled: number;
     option_pool_issued: number; pre_money: number | null;
@@ -73,17 +73,22 @@ export default defineEventHandler((event) => {
     return a.seniority - b.seniority
   })
 
-  // CNs — sum per attributed round. destination_class_code stores the
-  // round's code (it's a legacy field name from when it pointed at share
-  // classes; the column hosts round codes now).
+  // CNs — group by attributed round. Each note carries its own
+  // cap/discount terms; effective conversion price is computed per CN
+  // using the round's PPS and pre-money FDS (resolved during the walk
+  // below). The same logic mirrors /companies/:id/convertibles so the
+  // "Notes converted" share count on the cap table matches the
+  // "Resulting shares" column on the CN page.
   const cnRows = db().prepare(`
     SELECT principal, interest_accrued, interest_rate, issue_date, conversion_date,
-           destination_class_code, converts_at_round
+           destination_class_code, conversion_discount, valuation_cap, conversion_price
     FROM convertibles WHERE company_id = ? AND status = 'outstanding'
   `).all(id) as Array<{
     principal: number; interest_accrued: number; interest_rate: number;
     issue_date: string | null; conversion_date: string | null;
-    destination_class_code: string | null; converts_at_round: number;
+    destination_class_code: string | null;
+    conversion_discount: number; valuation_cap: number | null;
+    conversion_price: number | null;
   }>
 
   function accruedInterestFor(c: typeof cnRows[number]): number {
@@ -98,15 +103,26 @@ export default defineEventHandler((event) => {
     return (c.principal || 0) * c.interest_rate * (days / 365)
   }
 
-  const cnByCode = new Map<string, { dollars: number }>()
+  interface CnAttrib {
+    total: number               // principal + accrued interest
+    storedConvPrice: number     // Carta-imported or user-typed
+    discount: number
+    cap: number
+  }
+  const cnByCode = new Map<string, CnAttrib[]>()
   for (const c of cnRows) {
     const total = (c.principal || 0) + accruedInterestFor(c)
     if (total <= 0) continue
     const codeRaw = c.destination_class_code ? String(c.destination_class_code).replace(/-\d+$/, '').toUpperCase() : ''
-    const bucket = codeRaw || (c.converts_at_round ? 'OPEN' : 'DEFERRED')
-    const cur = cnByCode.get(bucket) || { dollars: 0 }
-    cur.dollars += total
-    cnByCode.set(bucket, cur)
+    if (!codeRaw) continue  // unassigned notes don't roll up anywhere
+    const bucket = cnByCode.get(codeRaw) || []
+    bucket.push({
+      total,
+      storedConvPrice: c.conversion_price && c.conversion_price > 0 ? c.conversion_price : 0,
+      discount: c.conversion_discount || 0,
+      cap: c.valuation_cap || 0,
+    })
+    cnByCode.set(codeRaw, bucket)
   }
 
   const cols: RoundColumn[] = []
@@ -125,24 +141,45 @@ export default defineEventHandler((event) => {
     const common = Number(r.common) || 0
     const poolIssued = Number(r.option_pool_issued) || 0
 
-    // Notes financing — dollars from CNs attributed to this round's code.
+    // CNs attributed to this round. preFDS for the cap-based effective
+    // price denominator is the FDS through the *previous* round, which is
+    // the cumulativeFDS we've accumulated so far (this round's own
+    // contributions haven't been added yet).
     const codeKey = r.code.toUpperCase()
-    let cnDollars = cnByCode.get(codeKey)?.dollars || 0
-    if (effectiveKind === 'open') cnDollars += cnByCode.get('OPEN')?.dollars || 0
+    const attribs = cnByCode.get(codeKey) || []
+    const roundPPS = r.share_price && r.share_price > 0 ? r.share_price : 0
+    const preFDS = cumulativeFDS
 
-    // Notes converted shares (informational; share count from the CN
-    // dollars at this round's PPS).
-    const cnShares = r.share_price && r.share_price > 0 ? cnDollars / r.share_price : 0
+    let cnDollars = 0
+    let cnShares = 0
+    for (const a of attribs) {
+      cnDollars += a.total
+      // Effective conv price — same rule as /convertibles: lower of
+      // (round PPS × (1 − discount)) and (cap / pre-money FDS).
+      let eff = 0
+      if (roundPPS > 0) {
+        const discountPrice = a.discount > 0 ? roundPPS * (1 - a.discount) : roundPPS
+        const capPrice = a.cap > 0 && preFDS > 0 ? a.cap / preFDS : 0
+        eff = capPrice > 0 ? Math.min(discountPrice, capPrice) : discountPrice
+      } else if (a.cap > 0 && preFDS > 0) {
+        eff = a.cap / preFDS
+      }
+      // Stored conv price overrides the math when present (e.g. Carta
+      // recorded an exact price that differs from the model). Falls back
+      // to the computed effective if neither is available.
+      const usedPrice = a.storedConvPrice || eff
+      if (usedPrice > 0) cnShares += a.total / usedPrice
+    }
 
     const preMoney = (r.pre_money != null && r.pre_money !== 0) ? r.pre_money : null
     const newMoney = r.new_money || 0
     const postMoney = (preMoney || 0) + newMoney + cnDollars
 
-    // Cumulative FDS sums up user-typed share contributions for this
-    // round. notes_converted is informational (those shares are already
-    // counted in preferred_issued when the CN converted into this round's
-    // class), so it's NOT added separately here.
-    cumulativeFDS += common + preferredIssued + poolIssued
+    // Cumulative FDS sums the user-typed equity contributions for this
+    // round PLUS the CN-converted shares attributed to it. The "Notes
+    // converted" row carries that share count so the operator can see
+    // it line up with the per-note shares on the CN page.
+    cumulativeFDS += common + preferredIssued + poolIssued + cnShares
     cumulativeFinancing += newMoney + cnDollars
 
     cols.push({
