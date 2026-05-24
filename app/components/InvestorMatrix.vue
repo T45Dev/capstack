@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Investors-by-round matrix — embedded on the Financings page below the
-// Summary Cap Table. Mirrors the per-investor allocation pattern from the
+// Financings table. Mirrors the per-investor allocation pattern from the
 // reference ANT Pro Forma spreadsheet: every named investor gets their own
 // row, every round is a column, each cell is the $ amount that investor
 // contributed in that round. Sum-per-round reconciles against the round's
