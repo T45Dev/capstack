@@ -136,8 +136,9 @@ export default defineEventHandler(async (event) => {
           id, company_id, stakeholder_id, external_id, stakeholder_name,
           principal, interest_accrued, interest_rate, issue_date, maturity_date,
           conversion_date, destination_class_code,
-          valuation_cap, conversion_discount, converts_at_round, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outstanding')
+          valuation_cap, conversion_discount, conversion_price,
+          converts_at_round, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outstanding')
       `)
       for (const cn of parsed.convertibles) {
         try {
@@ -156,6 +157,7 @@ export default defineEventHandler(async (event) => {
             cn.destinationClassCode ?? null,
             cn.valuationCap ?? null,
             cn.conversionDiscount ?? 0,
+            cn.conversionPrice ?? null,
             cn.conversionDate ? 1 : 0,
           )
         } catch (err: any) {

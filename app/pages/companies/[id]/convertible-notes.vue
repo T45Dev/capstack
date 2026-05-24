@@ -6,7 +6,7 @@
 // column). The Open round is whichever Cap Table row has kind='open'.
 // Click any row to edit inline; use the add-row affordance at the
 // bottom for bridge notes.
-import { fmtUSD, fmtPricePerShare } from '~/utils/format'
+import { fmtUSD, fmtPricePerShare, fmtPct } from '~/utils/format'
 import type { EditableCol } from '~/components/ui/UiEditableTable.vue'
 
 const route = useRoute()
@@ -19,6 +19,9 @@ interface CnRow {
   conversionDate: string | null
   principal: number
   interestAccrued: number
+  interestRate: number
+  conversionDiscount: number
+  valuationCap: number | null
   convPrice: number
   shares: number
   basisApplied: string
@@ -76,18 +79,20 @@ const destinationOptions = computed(() => {
 
 const cnCols = computed<EditableCol[]>(() => {
   const cols: EditableCol[] = [
-    { key: 'stakeholderName',      label: 'Holder',      width: 200, sortable: true, align: 'left',  type: 'text',   editable: true, placeholder: 'VCT Investments' },
+    { key: 'stakeholderName',      label: 'Holder',      width: 180, sortable: true, align: 'left',  type: 'text',   editable: true, placeholder: 'VCT Investments' },
     { key: 'destinationClassCode', label: 'Destination', width: 130, sortable: true, align: 'left',  type: 'select', editable: true, options: destinationOptions.value },
-    { key: 'conversionDate',       label: 'Conv. date',  width: 150, sortable: true, align: 'left',  type: 'date',   editable: true },
-    { key: 'principal',            label: 'Principal',   width: 130, sortable: true, align: 'right', type: 'usd',    editable: true, step: '1000' },
-    { key: 'interestAccrued',      label: 'Interest',    width: 120, sortable: true, align: 'right' },
-    { key: 'convPrice',            label: 'Conv. price', width: 120, sortable: true, align: 'right' },
+    { key: 'conversionDate',       label: 'Conv. date',  width: 130, sortable: true, align: 'left',  type: 'date',   editable: true },
+    { key: 'principal',            label: 'Principal',   width: 120, sortable: true, align: 'right', type: 'usd',    editable: true, step: '1000' },
+    { key: 'interestRate',         label: 'Rate',        width: 80,  sortable: true, align: 'right', type: 'pct',    editable: true, step: '0.001' },
+    { key: 'interestAccrued',      label: 'Interest',    width: 110, sortable: true, align: 'right', type: 'usd',    editable: true, step: '100' },
+    { key: 'conversionDiscount',   label: 'Discount',    width: 80,  sortable: true, align: 'right', type: 'pct',    editable: true, step: '0.01' },
+    { key: 'convPrice',            label: 'Conv. price', width: 110, sortable: true, align: 'right', type: 'usd',    editable: true, step: '0.01' },
   ]
   for (const u of cnUnits.selected.value) {
     cols.push({
       key: `shares_${u}`,
       label: `Resulting${unitSuffix(u)}`,
-      width: u === 'shares' ? 140 : 110, sortable: true, align: 'right',
+      width: u === 'shares' ? 130 : 100, sortable: true, align: 'right',
     })
   }
   return cols
@@ -132,6 +137,10 @@ async function onUpdate(row: CnRow, patch: Partial<CnRow>) {
     if (patch.conversionDate) body.converts_at_round = true
   }
   if ('principal' in patch) body.principal = patch.principal
+  if ('interestRate' in patch) body.interest_rate = patch.interestRate ?? 0
+  if ('interestAccrued' in patch) body.interest_accrued = patch.interestAccrued ?? 0
+  if ('conversionDiscount' in patch) body.conversion_discount = patch.conversionDiscount ?? 0
+  if ('convPrice' in patch) body.conversion_price = patch.convPrice ?? null
   await $fetch(`/api/convertibles/${row.id}`, { method: 'PATCH', body })
   await refreshAll()
 }
@@ -146,9 +155,11 @@ async function onCreate(draft: Partial<CnRow>) {
       principal: draft.principal,
       conversion_date: draft.conversionDate || null,
       destination_class_code: destination,
-      interest_rate: 0.08,
+      interest_rate: draft.interestRate ?? 0.08,
+      interest_accrued: draft.interestAccrued ?? 0,
+      conversion_discount: draft.conversionDiscount ?? 0,
+      conversion_price: draft.convPrice ?? null,
       issue_date: new Date().toISOString().slice(0, 10),
-      conversion_discount: 0,
       converts_at_round: !!destination || !!draft.conversionDate,
     },
   })
@@ -220,11 +231,20 @@ async function onDelete(row: CnRow) {
         <template #cell-principal="{ value }">
           <span class="text-ink-700">{{ fmtUSD(value) }}</span>
         </template>
+        <template #cell-interestRate="{ value }">
+          <span v-if="value" class="text-ink-700">{{ fmtPct(value, 2) }}</span>
+          <span v-else class="text-ink-400">—</span>
+        </template>
         <template #cell-interestAccrued="{ value }">
           <span class="text-ink-700">{{ fmtUSD(value) }}</span>
         </template>
+        <template #cell-conversionDiscount="{ value }">
+          <span v-if="value" class="text-ink-700">{{ fmtPct(value, 2) }}</span>
+          <span v-else class="text-ink-400">—</span>
+        </template>
         <template #cell-convPrice="{ value }">
-          <span class="text-ink-700">{{ fmtPricePerShare(value) }}</span>
+          <span v-if="value" class="text-ink-700">{{ fmtPricePerShare(value) }}</span>
+          <span v-else class="text-ink-400">—</span>
         </template>
         <template v-for="u in cnUnits.selected.value" :key="`cell-shares_${u}`" #[`cell-shares_${u}`]="{ row }">
           {{ formatBy(u, row.shares, compute?.round?.postRoundFDS || 0, row.convPrice || 0) }}
