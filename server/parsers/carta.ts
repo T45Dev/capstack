@@ -647,9 +647,13 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
       // Issue / award / grant date — wide bank because Carta templates
       // disagree on the column label. Seen: "Issue Date", "Award Date",
       // "Grant Date", "Date Issued", "Date Granted", "Issuance Date",
-      // "Board Approval Date" (sometimes the only available column).
+      // "Board Approval Date", "Original Issue Date", "Vesting
+      // Commencement Date" (sometimes the only available column).
       const cIssueDate = findHeader(
         /^(issue|award|grant|issuance|effective|board\s*approval) ?date$/,
+        /^original ?issue ?date$/,
+        /^vesting ?commencement ?date$/,
+        /^vest ?commencement$/,
         /^date( ?issued| ?granted| ?awarded| ?of\s*grant)?$/,
         /^(issued|granted|awarded)$/,
         /^date$/,

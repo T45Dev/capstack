@@ -17,7 +17,7 @@ const id = computed(() => route.params.id as string)
 
 const { data: company } = await useFetch(() => `/api/companies/${id.value}`, { watch: [id], default: () => null as any })
 const { data: capTable } = await useFetch(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => null as any })
-const { data: grantsData } = await useFetch(() => `/api/companies/${id.value}/grants`, { watch: [id], default: () => ({ grants: [], pools: [] } as any) })
+const { data: grantsData, refresh: refreshGrants } = await useFetch(() => `/api/companies/${id.value}/grants`, { watch: [id], default: () => ({ grants: [], pools: [] } as any) })
 const { data: ideas, refresh: refreshIdeas } = await useFetch<any[]>(() => `/api/companies/${id.value}/pool-events`, { watch: [id], default: () => [] })
 // Round-summary supplies per-round option_pool_issued + close_date, which
 // is what drives the chronological pool top-up events on the timeline.
@@ -386,6 +386,24 @@ async function deleteIdea(idea: any) {
   await refreshIdeas()
 }
 
+// Inline date edit for grant events on the timeline. When a grant came in
+// without an issue date (no plan sheet matched, or the date column was
+// labeled something we didn't catch), the operator can pick a date right
+// on the timeline cell and we PATCH the grant. Refreshes the grants data
+// so the timeline re-renders with the new date in chronological order.
+async function commitGrantDate(grantId: string, isoDate: string): Promise<void> {
+  if (!grantId) return
+  try {
+    await $fetch(`/api/grants/${grantId}`, {
+      method: 'PATCH',
+      body: { issue_date: isoDate || null },
+    })
+    await refreshGrants()
+  } catch (e) {
+    console.error('Failed to update grant issue_date', e)
+  }
+}
+
 // ---- Pie chart (Outstanding / Proposed / Ideas / Available, spec §5.6) ----
 // SVG donut so the legend can sit beside the slices and the relative
 // weights read at a glance.
@@ -622,9 +640,25 @@ const chart = computed(() => {
         </thead>
         <tbody>
           <tr v-for="e in eventsWithRunning" :key="e.id" class="hover:bg-accent-50/40 border-b border-ink-200">
-            <td class="px-2.5 py-1.5" :class="e.dateIsPlaceholder ? 'text-amber-700' : 'text-ink-600'" :title="e.dateIsPlaceholder ? 'No issue date on the source record — placeholder. Edit the grant to set a real date.' : ''">
-              {{ fmtDate(e.date) }}
-              <span v-if="e.dateIsPlaceholder" class="ml-0.5 text-[9px] uppercase tracking-wide text-amber-700/80">est</span>
+            <!-- Date cell: inline date picker when this is a grant event
+                 (so the operator can fix missing/wrong import dates without
+                 leaving the page). Pool top-ups + ideas read-only. -->
+            <td class="px-2.5 py-1.5" :class="e.dateIsPlaceholder ? 'text-amber-700' : 'text-ink-600'">
+              <template v-if="e.grantId">
+                <input
+                  type="date"
+                  :value="e.dateIsPlaceholder ? '' : e.date"
+                  :class="['bg-transparent border rounded px-1 py-0.5 text-[12px] focus:outline-none focus:ring-1 focus:ring-accent-500 focus:border-accent-500 num',
+                           e.dateIsPlaceholder ? 'border-amber-300 text-amber-700 hover:border-amber-500' : 'border-transparent text-ink-700 hover:border-ink-300']"
+                  :title="e.dateIsPlaceholder ? `Placeholder — no issue date on the source grant. Pick one to set it.` : 'Grant issue date — edit to update.'"
+                  @change="commitGrantDate(e.grantId!, ($event.target as HTMLInputElement).value)"
+                />
+                <span v-if="e.dateIsPlaceholder" class="ml-0.5 text-[9px] uppercase tracking-wide text-amber-700/80">est</span>
+              </template>
+              <template v-else>
+                {{ fmtDate(e.date) }}
+                <span v-if="e.dateIsPlaceholder" class="ml-0.5 text-[9px] uppercase tracking-wide text-amber-700/80">est</span>
+              </template>
             </td>
             <td class="px-2.5 py-1.5">
               <span class="text-ink-900 font-medium">{{ e.name }}</span>
