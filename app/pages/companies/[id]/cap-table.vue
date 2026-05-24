@@ -667,15 +667,9 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                 </td>
               </tr>
               <tr>
-                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6 sticky left-0 z-10 bg-white">Preferred issued</td>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-600 text-right pr-6 sticky left-0 z-10 bg-white" title="New money ÷ Share price">Preferred issued</td>
                 <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
-                  <NumberInput
-                    variant="bare"
-                    :model-value="effective(r, 'preferred_issued') ?? (r.preferred_issued || null)"
-                    placeholder="—"
-                    :input-class="inputCellClass"
-                    @update:model-value="(v) => setDraft(r.round_id, 'preferred_issued', v ?? 0)"
-                  />
+                  {{ r.preferred_issued ? fmtShares(r.preferred_issued) : '—' }}
                 </td>
               </tr>
               <tr>
