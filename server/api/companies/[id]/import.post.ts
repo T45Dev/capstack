@@ -127,10 +127,9 @@ export default defineEventHandler(async (event) => {
 
     // Convertibles
     if (parsed.convertibles.length) {
-      // Notes with a conversion date go into the "CN Conversion Detail" section
-      // by default; notes without one default to Deferred (the user can flip
-      // either via the Cap table page or by setting a conversion date inline
-      // on the Assumptions page).
+      // Notes with a conversion date are attributed to that round; notes
+      // without one default to Deferred (the user can flip either via the
+      // Convertible notes ledger or by setting a conversion date inline).
       const insCN = db().prepare(`
         INSERT INTO convertibles (
           id, company_id, stakeholder_id, external_id, stakeholder_name,

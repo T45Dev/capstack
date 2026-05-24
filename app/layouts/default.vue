@@ -11,10 +11,29 @@ const config = useRuntimeConfig()
 
 const companyId = computed(() => (route.params.id as string) || null)
 
-const { data: company } = await useFetch(() =>
+const { data: company, refresh: refreshCompany } = await useFetch(() =>
   companyId.value ? `/api/companies/${companyId.value}` : null,
   { default: () => null, watch: [companyId] },
 )
+
+// Rounds list for the "most-recently-closed" picker in the breadcrumb. Only
+// closed / formation rounds qualify as the baseline; the open round is what
+// the operator is modeling, so it can't be its own pre-baseline.
+const { data: roundsForBaseline } = await useFetch<{ rounds: Array<{ code: string; name: string | null; kind: string }> }>(() =>
+  companyId.value ? `/api/companies/${companyId.value}/round-summary` : null,
+  { default: () => ({ rounds: [] }), watch: [companyId] },
+)
+const baselineOptions = computed(() =>
+  (roundsForBaseline.value?.rounds || [])
+    .filter(r => r.kind !== 'open')
+    .map(r => ({ value: r.name || r.code, label: r.name || r.code })),
+)
+
+async function setStartingRound(val: string) {
+  if (!companyId.value) return
+  await $fetch(`/api/companies/${companyId.value}`, { method: 'PATCH', body: { starting_round: val || null } })
+  await refreshCompany()
+}
 
 // Nav collapse state — persists across reloads so the user's preference
 // for "labels visible" vs "icons-only" sticks. Default to expanded.
@@ -64,9 +83,21 @@ const importHref = computed(() => companyId.value ? `/companies/${companyId.valu
           </NuxtLink>
           <span class="text-ink-400">/</span>
           <span class="text-ink-900 font-medium truncate">{{ company.name }}</span>
-          <span v-if="company.starting_round" class="ml-2 text-[10px] uppercase tracking-wide text-accent-700 bg-accent-50 border border-accent-200 px-1.5 py-0.5 rounded">
-            {{ company.starting_round }}
-          </span>
+          <!-- Pre-baseline round picker — was previously a static badge tied to
+               the deprecated Assumptions page. Now the operator can switch
+               which closed round defines the "pre" snapshot directly from the
+               breadcrumb, since every page below the nav depends on it. -->
+          <label class="ml-2 inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-accent-700" title="Most-recently-closed round (pre-baseline). Switch when you change what you're modeling.">
+            <span class="text-ink-500">pre-baseline</span>
+            <select
+              :value="company.starting_round || ''"
+              class="bg-accent-50 border border-accent-200 hover:border-accent-300 text-accent-700 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide focus:outline-none focus:ring-1 focus:ring-accent-500"
+              @change="setStartingRound(($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">—</option>
+              <option v-for="o in baselineOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+            </select>
+          </label>
         </div>
 
         <div class="flex-1" />

@@ -515,8 +515,8 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
         const missing = result.convertibles.filter(c => !c.conversionDate).length
         if (missing > 0) {
           warnings.push(
-            `${missing} convertible note${missing === 1 ? '' : 's'} had no conversion date — set one in `
-            + 'the CN conversion detail table on the Assumptions page to drive interest accrual.',
+            `${missing} convertible note${missing === 1 ? '' : 's'} had no conversion date — set one on `
+            + 'the Convertible Notes ledger to drive interest accrual.',
           )
         }
       }
