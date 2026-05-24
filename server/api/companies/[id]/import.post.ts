@@ -110,15 +110,40 @@ export default defineEventHandler(async (event) => {
       }
     }
 
-    // Grants (imported from cap-table options column — outstanding)
+    // Grants — when the Carta Stock Option Plan sheet was found, every
+    // parsed grant comes through with strike + issue date + vesting +
+    // (issued / exercised / forfeited) counts. Otherwise we have just the
+    // qty-rolled-up-per-stakeholder stub from the Detailed Cap Table.
     if (parsed.grants.length) {
       const insG = db().prepare(`
-        INSERT INTO grants (id, company_id, stakeholder_id, recipient_name, recipient_type, round, quantity, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'outstanding')
+        INSERT INTO grants (
+          id, company_id, stakeholder_id, recipient_name, recipient_type, round,
+          quantity, strike, issue_date, vesting_start, vest_months, cliff_months,
+          quantity_issued, quantity_exercised, quantity_forfeited,
+          award_type, acceleration, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outstanding')
       `)
       for (const g of parsed.grants) {
         try {
-          insG.run(newId('gr'), id, nameToId.get(g.recipientName) || null, g.recipientName, null, null, Math.round(g.quantity))
+          insG.run(
+            newId('gr'),
+            id,
+            nameToId.get(g.recipientName) || null,
+            g.recipientName,
+            null,
+            null,
+            Math.round(g.quantity),
+            g.strike ?? null,
+            g.issueDate ?? null,
+            g.vestingStart ?? null,
+            g.vestMonths ?? null,
+            g.cliffMonths ?? null,
+            g.quantityIssued ?? null,
+            g.quantityExercised ?? null,
+            g.quantityForfeited ?? null,
+            g.awardType ?? null,
+            g.acceleration ?? null,
+          )
         } catch (err: any) {
           parsed.warnings.push(`Couldn't import grant for "${g.recipientName}": ${err?.message || err}`)
         }

@@ -10,7 +10,7 @@ interface Grant {
   recipient_name: string
   recipient_type: string | null
   round: string | null
-  quantity: number
+  quantity: number                   // outstanding count
   strike: number | null
   issue_date: string | null
   vesting_start: string | null
@@ -20,6 +20,24 @@ interface Grant {
   approval_status: 'Pending' | 'Approved' | 'Rejected' | null
   notes: string | null
   linked_stakeholder: string | null
+  // Per-grant detail from the Carta Stock Option Plan sheet — null for
+  // grants that came in via the cap-table qty-only path.
+  quantity_issued?: number | null
+  quantity_exercised?: number | null
+  quantity_forfeited?: number | null
+  award_type?: string | null
+  acceleration?: string | null
+}
+
+// Vesting schedule label — the user asked for canonical labels for the two
+// common cases plus "Other" for everything else.
+function vestingLabel(g: { vest_months: number | null; cliff_months: number | null }): string {
+  const v = g.vest_months
+  const c = g.cliff_months
+  if (v == null) return '—'
+  if (v === 48 && c === 12) return '4yr, 1yr cliff'
+  if (v === 24 && (c === 0 || c == null)) return '2yr, no cliff'
+  return 'Other'
 }
 interface Pool { id: string; name: string; authorized: number }
 
@@ -76,6 +94,12 @@ const proposed = computed(() => data.value!.grants.filter(g => g.status === 'pro
 
 const totalOutstanding = computed(() => outstanding.value.reduce((a, g) => a + g.quantity, 0))
 const totalProposed = computed(() => proposed.value.reduce((a, g) => a + g.quantity, 0))
+// Sum of historical exercises / forfeitures across all outstanding grants.
+// Comes from Carta's option-plan sheet; grants without per-grant detail
+// contribute 0 here.
+const totalExercised = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_exercised || 0), 0))
+const totalForfeited = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_forfeited || 0), 0))
+const totalIssued = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_issued || g.quantity), 0))
 const poolAuthorized = computed(() => data.value!.pools.reduce((a, p) => a + p.authorized, 0))
 const poolAvailable = computed(() => Math.max(0, poolAuthorized.value - totalOutstanding.value - totalProposed.value))
 
@@ -90,6 +114,33 @@ const ppsAnchor = computed(() => capTable.value?.current_pps || 0)
 // Per-table unit toggles
 const outUnits  = useTableUnits('capstack:grants:outstanding:units')
 const propUnits = useTableUnits('capstack:grants:proposed:units')
+
+// Per-table column-visibility — lets the user hide columns they don't need
+// for a focused view. Persisted to localStorage so the choice sticks per
+// browser. Recipient and Actions are always shown; everything else is
+// toggleable.
+const ALWAYS_VISIBLE = new Set(['recipient_name', 'actions'])
+function useHiddenCols(storageKey: string) {
+  const hidden = ref<Set<string>>(new Set())
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(storageKey)
+      if (raw) hidden.value = new Set(JSON.parse(raw))
+    } catch { /* ignore */ }
+    watch(hidden, (v) => {
+      try { localStorage.setItem(storageKey, JSON.stringify([...v])) } catch { /* ignore */ }
+    }, { deep: true })
+  }
+  function toggle(key: string) {
+    if (ALWAYS_VISIBLE.has(key)) return
+    const next = new Set(hidden.value)
+    next.has(key) ? next.delete(key) : next.add(key)
+    hidden.value = next
+  }
+  return { hidden, toggle }
+}
+const outstandingHidden = useHiddenCols('capstack:grants:outstanding:hidden')
+const proposedHidden = useHiddenCols('capstack:grants:proposed:hidden')
 
 interface GrCol {
   key: string
@@ -159,6 +210,16 @@ const proposedTable = useSortableTable({
   defaultSort: { key: 'prop_new_shares', dir: 'desc' },
   columns: proposedCols.value as any,
 })
+
+// Render-time visibility filter — sort / resize / widths still live on the
+// full col list (so toggling a col back on restores its size); these
+// computeds drive the actual <td>/<th> iteration in the template.
+const outstandingVisibleCols = computed(() =>
+  outstandingTable.cols.filter(c => !outstandingHidden.hidden.value.has(c.key)),
+)
+const proposedVisibleCols = computed(() =>
+  proposedTable.cols.filter(c => !proposedHidden.hidden.value.has(c.key)),
+)
 
 watch(outstandingCols, (cols) => {
   const widthMap: Record<string, number> = {}
@@ -515,12 +576,54 @@ const fieldLabels: Record<string, string> = {
       </div>
     </div>
 
-    <!-- Pool stats -->
-    <div class="flex flex-wrap gap-3 mb-6">
-      <UiStat label="Pool authorized" :value="fmtShares(poolAuthorized)" class="flex-1 min-w-[150px]" />
-      <UiStat label="Outstanding" :value="fmtShares(totalOutstanding)" class="flex-1 min-w-[150px]" />
-      <UiStat label="Proposed" :value="fmtShares(totalProposed)" class="flex-1 min-w-[150px]" />
-      <UiStat label="Available" :value="fmtShares(poolAvailable)" emphasis class="flex-1 min-w-[150px]" />
+    <!-- Pool math as a literal equation — the only way to make pool
+         accounting obvious without explaining: authorized = outstanding +
+         proposed + available, plus a lifetime row for exercised / forfeited
+         so the operator can see where shares have gone historically. -->
+    <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-6 p-4">
+      <div class="flex flex-wrap items-end gap-3 text-ink-900 num">
+        <div class="flex flex-col items-start">
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Pool authorized</span>
+          <span class="text-2xl font-semibold">{{ fmtShares(poolAuthorized) }}</span>
+        </div>
+        <span class="text-2xl text-ink-400 pb-1">=</span>
+        <div class="flex flex-col items-start">
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Outstanding</span>
+          <span class="text-2xl font-semibold">{{ fmtShares(totalOutstanding) }}</span>
+        </div>
+        <span class="text-2xl text-ink-400 pb-1">+</span>
+        <div class="flex flex-col items-start">
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Proposed</span>
+          <span class="text-2xl font-semibold text-amber-700">{{ fmtShares(totalProposed) }}</span>
+        </div>
+        <span class="text-2xl text-ink-400 pb-1">+</span>
+        <div class="flex flex-col items-start">
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Available</span>
+          <span class="text-2xl font-semibold text-emerald-700">{{ fmtShares(poolAvailable) }}</span>
+        </div>
+      </div>
+      <div v-if="totalExercised > 0 || totalForfeited > 0 || totalIssued > totalOutstanding" class="mt-3 pt-3 border-t border-ink-200 flex flex-wrap items-end gap-3 text-ink-700 num text-sm">
+        <span class="text-[10px] uppercase tracking-wider text-ink-500">Lifetime</span>
+        <div class="flex items-end gap-1.5">
+          <span class="text-ink-500">Issued</span>
+          <span class="font-medium">{{ fmtShares(totalIssued) }}</span>
+        </div>
+        <span class="text-ink-400">=</span>
+        <div class="flex items-end gap-1.5">
+          <span class="text-ink-500">Outstanding</span>
+          <span class="font-medium">{{ fmtShares(totalOutstanding) }}</span>
+        </div>
+        <span class="text-ink-400">+</span>
+        <div class="flex items-end gap-1.5">
+          <span class="text-ink-500">Exercised</span>
+          <span class="font-medium text-accent-700">{{ fmtShares(totalExercised) }}</span>
+        </div>
+        <span class="text-ink-400">+</span>
+        <div class="flex items-end gap-1.5">
+          <span class="text-ink-500">Forfeited</span>
+          <span class="font-medium text-red-700">{{ fmtShares(totalForfeited) }}</span>
+        </div>
+      </div>
     </div>
 
     <!-- Outstanding + Proposed side by side from typical laptop widths upward. -->
@@ -528,17 +631,29 @@ const fieldLabels: Record<string, string> = {
       <UiCard :title="`Outstanding (${outstanding.length})`" subtitle="Live grants on the cap table" :padded="false">
         <template #header>
           <TableUnitsToggle storage-key="capstack:grants:outstanding:units" />
+          <details class="relative">
+            <summary class="cursor-pointer list-none px-2 py-1 text-[11px] text-ink-600 border border-ink-300 rounded hover:bg-ink-100 select-none">
+              Columns
+              <span v-if="outstandingHidden.hidden.value.size" class="ml-1 text-[9px] text-amber-700">−{{ outstandingHidden.hidden.value.size }}</span>
+            </summary>
+            <div class="absolute right-0 top-full mt-1 z-20 bg-white border border-ink-300 rounded shadow-card p-2 min-w-[180px]">
+              <label v-for="c in outstandingTable.cols.filter(c => !ALWAYS_VISIBLE.has(c.key))" :key="c.key" class="flex items-center gap-1.5 text-xs py-0.5 cursor-pointer">
+                <input type="checkbox" :checked="!outstandingHidden.hidden.value.has(c.key)" @change="outstandingHidden.toggle(c.key)" class="accent-accent-500">
+                <span>{{ c.label || c.key }}</span>
+              </label>
+            </div>
+          </details>
         </template>
         <div v-if="!outstanding.length" class="text-sm text-ink-500 px-4 py-6 text-center">No outstanding grants.</div>
         <div v-else class="overflow-x-auto">
           <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
-              <col v-for="c in outstandingTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
+              <col v-for="c in outstandingVisibleCols" :key="c.key" :style="{ width: c.width + 'px' }" />
             </colgroup>
             <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide">
               <tr>
                 <th
-                  v-for="c in outstandingTable.cols"
+                  v-for="c in outstandingVisibleCols"
                   :key="c.key"
                   class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold bg-ink-100"
                   :class="[
@@ -560,7 +675,7 @@ const fieldLabels: Record<string, string> = {
             </thead>
             <tbody class="num">
               <tr v-for="g in sortedOutstanding" :key="g.id" class="group">
-                <template v-for="c in outstandingTable.cols" :key="c.key">
+                <template v-for="c in outstandingVisibleCols" :key="c.key">
                   <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-accent-50/40" :title="g.recipient_name">
                     <span>{{ g.recipient_name }}</span>
                     <span
@@ -573,7 +688,7 @@ const fieldLabels: Record<string, string> = {
                   </td>
                   <td v-else-if="c.key === 'strike'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-accent-50/40">{{ fmtPricePerShare(g.strike) }}</td>
                   <td v-else-if="c.key === 'issue_date'" class="px-2.5 py-1.5 text-ink-600 border-b border-ink-200 group-hover:bg-accent-50/40">{{ fmtDate(g.issue_date) }}</td>
-                  <td v-else-if="c.key === 'vest'" class="px-2.5 py-1.5 text-right text-ink-600 border-b border-ink-200 group-hover:bg-accent-50/40">{{ g.vest_months ? `${g.vest_months}m / ${g.cliff_months}m` : '—' }}</td>
+                  <td v-else-if="c.key === 'vest'" class="px-2.5 py-1.5 text-right text-ink-600 border-b border-ink-200 group-hover:bg-accent-50/40" :title="g.vest_months ? `${g.vest_months}m vest / ${g.cliff_months ?? 0}m cliff` : ''">{{ vestingLabel(g) }}</td>
                   <td
                     v-else-if="c.bucket"
                     class="px-2.5 py-1.5 text-right border-b border-ink-200 group-hover:bg-accent-50/40"
@@ -597,17 +712,29 @@ const fieldLabels: Record<string, string> = {
       <UiCard :title="`Proposed (${proposed.length})`" subtitle="Draft grants — promote to make them live" :padded="false">
         <template #header>
           <TableUnitsToggle storage-key="capstack:grants:proposed:units" />
+          <details class="relative">
+            <summary class="cursor-pointer list-none px-2 py-1 text-[11px] text-ink-600 border border-ink-300 rounded hover:bg-ink-100 select-none">
+              Columns
+              <span v-if="proposedHidden.hidden.value.size" class="ml-1 text-[9px] text-amber-700">−{{ proposedHidden.hidden.value.size }}</span>
+            </summary>
+            <div class="absolute right-0 top-full mt-1 z-20 bg-white border border-ink-300 rounded shadow-card p-2 min-w-[180px]">
+              <label v-for="c in proposedTable.cols.filter(c => !ALWAYS_VISIBLE.has(c.key))" :key="c.key" class="flex items-center gap-1.5 text-xs py-0.5 cursor-pointer">
+                <input type="checkbox" :checked="!proposedHidden.hidden.value.has(c.key)" @change="proposedHidden.toggle(c.key)" class="accent-accent-500">
+                <span>{{ c.label || c.key }}</span>
+              </label>
+            </div>
+          </details>
         </template>
         <div v-if="!proposed.length" class="text-sm text-ink-500 px-4 py-6 text-center">No proposed grants. Click "Propose grant" to draft one.</div>
         <div v-else class="overflow-x-auto">
           <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
-              <col v-for="c in proposedTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
+              <col v-for="c in proposedVisibleCols" :key="c.key" :style="{ width: c.width + 'px' }" />
             </colgroup>
             <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide">
               <tr>
                 <th
-                  v-for="c in proposedTable.cols"
+                  v-for="c in proposedVisibleCols"
                   :key="c.key"
                   class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold bg-ink-100"
                   :class="[
@@ -629,7 +756,7 @@ const fieldLabels: Record<string, string> = {
             </thead>
             <tbody class="num">
               <tr v-for="g in sortedProposed" :key="g.id" class="group">
-                <template v-for="c in proposedTable.cols" :key="c.key">
+                <template v-for="c in proposedVisibleCols" :key="c.key">
                   <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-accent-50/40" :title="g.recipient_name">
                     <span>{{ g.recipient_name }}</span>
                     <span
