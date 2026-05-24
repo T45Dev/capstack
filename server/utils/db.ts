@@ -191,6 +191,27 @@ function migrate(d: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_rounds_company ON rounds(company_id, seniority);
 
+    -- Per-investor cash contributions to a round. Lets the operator model
+    -- "VCT leads $5M, T45 follows $3M" before the round closes — the
+    -- spreadsheet does this by giving each investor its own shareholder row
+    -- ("Series B (VCT Investments)") with $ amounts spread across round
+    -- columns. We keep stakeholders canonical and put the per-round amount
+    -- in this side table. The sum of amounts on a round is the source of
+    -- truth for new_money; per-investor share counts derive from amount /
+    -- share_price (with the round's terms applied).
+    CREATE TABLE IF NOT EXISTS round_investors (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      round_id TEXT NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+      stakeholder_id TEXT NOT NULL REFERENCES stakeholders(id) ON DELETE CASCADE,
+      amount REAL NOT NULL DEFAULT 0,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(round_id, stakeholder_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_round_investors_company ON round_investors(company_id);
+    CREATE INDEX IF NOT EXISTS idx_round_investors_round ON round_investors(round_id);
+
     CREATE TABLE IF NOT EXISTS pool_events (
       id TEXT PRIMARY KEY,
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -233,6 +254,15 @@ function migrate(d: Database.Database): void {
   // new_money / share_price". A numeric value (including 0) overrides for
   // rounds where the math doesn't apply, e.g. debt-only or bridge rounds.
   ensureColumn('rounds', 'preferred_issued_override', 'REAL')
+  // Liquidation preference terms. Default to 0x — i.e. no preference,
+  // tranche participates pro-rata only — so that the default exit math
+  // matches the user's existing spreadsheet practice (pure pro-rata).
+  // When the operator dials a round up to 1x non-participating (or
+  // anything else), the waterfall engine kicks in and respects the terms.
+  ensureColumn('rounds', 'liq_pref_multiple', 'REAL NOT NULL DEFAULT 0')
+  ensureColumn('rounds', 'participation', "TEXT NOT NULL DEFAULT 'none'")  // 'none' | 'full' | 'capped'
+  ensureColumn('rounds', 'participation_cap', 'REAL')                       // multiple, e.g. 3.0 = 3x invested cap
+  ensureColumn('rounds', 'pref_tier', 'INTEGER NOT NULL DEFAULT 0')         // higher tier = paid first; pari passu within tier
 
   // Backfill: for any company whose Formation round has option_pool_issued = 0
   // but whose option_pools table is non-empty, seed Formation with the

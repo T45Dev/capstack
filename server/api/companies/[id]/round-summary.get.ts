@@ -33,6 +33,11 @@ interface RoundColumn {
   // Cumulative totals through and including this round:
   total_shares_fds: number
   cumulated_financing: number
+  // Liquidation preference terms (drive the exit waterfall on §5.7).
+  liq_pref_multiple: number
+  participation: 'none' | 'full' | 'capped'
+  participation_cap: number | null
+  pref_tier: number               // higher = paid first
 }
 
 export default defineEventHandler((event) => {
@@ -45,7 +50,8 @@ export default defineEventHandler((event) => {
   const rounds = db().prepare(`
     SELECT id, code, name, kind, close_date, share_class_code, share_price,
            new_money, debt_canceled, option_pool_issued, pre_money,
-           preferred_issued, preferred_issued_override, common, seniority
+           preferred_issued, preferred_issued_override, common, seniority,
+           liq_pref_multiple, participation, participation_cap, pref_tier
     FROM rounds WHERE company_id = ?
   `).all(id) as Array<{
     id: string; code: string; name: string | null; kind: 'formation' | 'closed' | 'open';
@@ -54,6 +60,8 @@ export default defineEventHandler((event) => {
     option_pool_issued: number; pre_money: number | null;
     preferred_issued: number; preferred_issued_override: number | null;
     common: number; seniority: number;
+    liq_pref_multiple: number; participation: 'none' | 'full' | 'capped';
+    participation_cap: number | null; pref_tier: number;
   }>
 
   // The `kind` column on each round is the source of truth for whether
@@ -208,6 +216,10 @@ export default defineEventHandler((event) => {
       option_pool_issued: poolIssued,
       total_shares_fds: cumulativeFDS,
       cumulated_financing: cumulativeFinancing,
+      liq_pref_multiple: Number(r.liq_pref_multiple ?? 1),
+      participation: (r.participation as any) || 'none',
+      participation_cap: r.participation_cap != null ? Number(r.participation_cap) : null,
+      pref_tier: Number(r.pref_tier ?? 0),
     })
   }
 

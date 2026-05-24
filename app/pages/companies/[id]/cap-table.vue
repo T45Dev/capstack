@@ -36,6 +36,10 @@ interface RoundColumn {
   option_pool_issued: number
   total_shares_fds: number
   cumulated_financing: number
+  liq_pref_multiple: number
+  participation: 'none' | 'full' | 'capped'
+  participation_cap: number | null
+  pref_tier: number
 }
 
 const { data: roundSummary, refresh: refreshRoundSummary } = await useFetch<{ rounds: RoundColumn[] }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
@@ -87,6 +91,10 @@ interface RoundDraft {
   preferred_issued?: number
   preferred_issued_override?: number | null
   option_pool_issued?: number
+  liq_pref_multiple?: number
+  participation?: 'none' | 'full' | 'capped'
+  participation_cap?: number | null
+  pref_tier?: number
 }
 const drafts = ref<Record<string, RoundDraft>>({})
 const isSaving = ref(false)
@@ -725,6 +733,11 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
           Values are user-entered. Toggle a column to Open to mark it as the round currently being modeled — only one round can be Open at a time.
         </p>
       </UiCard>
+
+      <!-- Investors-by-round matrix — captures the per-investor cash
+           contributions the Summary card aggregates as new_money. Edits
+           refresh the round summary so the totals stay reconciled. -->
+      <InvestorMatrix :company-id="id" @refreshed="refreshRoundSummary" />
 
       <!-- Convertible Notes ledger — extracted into a shared component so
            the dollars/shares always render right next to the rounds they

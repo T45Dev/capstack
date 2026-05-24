@@ -13,6 +13,8 @@ export default defineEventHandler(async (event) => {
     'share_price', 'new_money', 'debt_canceled', 'option_pool_issued',
     'pre_money', 'preferred_issued', 'preferred_issued_override', 'common',
     'parent_round_code', 'seniority', 'notes',
+    // liq pref terms — drive exit waterfall
+    'liq_pref_multiple', 'participation', 'participation_cap', 'pref_tier',
   ]
   const updates: string[] = []
   const params: any[] = []
