@@ -536,12 +536,9 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
 
 <template>
   <div v-if="data">
-    <div class="flex items-end justify-between mb-4 gap-3 flex-wrap">
+    <div class="flex items-end justify-between mb-2 gap-3 flex-wrap">
       <div>
         <h1 class="text-xl font-semibold tracking-tight text-ink-900">Financings</h1>
-        <p class="text-sm text-ink-600 mt-1">
-          Funding rounds (top) and convertible notes (below). Round values are user-entered; CNs roll up into the round they're attributed to.
-        </p>
       </div>
       <div class="flex items-center gap-2 flex-wrap">
         <NuxtLink :to="`/companies/${id}/import`">
