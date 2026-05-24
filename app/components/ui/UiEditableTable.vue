@@ -42,12 +42,16 @@ interface Props {
   sortValue?: (row: T, key: string) => number | string | null | undefined
   // Total below the rows: bool to enable, optional cells map.
   showAddRow?: boolean
+  // Sticky-pin the first column to the left edge so it stays visible
+  // while the rest of the table scrolls horizontally.
+  stickyFirst?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   rowKey: 'id',
   addLabel: 'Add row',
   showAddRow: true,
+  stickyFirst: false,
 })
 
 const emit = defineEmits<{
@@ -166,12 +170,13 @@ function isEditingRow(row: T): boolean {
       <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100">
         <tr>
           <th
-            v-for="col in table.cols"
+            v-for="(col, colIdx) in table.cols"
             :key="col.key"
             class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold"
             :class="[
               col.align === 'right' ? 'text-right' : (col.align === 'center' ? 'text-center' : 'text-left'),
               col.sortable ? 'cursor-pointer hover:text-ink-900' : '',
+              stickyFirst && colIdx === 0 ? 'sticky left-0 z-20 bg-ink-100 shadow-[1px_0_0_0_rgb(0_0_0/0.06)]' : '',
             ]"
             @click="col.sortable ? table.toggleSort(col.key) : null"
           >
@@ -189,7 +194,7 @@ function isEditingRow(row: T): boolean {
         <tr
           v-for="row in sortedRows"
           :key="(row as any)[rowKey]"
-          class="transition-colors"
+          class="group transition-colors"
           :class="[
             isEditingRow(row) ? 'bg-accent-50/40' : 'hover:bg-accent-50/20 cursor-pointer',
             isReadOnly?.(row) ? 'opacity-90' : '',
@@ -197,10 +202,17 @@ function isEditingRow(row: T): boolean {
           @click="!isEditingRow(row) && startEdit(row)"
         >
           <td
-            v-for="col in table.cols"
+            v-for="(col, colIdx) in table.cols"
             :key="col.key"
             class="px-2.5 py-1 border-b border-ink-200"
-            :class="col.align === 'right' ? 'text-right' : (col.align === 'center' ? 'text-center' : 'text-left')"
+            :class="[
+              col.align === 'right' ? 'text-right' : (col.align === 'center' ? 'text-center' : 'text-left'),
+              stickyFirst && colIdx === 0
+                ? (isEditingRow(row)
+                  ? 'sticky left-0 z-10 bg-accent-50 shadow-[1px_0_0_0_rgb(0_0_0/0.06)]'
+                  : 'sticky left-0 z-10 bg-white shadow-[1px_0_0_0_rgb(0_0_0/0.06)] group-hover:bg-accent-50/20')
+                : '',
+            ]"
             @click.stop="!isEditingRow(row) && startEdit(row)"
           >
             <template v-if="isEditingRow(row) && col.editable">

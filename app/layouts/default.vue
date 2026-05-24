@@ -4,7 +4,7 @@
 // labels follow the spec vocabulary (Option Grants, Exit Scenarios, etc.).
 import {
   FileSpreadsheet, Sliders, FileText, Award, GitCompare, TrendingDown,
-  FlaskConical, Building2, Upload,
+  FlaskConical, Building2, Upload, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-vue-next'
 const route = useRoute()
 const config = useRuntimeConfig()
@@ -15,6 +15,19 @@ const { data: company } = await useFetch(() =>
   companyId.value ? `/api/companies/${companyId.value}` : null,
   { default: () => null, watch: [companyId] },
 )
+
+// Nav collapse state — persists across reloads so the user's preference
+// for "labels visible" vs "icons-only" sticks. Default to expanded.
+const navCollapsed = ref(false)
+if (typeof window !== 'undefined') {
+  try {
+    navCollapsed.value = localStorage.getItem('capstack:nav:collapsed') === '1'
+  } catch { /* ignore */ }
+  watch(navCollapsed, (v) => {
+    try { localStorage.setItem('capstack:nav:collapsed', v ? '1' : '0') } catch { /* ignore */ }
+  })
+}
+function toggleNav() { navCollapsed.value = !navCollapsed.value }
 
 // Spec §4 nav order. Routes use the spec page names where they differ from
 // the legacy filenames (e.g. /grants is still /grants on disk, but labelled
@@ -61,29 +74,49 @@ const importHref = computed(() => companyId.value ? `/companies/${companyId.valu
 
     <!-- Workspace shell: left-side nav + main content. -->
     <div v-if="companyId" class="flex">
-      <aside class="w-56 shrink-0 border-r border-ink-300 bg-white min-h-[calc(100vh-3.5rem)] sticky top-14 self-start">
+      <aside
+        class="shrink-0 border-r border-ink-300 bg-white min-h-[calc(100vh-3.5rem)] sticky top-14 self-start transition-[width] duration-150"
+        :class="navCollapsed ? 'w-14' : 'w-56'"
+      >
         <nav class="px-2 py-3 flex flex-col gap-0.5">
           <NuxtLink
             v-for="t in tabs"
             :key="t.to"
             :to="t.to"
             class="inline-flex items-center gap-2 px-2.5 py-1.5 text-sm rounded-md transition-colors"
-            :class="route.path === t.to
-              ? 'bg-accent-500 text-white shadow-sm'
-              : 'text-ink-700 hover:text-ink-900 hover:bg-ink-100'"
+            :class="[
+              route.path === t.to
+                ? 'bg-accent-500 text-white shadow-sm'
+                : 'text-ink-700 hover:text-ink-900 hover:bg-ink-100',
+              navCollapsed ? 'justify-center' : '',
+            ]"
+            :title="navCollapsed ? t.label : undefined"
           >
             <component :is="t.icon" :size="14" />
-            <span>{{ t.label }}</span>
+            <span v-if="!navCollapsed">{{ t.label }}</span>
           </NuxtLink>
           <div class="border-t border-ink-200 my-2" />
           <NuxtLink
             v-if="importHref"
             :to="importHref"
             class="inline-flex items-center gap-2 px-2.5 py-1.5 text-sm rounded-md text-ink-500 hover:text-ink-900 hover:bg-ink-100"
+            :class="navCollapsed ? 'justify-center' : ''"
+            :title="navCollapsed ? 'Import Carta' : undefined"
           >
             <Upload :size="14" />
-            <span>Import Carta</span>
+            <span v-if="!navCollapsed">Import Carta</span>
           </NuxtLink>
+          <button
+            type="button"
+            class="inline-flex items-center gap-2 px-2.5 py-1.5 mt-1 text-sm rounded-md text-ink-500 hover:text-ink-900 hover:bg-ink-100"
+            :class="navCollapsed ? 'justify-center' : ''"
+            :title="navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+            @click="toggleNav"
+          >
+            <PanelLeftOpen v-if="navCollapsed" :size="14" />
+            <PanelLeftClose v-else :size="14" />
+            <span v-if="!navCollapsed">Collapse</span>
+          </button>
         </nav>
       </aside>
       <main class="flex-1 px-6 py-6 min-w-0">

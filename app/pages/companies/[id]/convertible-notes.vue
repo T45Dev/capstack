@@ -214,6 +214,7 @@ async function onDelete(row: CnRow) {
         :sort-value="sortValue"
         storage-key="capstack:cn-detail"
         add-label="Add convertible"
+        sticky-first
         @create="onCreate"
         @update="onUpdate"
         @delete="onDelete"
