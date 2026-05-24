@@ -83,6 +83,10 @@ interface TimelineEvent {
   grantId?: string             // grants.id when source === grant_*
   vestMonths?: number
   cliffMonths?: number
+  // True when the event's `date` is a fallback (no real issue_date /
+  // adopted_date on the source record). UI marks these visually so the
+  // operator can fix them via the Option Grants edit modal.
+  dateIsPlaceholder?: boolean
 }
 
 const events = computed<TimelineEvent[]>(() => {
@@ -114,12 +118,16 @@ const events = computed<TimelineEvent[]>(() => {
     }
   }
 
-  // Existing grants: outstanding + proposed
+  // Existing grants: outstanding + proposed. When the source has no
+  // issue_date and no vesting_start, we mark the event so the timeline
+  // can show it differently (the date will be a placeholder).
   for (const g of (grantsData.value?.grants || [])) {
     if (g.status !== 'outstanding' && g.status !== 'proposed') continue
+    const dateIsPlaceholder = !g.issue_date && !g.vesting_start
     out.push({
       id: `grant:${g.id}`,
       date: g.issue_date || g.vesting_start || fallbackDate.value,
+      dateIsPlaceholder,
       name: g.recipient_name,
       type: 'grant',
       kind: (g.recipient_type || '').toLowerCase() === 'employee' ? 'ISO' : 'NSO',
@@ -221,6 +229,11 @@ const chartPoints = computed<ChartPoint[]>(() => {
   }
   return points
 })
+
+// How many grant events are using a placeholder date (no issue_date /
+// vesting_start on the source record). Drives a small "missing date"
+// banner on the page so the operator can spot and fix them.
+const grantsMissingDate = computed(() => events.value.filter(e => e.source !== 'idea' && e.source !== 'pool' && e.dateIsPlaceholder).length)
 
 // ---- Top stat values ----
 const totals = computed(() => {
@@ -473,6 +486,17 @@ const chart = computed(() => {
       </div>
     </div>
 
+    <!-- Missing-date callout: when imported grants are missing issue
+         dates (the Carta option-plan sheet had a different column name,
+         or wasn't found at all), those events cluster at the company's
+         starting date. Show the count so the operator can fix them. -->
+    <div v-if="grantsMissingDate > 0" class="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 mb-3 text-xs text-amber-900 shrink-0">
+      <span class="font-medium">{{ grantsMissingDate }} grant{{ grantsMissingDate === 1 ? '' : 's' }}</span>
+      missing an issue date — they're shown at the company's starting date on the timeline. Edit them on the
+      <NuxtLink :to="`/companies/${id}/grants`" class="underline font-medium hover:text-amber-700">Option Grants</NuxtLink>
+      page to set a real date.
+    </div>
+
     <!-- Overall heading: pool math as equation + lifetime row + pie/line
          charts side-by-side. Stays put while the timeline below scrolls. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-4 p-4 shrink-0">
@@ -598,7 +622,10 @@ const chart = computed(() => {
         </thead>
         <tbody>
           <tr v-for="e in eventsWithRunning" :key="e.id" class="hover:bg-accent-50/40 border-b border-ink-200">
-            <td class="px-2.5 py-1.5 text-ink-600">{{ fmtDate(e.date) }}</td>
+            <td class="px-2.5 py-1.5" :class="e.dateIsPlaceholder ? 'text-amber-700' : 'text-ink-600'" :title="e.dateIsPlaceholder ? 'No issue date on the source record — placeholder. Edit the grant to set a real date.' : ''">
+              {{ fmtDate(e.date) }}
+              <span v-if="e.dateIsPlaceholder" class="ml-0.5 text-[9px] uppercase tracking-wide text-amber-700/80">est</span>
+            </td>
             <td class="px-2.5 py-1.5">
               <span class="text-ink-900 font-medium">{{ e.name }}</span>
               <span

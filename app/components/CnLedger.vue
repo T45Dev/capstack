@@ -95,6 +95,7 @@ const cnCols = computed<EditableCol[]>(() => {
     { key: 'totalInvestment',      label: 'Total inv.',     width: 120, sortable: true, align: 'right' },
     { key: 'convPrice',            label: 'Share price',    width: 110, sortable: true, align: 'right', type: 'usd',    editable: true, step: '0.01' },
     { key: 'conversionDiscount',   label: 'Discount',       width: 80,  sortable: true, align: 'right', type: 'pct',    editable: true, step: '0.01' },
+    { key: 'valuationCap',         label: 'Val. cap',       width: 110, sortable: true, align: 'right', type: 'usd',    editable: true, step: '1000000' },
     { key: 'effectiveConvPrice',   label: 'Eff. share price', width: 120, sortable: true, align: 'right' },
   ]
   for (const u of cnUnits.selected.value) {
@@ -175,6 +176,7 @@ async function onUpdate(row: CnRow, patch: Partial<CnRow>) {
   if ('interestRate' in patch) body.interest_rate = patch.interestRate ?? 0
   if ('interestAccrued' in patch) body.interest_accrued = patch.interestAccrued ?? 0
   if ('conversionDiscount' in patch) body.conversion_discount = patch.conversionDiscount ?? 0
+  if ('valuationCap' in patch) body.valuation_cap = patch.valuationCap ?? null
   if ('convPrice' in patch) body.conversion_price = patch.convPrice ?? null
   await $fetch(`/api/convertibles/${row.id}`, { method: 'PATCH', body })
   await refreshAll()
@@ -193,6 +195,7 @@ async function onCreate(draft: Partial<CnRow>) {
       interest_rate: draft.interestRate ?? 0.08,
       interest_accrued: draft.interestAccrued ?? 0,
       conversion_discount: draft.conversionDiscount ?? 0,
+      valuation_cap: draft.valuationCap ?? null,
       conversion_price: draft.convPrice ?? null,
       issue_date: new Date().toISOString().slice(0, 10),
       converts_at_round: !!destination || !!draft.conversionDate,
@@ -297,6 +300,10 @@ async function onDelete(row: CnRow) {
         </template>
         <template #cell-conversionDiscount="{ value }">
           <span v-if="value" class="text-ink-700">{{ fmtPct(value, 2) }}</span>
+          <span v-else class="text-ink-400">—</span>
+        </template>
+        <template #cell-valuationCap="{ value }">
+          <span v-if="value" class="text-ink-700">{{ fmtUSD(value) }}</span>
           <span v-else class="text-ink-400">—</span>
         </template>
         <template #cell-convPrice="{ value }">

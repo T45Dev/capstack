@@ -40,6 +40,7 @@ interface RoundColumn {
   participation: 'none' | 'full' | 'capped'
   participation_cap: number | null
   pref_tier: number
+  parent_round_code: string | null
   notes_attributed: Array<{
     id: string
     stakeholderName: string
@@ -155,6 +156,7 @@ interface RoundDraft {
   participation?: 'none' | 'full' | 'capped'
   participation_cap?: number | null
   pref_tier?: number
+  parent_round_code?: string | null
 }
 const drafts = ref<Record<string, RoundDraft>>({})
 // In-flight PATCH counter — drives the small "Saving…" indicator in the card
@@ -682,6 +684,28 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     @change="setDraft(r.round_id, 'close_date', ($event.target as HTMLInputElement).value || null)"
                     @blur="commitRound(r.round_id)"
                   />
+                </td>
+              </tr>
+              <!-- Tranche-of: when this round is a later tranche of an
+                   earlier round's Qualified Financing (e.g. B-2 is part of
+                   the same Series B raise that started at B-1), pick the
+                   parent here so the CN cap formula uses the QF's initial-
+                   closing preFDS instead of this tranche's. Per the
+                   promissory note's "immediately prior to the initial
+                   closing of the Qualified Financing" convention. -->
+              <tr>
+                <td class="px-3 py-1.5 border-b border-ink-200 text-ink-700 sticky left-0 z-10 bg-white" title="When this round is a tranche of an earlier round's Qualified Financing, set the parent here. The CN cap formula will use the parent's pre-FDS.">Tranche of</td>
+                <td v-for="r in roundCols" :key="r.round_id" class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700" :class="effectiveKind(r) === 'open' ? 'bg-accent-50/40' : ''">
+                  <select
+                    :value="(effective(r, 'parent_round_code') ?? r.parent_round_code) || ''"
+                    :class="inputCellClass"
+                    @change="setDraft(r.round_id, 'parent_round_code', ($event.target as HTMLSelectElement).value || null); commitRound(r.round_id)"
+                  >
+                    <option value="">— standalone</option>
+                    <option v-for="other in roundCols.filter(x => x.round_id !== r.round_id)" :key="other.round_id" :value="other.code">
+                      {{ other.name || other.code }}
+                    </option>
+                  </select>
                 </td>
               </tr>
               <tr>
