@@ -344,6 +344,22 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
   const optsCol = cols.find(c => /options?\s+and\s+rsu/i.test(c.label) && /outstanding/i.test(c.label))
   const outstandingSharesCol = cols.find(c => /^outstanding\s+shares$/i.test(c.label))
   const fdsCol = cols.find(c => /fully\s+diluted\s+shares/i.test(c.label))
+  // Issue date next to the options column on the Detailed Cap Table.
+  // Some Carta templates carry per-stakeholder option detail here even
+  // when there's no separate Option Plan sheet — and that's where the
+  // operator's grant dates live. Header bank kept wide so we catch
+  // variants like "Option Issue Date", "Grant Date", "Award Date", etc.
+  const optsIssueDateCol = cols.find(c =>
+    /^(issue|grant|award|issuance|effective|board\s*approval) ?date$/i.test(c.label)
+    || /^(option|options).*(issue|grant|award) ?date$/i.test(c.label)
+    || /^date( ?issued| ?granted| ?awarded)$/i.test(c.label),
+  )
+  const optsStrikeCol = cols.find(c =>
+    /^(strike|exercise) ?price/i.test(c.label) || /^strike$/i.test(c.label),
+  )
+  const optsVestStartCol = cols.find(c =>
+    /^vesting? ?start( ?date)?$/i.test(c.label) || /^vest ?commencement/i.test(c.label),
+  )
 
   if (!nameCol) { warnings.push('No "Name" column found.'); return result }
 
@@ -423,10 +439,22 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
       }
     }
 
-    // Options & RSUs
+    // Options & RSUs. Pull per-stakeholder detail (issue date, strike,
+    // vesting start) directly from the Detailed Cap Table when those
+    // columns exist next to the Options column — that's the case the
+    // user just flagged: their cap-table sheet carries the dates, no
+    // separate Option Plan sheet needed.
     if (optsCol) {
       const q = asNumber(row.getCell(optsCol.col).value)
-      if (q > 0) result.grants.push({ recipientName: name, quantity: q })
+      if (q > 0) {
+        result.grants.push({
+          recipientName: name,
+          quantity: q,
+          issueDate: optsIssueDateCol ? asDate(row.getCell(optsIssueDateCol.col).value) : null,
+          strike: optsStrikeCol ? (asNumber(row.getCell(optsStrikeCol.col).value) || null) : null,
+          vestingStart: optsVestStartCol ? asDate(row.getCell(optsVestStartCol.col).value) : null,
+        })
+      }
     }
 
     r++
@@ -598,6 +626,13 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
       || /grants?\s*(detail|ledger)/.test(n)
       || /^awards?$/.test(n)
   })
+  // Track which grants came from the Detailed Cap Table so we can drop
+  // them wholesale if the Option Plan sheet provides richer per-grant
+  // data for the same stakeholders (the Plan sheet wins). With Issue
+  // Date support added to the Detailed Cap Table path, both sources
+  // now produce non-stub grants, so we can't dedupe by "isStub" alone.
+  const detailedCapTableGrantCount = result.grants.length
+
   if (planSheet) {
     // Find the header row — first row in the top 8 with at least 3 grant-y
     // signature headers (name + quantity + strike / date / vesting).
@@ -702,15 +737,20 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
         }
       }
       if (parsed > 0) {
-        // De-dupe: when the Plan sheet supplies a grant for a stakeholder
-        // we already inserted from the Detailed Cap Table (qty-only), drop
-        // the qty-only stub so we don't double-count. Plan-sheet grants
-        // have strike or issueDate populated; cap-table-only stubs don't.
-        const detailed = new Set(result.grants.filter(g => g.strike != null || g.issueDate != null).map(g => g.recipientName.toLowerCase()))
-        result.grants = result.grants.filter(g => {
-          const isStub = g.strike == null && g.issueDate == null && g.vestMonths == null
-          return !(isStub && detailed.has(g.recipientName.toLowerCase()))
-        })
+        // De-dupe: the Plan sheet just produced richer per-grant detail
+        // for some stakeholders. Drop EVERY grant the Detailed Cap Table
+        // had pushed for those stakeholders (they're now covered by the
+        // Plan sheet entries, in possibly greater detail with separate
+        // rows per grant). Grants from stakeholders the Plan sheet
+        // didn't cover stay as-is.
+        const planSheetStakeholders = new Set(
+          result.grants.slice(detailedCapTableGrantCount).map(g => g.recipientName.toLowerCase()),
+        )
+        const keepDetailedCapTable = result.grants
+          .slice(0, detailedCapTableGrantCount)
+          .filter(g => !planSheetStakeholders.has(g.recipientName.toLowerCase()))
+        const planSheetGrants = result.grants.slice(detailedCapTableGrantCount)
+        result.grants = [...keepDetailedCapTable, ...planSheetGrants]
       }
 
       // Surface a warning when a non-trivial number of grants came in
