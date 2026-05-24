@@ -271,11 +271,11 @@ async function commitRound(roundId: string): Promise<void> {
 // Soft amber tint marks every cell that's a user-input field, so the operator
 // can tell at a glance which numbers they own vs which are derived from the
 // ledger import. Focus state clears the tint and switches to the accent ring.
-const inputCellClass = 'w-full bg-amber-50 border border-amber-300 hover:border-amber-500 focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-accent-500 rounded px-1 py-0.5 text-right text-[12px] text-ink-900 num'
+const inputCellClass = 'w-full bg-amber-50 border border-amber-300 hover:border-amber-500 focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-accent-500 rounded px-1 py-0.5 text-left text-[12px] text-ink-900 num'
 // Cells that show a computed value but allow override (Preferred issued).
 // When the formula's in effect we render in a muted style so the user can
 // see at a glance which cells are derived vs manually set.
-const formulaCellClass = 'w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-accent-500 rounded px-1 py-0.5 text-right text-[12px] text-ink-500 italic num'
+const formulaCellClass = 'w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-accent-500 rounded px-1 py-0.5 text-left text-[12px] text-ink-500 italic num'
 
 // Preferred issued: when the user has overridden the formula, show the
 // override value with the standard amber input chrome. Otherwise display
@@ -764,7 +764,7 @@ function colWidthFor(roundId: string): number {
                   <input
                     type="date"
                     :value="(effective(r, 'close_date') ?? r.close_date) || ''"
-                    :class="inputCellClass + ' cursor-pointer text-left'"
+                    :class="inputCellClass + ' cursor-pointer'"
                     @change="setDraft(r.round_id, 'close_date', ($event.target as HTMLInputElement).value || null)"
                     @blur="commitRound(r.round_id)"
                   />
@@ -778,7 +778,7 @@ function colWidthFor(roundId: string): number {
                   <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Tranche of</div>
                   <select
                     :value="(effective(r, 'parent_round_code') ?? r.parent_round_code) || ''"
-                    :class="inputCellClass + ' text-left'"
+                    :class="inputCellClass"
                     @change="setDraft(r.round_id, 'parent_round_code', ($event.target as HTMLSelectElement).value || null); commitRound(r.round_id)"
                   >
                     <option value="">— standalone</option>
@@ -820,7 +820,7 @@ function colWidthFor(roundId: string): number {
                      Notes financing is reported below as its own line. -->
                 <div :title="tooltipPostMoney(r)">
                   <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Post-money ($)</div>
-                  <div class="px-1 py-0.5 text-right text-[13px] font-medium" :class="effectiveKind(r) === 'open' ? 'text-accent-700' : 'text-ink-900'">
+                  <div class="px-1 py-0.5 text-left text-[13px] font-medium" :class="effectiveKind(r) === 'open' ? 'text-accent-700' : 'text-ink-900'">
                     <span v-if="r.post_money" class="cursor-help underline decoration-dotted decoration-ink-400">{{ fmtUSD(r.post_money) }}</span>
                     <template v-else><span class="text-ink-400 font-normal">—</span></template>
                   </div>
@@ -832,7 +832,7 @@ function colWidthFor(roundId: string): number {
                      post-money valuation. -->
                 <div :title="tooltipNotesFinancing(r)">
                   <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Notes financing ($)</div>
-                  <div class="px-1 py-0.5 text-right text-[12px] text-ink-700">
+                  <div class="px-1 py-0.5 text-left text-[12px] text-ink-700">
                     <span v-if="r.notes_financing" class="cursor-help underline decoration-dotted decoration-ink-400">{{ fmtUSD(r.notes_financing) }}</span>
                     <template v-else><span class="text-ink-400">—</span></template>
                   </div>
@@ -856,7 +856,7 @@ function colWidthFor(roundId: string): number {
                 <!-- Cumulated financing (computed) -->
                 <div :title="tooltipCumulatedFinancing(r)">
                   <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Cumulated financing</div>
-                  <div class="px-1 py-0.5 text-right text-[12px] text-ink-700">
+                  <div class="px-1 py-0.5 text-left text-[12px] text-ink-700">
                     <span class="cursor-help underline decoration-dotted decoration-ink-400">{{ fmtUSD(r.cumulated_financing) }}</span>
                   </div>
                 </div>
@@ -867,7 +867,7 @@ function colWidthFor(roundId: string): number {
                 <!-- Total fully diluted (cumulative through this round) -->
                 <div :title="tooltipTotalFDS(r)">
                   <div class="text-[9px] uppercase tracking-wider text-ink-700 font-semibold mb-0.5">Total FDS</div>
-                  <div class="px-1 py-0.5 text-right text-[14px] font-semibold" :class="effectiveKind(r) === 'open' ? 'text-accent-700' : 'text-ink-900'">
+                  <div class="px-1 py-0.5 text-left text-[14px] font-semibold" :class="effectiveKind(r) === 'open' ? 'text-accent-700' : 'text-ink-900'">
                     {{ r.total_shares_fds ? fmtShares(r.total_shares_fds) : '—' }}
                   </div>
                 </div>
@@ -904,7 +904,7 @@ function colWidthFor(roundId: string): number {
                 <!-- Notes converted (computed) -->
                 <div :title="notesAttributedTooltip(r) || 'No CNs attributed to this round.'">
                   <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Notes converted</div>
-                  <div class="px-1 py-0.5 text-right text-[12px] text-ink-700">
+                  <div class="px-1 py-0.5 text-left text-[12px] text-ink-700">
                     <span v-if="r.notes_converted" class="cursor-help underline decoration-dotted decoration-ink-400">{{ fmtShares(r.notes_converted) }}</span>
                     <template v-else><span class="text-ink-400">—</span></template>
                   </div>
