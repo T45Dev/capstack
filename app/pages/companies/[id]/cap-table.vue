@@ -96,23 +96,30 @@ function effectiveKind(r: RoundColumn): 'formation' | 'closed' | 'open' {
 
 // Toggle a round between open / closed. Single-open invariant: setting one
 // open drafts every other currently-open round (server-side or draft-side)
-// back to 'closed' in the same buffer so Save commits the swap atomically.
-function setKind(roundId: string, newKind: 'closed' | 'open'): void {
+// back to 'closed' in the same buffer so the swap commits atomically. With
+// auto-save we flush every affected row immediately so the user sees the
+// switch land without a Save click.
+async function setKind(roundId: string, newKind: 'closed' | 'open'): Promise<void> {
+  const affected: string[] = [roundId]
   if (newKind === 'open') {
     for (const r of roundCols.value) {
       if (r.round_id === roundId) continue
-      if (effectiveKind(r) === 'open') setDraft(r.round_id, 'kind', 'closed')
+      if (effectiveKind(r) === 'open') {
+        setDraft(r.round_id, 'kind', 'closed')
+        affected.push(r.round_id)
+      }
     }
   }
   setDraft(roundId, 'kind', newKind)
+  for (const id of affected) await commitRound(id)
 }
 
 // ---- Edit/save state ----
-// Every input on the Summary card writes into a local draft instead of
-// PATCHing immediately. The user clicks "Save" to commit the batch — that's
-// when the close-date sort actually re-runs, so columns don't jump around
-// mid-edit. Cancel discards. Add round / Delete round still hit the server
-// immediately so the row set itself stays in sync.
+// Drafts are now short-lived: they capture an in-flight edit between keystrokes
+// and the blur that commits it. On blur, commitRound() PATCHes whatever's in
+// the draft for that row and clears it; the round-summary refresh propagates
+// derived rows (FDS, Cumulated financing, post-money). Kind toggles
+// (Closed/Open) and Add/Delete round still hit the server immediately.
 interface RoundDraft {
   name?: string | null
   kind?: 'formation' | 'closed' | 'open'
@@ -130,11 +137,10 @@ interface RoundDraft {
   pref_tier?: number
 }
 const drafts = ref<Record<string, RoundDraft>>({})
-const isSaving = ref(false)
-const dirtyCount = computed(() => Object.keys(drafts.value).filter(k => {
-  const d = drafts.value[k]
-  return d && Object.keys(d).length > 0
-}).length)
+// In-flight PATCH counter — drives the small "Saving…" indicator in the card
+// header. Bumped at the start of every commitRound and decremented on
+// success/failure so concurrent blurs aggregate naturally.
+const savingCount = ref(0)
 
 function setDraft<K extends keyof RoundDraft>(roundId: string, field: K, value: RoundDraft[K]): void {
   const cur = drafts.value[roundId] || {}
@@ -149,28 +155,32 @@ function effective<K extends keyof RoundDraft>(r: RoundColumn, field: K): RoundD
   return (r as any)[field]
 }
 
-async function saveDrafts() {
-  if (!dirtyCount.value) return
-  isSaving.value = true
+// Commit one row's pending drafts to the server. Called from @blur on every
+// editable cell — by the time blur fires, the cell's onBlur has already
+// flushed its value into the drafts buffer, so we PATCH whatever's in there.
+// Idempotent: returning early when there's nothing to save keeps blur churn
+// (tabbing across read-only cells) cheap.
+async function commitRound(roundId: string): Promise<void> {
+  const body = drafts.value[roundId]
+  if (!body || Object.keys(body).length === 0) return
+  const payload: any = { ...body }
+  if ('close_date' in payload) payload.close_date = normalizeDate(payload.close_date || '') || null
+  // Drop the draft eagerly so a fast follow-on blur doesn't double-save the
+  // same fields. If the PATCH fails we restore them so the user can retry.
+  const restore = { ...body }
+  const next = { ...drafts.value }
+  delete next[roundId]
+  drafts.value = next
+  savingCount.value++
   try {
-    for (const [roundId, body] of Object.entries(drafts.value)) {
-      if (!body || Object.keys(body).length === 0) continue
-      // Normalize close_date before saving (Chrome 2-digit-year gotcha).
-      const payload: any = { ...body }
-      if ('close_date' in payload) payload.close_date = normalizeDate(payload.close_date || '') || null
-      await $fetch(`/api/rounds/${roundId}`, { method: 'PATCH', body: payload })
-    }
-    drafts.value = {}
+    await $fetch(`/api/rounds/${roundId}`, { method: 'PATCH', body: payload })
     await refreshRoundSummary()
   } catch (e) {
-    console.error('Save failed', e)
+    console.error('Auto-save failed; restoring draft', e)
+    drafts.value = { ...drafts.value, [roundId]: { ...(drafts.value[roundId] || {}), ...restore } }
   } finally {
-    isSaving.value = false
+    savingCount.value--
   }
-}
-
-function cancelDrafts() {
-  drafts.value = {}
 }
 
 // Soft amber tint marks every cell that's a user-input field, so the operator
@@ -558,25 +568,25 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
            at a time. -->
       <UiCard
         title="Financings table"
-        subtitle="One column per round — type the values; Save commits and re-sorts by close date."
+        subtitle="One column per round — type the values; each cell auto-saves when you tab off."
         :padded="false"
       >
         <template #header>
           <div class="flex items-center gap-2">
-            <span v-if="dirtyCount" class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
-              {{ dirtyCount }} unsaved {{ dirtyCount === 1 ? 'change' : 'changes' }}
-            </span>
-            <UiButton v-if="dirtyCount" variant="ghost" :disabled="isSaving" @click="cancelDrafts">Cancel</UiButton>
-            <UiButton v-if="dirtyCount" variant="primary" :disabled="isSaving" @click="saveDrafts">
-              {{ isSaving ? 'Saving…' : 'Save' }}
-            </UiButton>
-            <UiButton :disabled="isSaving" @click="addRound"><Plus :size="14" /> Add round</UiButton>
+            <span v-if="savingCount > 0" class="text-[11px] text-ink-500 italic">Saving…</span>
+            <UiButton @click="addRound"><Plus :size="14" /> Add round</UiButton>
           </div>
         </template>
         <div v-if="!roundCols.length" class="px-4 py-8 text-center text-sm text-ink-500">
           No rounds yet. Click <span class="font-medium text-ink-700">Add round</span> to start typing your funding history.
         </div>
-        <div v-else class="overflow-x-auto">
+        <!-- max-height + overflow-auto turns this wrapper into the scroll
+             context for BOTH axes — required so the thead's position:sticky
+             actually sticks to the table's top edge (not the page's, which
+             keeps moving when the page scrolls). The viewport-minus-padding
+             height lands the table just under the page nav with breathing
+             room below. -->
+        <div v-else class="overflow-auto max-h-[calc(100vh-12rem)]">
           <table class="text-[12px] border-separate whitespace-nowrap" style="border-spacing: 0; min-width: 100%;">
             <colgroup>
               <col style="width: 220px" />
@@ -584,12 +594,16 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
             </colgroup>
             <thead class="text-ink-700 bg-ink-100">
               <tr>
-                <th class="px-3 py-2 border-b border-ink-300 text-left text-[11px] font-semibold uppercase tracking-wide sticky left-0 z-10 bg-ink-100">Capitalization table</th>
+                <!-- Sticky top:0 within the scrollable wrapper — the wrapper
+                     starts below the page nav so top:0 lands the header just
+                     under it. The corner cell is sticky both ways so it owns
+                     the row/column intersection. -->
+                <th class="px-3 py-2 border-b border-ink-300 text-left text-[11px] font-semibold uppercase tracking-wide sticky left-0 top-0 z-30 bg-ink-100">Capitalization table</th>
                 <th
                   v-for="r in roundCols"
                   :key="r.round_id"
-                  class="px-3 py-2 border-b border-ink-300 text-right text-[11px] font-semibold group"
-                  :class="effectiveKind(r) === 'open' ? 'bg-accent-50 text-accent-700' : 'text-ink-700'"
+                  class="px-3 py-2 border-b border-ink-300 text-right text-[11px] font-semibold group sticky top-0 z-20"
+                  :class="effectiveKind(r) === 'open' ? 'bg-accent-50 text-accent-700' : 'text-ink-700 bg-ink-100'"
                 >
                   <div class="flex items-center justify-end gap-1.5">
                     <button
@@ -607,6 +621,8 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                       class="flex-1 min-w-0 bg-transparent text-right font-semibold text-[11px] border border-transparent hover:border-ink-300 focus:border-accent-500 focus:bg-white focus:outline-none rounded px-1 py-0.5"
                       :class="effectiveKind(r) === 'open' ? 'text-accent-700' : ''"
                       @input="setDraft(r.round_id, 'name', ($event.target as HTMLInputElement).value)"
+                      @blur="commitRound(r.round_id)"
+                      @keydown.enter="($event.target as HTMLInputElement).blur()"
                     />
                   </div>
                   <div class="mt-1 flex items-center justify-end gap-1">
@@ -641,6 +657,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     :value="(effective(r, 'close_date') ?? r.close_date) || ''"
                     :class="inputCellClass + ' cursor-pointer'"
                     @change="setDraft(r.round_id, 'close_date', ($event.target as HTMLInputElement).value || null)"
+                    @blur="commitRound(r.round_id)"
                   />
                 </td>
               </tr>
@@ -655,6 +672,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     :input-class="inputCellClass"
                     title="Pre-money valuation — user input"
                     @update:model-value="(v) => setDraft(r.round_id, 'pre_money', v)"
+                    @blur="commitRound(r.round_id)"
                   />
                 </td>
               </tr>
@@ -669,6 +687,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     :input-class="inputCellClass"
                     title="New money — user input"
                     @update:model-value="(v) => setDraft(r.round_id, 'new_money', v ?? 0)"
+                    @blur="commitRound(r.round_id)"
                   />
                 </td>
               </tr>
@@ -695,6 +714,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     placeholder="—"
                     :input-class="inputCellClass"
                     @update:model-value="(v) => setDraft(r.round_id, 'share_price', v)"
+                    @blur="commitRound(r.round_id)"
                   />
                 </td>
               </tr>
@@ -748,6 +768,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     placeholder="—"
                     :input-class="inputCellClass"
                     @update:model-value="(v) => setDraft(r.round_id, 'common', v ?? 0)"
+                    @blur="commitRound(r.round_id)"
                   />
                 </td>
               </tr>
@@ -761,6 +782,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     :input-class="preferredIssuedInputClass(r)"
                     :title="isPreferredOverridden(r) ? 'Manual override — clear to revert to formula' : 'Formula: new_money ÷ share_price (auto). Type to override.'"
                     @update:model-value="(v) => setDraft(r.round_id, 'preferred_issued_override', v ?? null)"
+                    @blur="commitRound(r.round_id)"
                   />
                 </td>
               </tr>
@@ -780,6 +802,7 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
                     :input-class="inputCellClass"
                     title="Option pool issued — user input"
                     @update:model-value="(v) => setDraft(r.round_id, 'option_pool_issued', v ?? 0)"
+                    @blur="commitRound(r.round_id)"
                   />
                 </td>
               </tr>
