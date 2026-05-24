@@ -92,10 +92,11 @@ export default defineEventHandler((event) => {
   }>
 
   function accruedInterestFor(c: typeof cnRows[number]): number {
-    if (!c.conversion_date || !c.issue_date || !c.interest_rate || c.interest_rate <= 0) {
+    if (!c.issue_date || !c.interest_rate || c.interest_rate <= 0) {
       return c.interest_accrued || 0
     }
-    const conv = new Date(c.conversion_date).getTime()
+    const endStr = c.conversion_date || new Date().toISOString().slice(0, 10)
+    const conv = new Date(endStr).getTime()
     const iss = new Date(c.issue_date).getTime()
     if (!isFinite(conv) || !isFinite(iss)) return c.interest_accrued || 0
     const days = (conv - iss) / (1000 * 60 * 60 * 24)
@@ -154,21 +155,20 @@ export default defineEventHandler((event) => {
     let cnShares = 0
     for (const a of attribs) {
       cnDollars += a.total
-      // Effective conv price — same rule as /convertibles: lower of
-      // (round PPS × (1 − discount)) and (cap / pre-money FDS).
+      // Share price basis: stored conv_price (Carta or user-typed) wins
+      // over the round PPS. Effective conv price applies cap/discount on
+      // top — same rule as /convertibles so the CN page's shares column
+      // and the cap table's Notes converted row agree exactly.
+      const basis = a.storedConvPrice || roundPPS
       let eff = 0
-      if (roundPPS > 0) {
-        const discountPrice = a.discount > 0 ? roundPPS * (1 - a.discount) : roundPPS
+      if (basis > 0) {
+        const discountPrice = a.discount > 0 ? basis * (1 - a.discount) : basis
         const capPrice = a.cap > 0 && preFDS > 0 ? a.cap / preFDS : 0
         eff = capPrice > 0 ? Math.min(discountPrice, capPrice) : discountPrice
       } else if (a.cap > 0 && preFDS > 0) {
         eff = a.cap / preFDS
       }
-      // Stored conv price overrides the math when present (e.g. Carta
-      // recorded an exact price that differs from the model). Falls back
-      // to the computed effective if neither is available.
-      const usedPrice = a.storedConvPrice || eff
-      if (usedPrice > 0) cnShares += a.total / usedPrice
+      if (eff > 0) cnShares += a.total / eff
     }
 
     const preMoney = (r.pre_money != null && r.pre_money !== 0) ? r.pre_money : null
