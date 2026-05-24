@@ -584,9 +584,19 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
   // table already gave us — and add any grant rows the cap table missed.
   const planSheet = wb.worksheets.find(ws => {
     const n = (ws.name || '').toLowerCase()
-    return /(stock\s*option|equity).+(plan|incentive|ledger)/i.test(n)
-      || /option.+ledger/i.test(n)
-      || /option.+detail/i.test(n)
+    // Broad pattern bank so we catch the many ways Carta labels this
+    // sheet across templates and customers. Real-world names seen:
+    //   "2019 Stock Option and Incentive Plan", "Equity Incentive Plan",
+    //   "Option Ledger", "ANT Post A-4 Option Detail", "Stock Options",
+    //   "Option Grants", "Grants Detail", "Awards", "Outstanding Options".
+    return /(stock\s*option|equity).+(plan|incentive|ledger)/.test(n)
+      || /option.+ledger/.test(n)
+      || /option.+detail/.test(n)
+      || /^stock\s*options?$/.test(n)
+      || /option\s*(grants?|awards?)/.test(n)
+      || /outstanding\s*options?/.test(n)
+      || /grants?\s*(detail|ledger)/.test(n)
+      || /^awards?$/.test(n)
   })
   if (planSheet) {
     // Find the header row — first row in the top 8 with at least 3 grant-y
@@ -634,7 +644,16 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
       const cQtyCancelled = findHeader(/^quantity ?(cancelled|canceled|forfeited)$/, /^(cancelled|canceled|forfeited)$/)
       const cQtyExpired = findHeader(/^quantity ?expired$/, /^expired$/, /lapsed/)
       const cStrike = findHeader(/^(strike|exercise) ?price( ?\(\$\))?$/, /^strike$/, /^exercise$/)
-      const cIssueDate = findHeader(/^(issue|award|grant) ?date$/, /^date( ?issued| ?granted| ?awarded)?$/, /^date$/)
+      // Issue / award / grant date — wide bank because Carta templates
+      // disagree on the column label. Seen: "Issue Date", "Award Date",
+      // "Grant Date", "Date Issued", "Date Granted", "Issuance Date",
+      // "Board Approval Date" (sometimes the only available column).
+      const cIssueDate = findHeader(
+        /^(issue|award|grant|issuance|effective|board\s*approval) ?date$/,
+        /^date( ?issued| ?granted| ?awarded| ?of\s*grant)?$/,
+        /^(issued|granted|awarded)$/,
+        /^date$/,
+      )
       const cVestStart = findHeader(/^vesting ?start( ?date)?$/, /^vest ?start$/)
       const cVestSchedule = findHeader(/^vesting ?schedule$/, /^schedule$/)
       const cAwardType = findHeader(/^(award|grant) ?type$/, /^(iso|nso|rsu)/)
@@ -689,7 +708,30 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
           return !(isStub && detailed.has(g.recipientName.toLowerCase()))
         })
       }
+
+      // Surface a warning when a non-trivial number of grants came in
+      // without an issue date — these will fall back to a placeholder
+      // date on the Option Pool Impact timeline, so the operator can
+      // fix them via the grants page if the source column was misread.
+      const grantsWithoutDate = result.grants.filter(g => !g.issueDate).length
+      if (grantsWithoutDate > 0) {
+        warnings.push(
+          `${grantsWithoutDate} grant${grantsWithoutDate === 1 ? '' : 's'} on "${planSheet.name}" `
+          + `imported without an issue date — they'll cluster at the company's starting date on the `
+          + `Option Pool Impact timeline. Check the Option Grants page to set issue dates manually.`,
+        )
+      }
     }
+  } else {
+    // No option-plan sheet found at all. Grants come in only via the
+    // Detailed Cap Table — qty-only, no dates. Surface explicitly so the
+    // operator can either rename the sheet in Carta or paste the actual
+    // sheet name and we widen the detection.
+    warnings.push(
+      `No Stock Option Plan sheet found (tried patterns like "Stock Option and Incentive Plan", `
+      + `"Equity Incentive Plan", "Option Ledger", "Option Detail", "Stock Options", "Option Grants"). `
+      + `Grants imported from the Detailed Cap Table won't have strike / issue dates / vesting.`,
+    )
   }
 
   // ----- Company name + as-of -----
