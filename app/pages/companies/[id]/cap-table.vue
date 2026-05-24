@@ -153,19 +153,27 @@ async function addRound() {
 // Delete a round. Confirms first. Any CN whose destination matched this
 // round's code keeps the value but will read as unmatched until reassigned.
 // Also clears any in-flight draft for that round so the dirty count stays
-// accurate.
+// accurate. Defensive: clear the draft BEFORE the network call so a
+// transient render between the DELETE returning and the refresh fetching
+// can't reach into a stale draft for a no-longer-existing round.
 async function deleteRound(roundId: string, label: string) {
   if (!roundId || roundId === 'open') return
   if (!confirm(`Delete round "${label}"? Any CNs attributed here will become unassigned.`)) return
+  // Optimistically clear the draft first.
+  if (drafts.value[roundId]) {
+    const next = { ...drafts.value }
+    delete next[roundId]
+    drafts.value = next
+  }
   try {
     await $fetch(`/api/rounds/${roundId}`, { method: 'DELETE' })
-    if (drafts.value[roundId]) {
-      const next = { ...drafts.value }
-      delete next[roundId]
-      drafts.value = next
-    }
     await refreshRoundSummary()
-  } catch (e) { console.error('Failed to delete round', e) }
+  } catch (e) {
+    console.error('Failed to delete round', e)
+    // If the delete fails, the round comes back on the next refresh. Try to
+    // resync so the UI doesn't lie about what's actually in the DB.
+    try { await refreshRoundSummary() } catch {}
+  }
 }
 
 const query = ref('')
