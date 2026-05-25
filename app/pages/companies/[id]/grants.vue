@@ -43,6 +43,13 @@ function vestingLabel(g: { vest_months: number | null; cliff_months: number | nu
 interface Pool { id: string; name: string; authorized: number }
 
 const { data, refresh } = await useFetch<{ grants: Grant[]; pools: Pool[] }>(() => `/api/companies/${id.value}/grants`, { watch: [id], default: () => ({ grants: [], pools: [] } as any) })
+
+// Round-summary drives Authorized — sum of rounds.option_pool_issued
+// (operator-managed on the Financings page) is the source of truth.
+// option_pools (Carta import lump) is a fallback when no per-round
+// values are typed in. Pool Impact page uses the same logic; both
+// pages MUST agree on Authorized or the headline stats diverge.
+const { data: roundSummary } = await useFetch<{ rounds: any[] }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
 // Pull cap-table so the toggle's % / $ views have an FDS denominator and a PPS,
 // AND so we can surface each proposed grantee's existing position (common,
 // preferred, outstanding options).
@@ -102,20 +109,29 @@ const totalExercised = computed(() => outstanding.value.reduce((a, g) => a + (g.
 const totalForfeited = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_forfeited || 0), 0))
 const totalExpired = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_expired || 0), 0))
 const totalIssued = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_issued || g.quantity), 0))
-const poolAuthorized = computed(() => data.value!.pools.reduce((a, p) => a + p.authorized, 0))
+// Authorized = sum of rounds.option_pool_issued (operator-typed on
+// the Financings page). Falls back to option_pools (Carta import) when
+// no per-round values are set. Pool Impact uses the same source.
+const poolAuthorizedOriginal = computed(() => {
+  const fromRounds = (roundSummary.value?.rounds || [])
+    .reduce((a: number, r: any) => a + (r.option_pool_issued || 0), 0)
+  if (fromRounds > 0) return fromRounds
+  return data.value!.pools.reduce((a, p) => a + p.authorized, 0)
+})
 // Pool math identity (spec-correct):
 //   Authorized = Outstanding + Proposed + Available
-// Exercised shares leave the pool entirely (Outstanding → Common per
-// spec §2 Options "deck of cards" rule — pool size decreases by N).
-// Forfeited / Expired shares return to Available (already netted into
-// Available going forward). So none of Exercised / Forfeited / Expired
-// appear in the live balance equation. They stay visible underneath as
-// the lifetime lifecycle decomposition.
-//
-// Available solved from the identity so it always balances against the
-// imported pool authorization:
-//   Available = Authorized − Outstanding − Proposed
-// Negative Available = over-allocated → red Authorized headline.
+// Per spec §2 Options "deck of cards" rule:
+//   - Exercised shares leave the pool ENTIRELY (Outstanding → Common).
+//     The live pool size shrinks by Exercised amount.
+//   - Forfeited / Expired shares RETURN to Available (Outstanding
+//     decreases, Available increases). Because grant `quantity` is
+//     current outstanding (Carta's Quantity Outstanding column, which
+//     already excludes forfeit/expire), forfeit/expire are implicitly
+//     back in Available — no double-counting.
+// Live Authorized = Original - Exercised. Holding the identity:
+//   Available = Live Authorized − Outstanding − Proposed
+//             = Original − Exercised − Outstanding − Proposed
+const poolAuthorized = computed(() => poolAuthorizedOriginal.value - totalExercised.value)
 const poolAvailable = computed(() =>
   poolAuthorized.value - totalOutstanding.value - totalProposed.value,
 )

@@ -40,6 +40,13 @@ export interface ParsedGrant {
   quantityForfeited?: number | null
   quantityExpired?: number | null      // vested options that lapsed (separate from Forfeited)
   acceleration?: string | null         // 'single' | 'double' | null
+  // Dates that anchor pool-impact events. Carta records ONE date per
+  // event type per grant (last exercise, termination, expiration), so
+  // we capture each separately. Pool Impact pushes a dated event when
+  // the corresponding quantity is positive AND the date is set.
+  lastExercisedDate?: string | null
+  forfeitedDate?: string | null
+  expiredDate?: string | null
 }
 
 export interface ParsedRound {
@@ -849,6 +856,26 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
       const cVestSchedule = findHeader(/^vesting ?schedule$/, /^schedule$/)
       const cAwardType = findHeader(/^(award|grant) ?type$/, /^(iso|nso|rsu)/)
       const cAcceleration = findHeader(/^acceleration$/, /^accel/)
+      // Event dates. Carta records ONE date per event type per grant —
+      // the last exercise date, the termination date (which drives
+      // forfeitures of unvested shares), and the expiration date
+      // (vested-but-unexercised shares lapse on this date). Termination
+      // is a useful fallback when the export doesn't break out
+      // forfeit/expire dates separately.
+      const cExerciseDate = findHeader(
+        /^last ?exercis(e|ed) ?date$/, /^exercise ?date$/, /^exercised ?on$/,
+        /^last ?exercised$/, /^date ?exercised$/,
+      )
+      const cForfeitDate = findHeader(
+        /^forfeit(ed)? ?date$/, /^cancell?ed ?date$/, /^cancellation ?date$/,
+        /^date ?(forfeited|cancelled|canceled)$/,
+      )
+      const cExpireDate = findHeader(
+        /^expir(ed|ation) ?date$/, /^date ?expired$/, /^lapsed? ?date$/,
+      )
+      const cTerminationDate = findHeader(
+        /^termination ?date$/, /^date ?of ?termination$/, /^terminated ?date$/,
+      )
 
       // Diagnostic: dump exactly which columns we resolved on the Plan
       // sheet. This is the single most useful warning when the parser
@@ -869,6 +896,10 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
           colReport('strike', cStrike),
           colReport('issue_date', cIssueDate),
           colReport('vest_start', cVestStart),
+          colReport('exercise_date', cExerciseDate),
+          colReport('forfeit_date', cForfeitDate),
+          colReport('expire_date', cExpireDate),
+          colReport('termination_date', cTerminationDate),
         ].join(', '),
       )
 
@@ -895,6 +926,9 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
             : /single/.test(accelStr) ? 'single'
             : null
 
+          const termDate = cTerminationDate > 0 ? asDate(row.getCell(cTerminationDate).value) : null
+          const forfeitDate = cForfeitDate > 0 ? asDate(row.getCell(cForfeitDate).value) : null
+          const expireDate = cExpireDate > 0 ? asDate(row.getCell(cExpireDate).value) : null
           result.grants.push({
             recipientName: name,
             quantity: Math.round(quantity),
@@ -909,6 +943,14 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
             quantityForfeited: cQtyCancelled > 0 ? Math.round(asNumber(row.getCell(cQtyCancelled).value)) || null : null,
             quantityExpired: cQtyExpired > 0 ? Math.round(asNumber(row.getCell(cQtyExpired).value)) || null : null,
             acceleration,
+            lastExercisedDate: cExerciseDate > 0 ? asDate(row.getCell(cExerciseDate).value) : null,
+            // Termination Date is a useful fallback when the export doesn't
+            // break out forfeit/expire dates separately — the date the
+            // grantee left, which is when both forfeitures (unvested) and
+            // expirations (vested-but-unexercised within the exercise
+            // window) effectively land on the pool timeline.
+            forfeitedDate: forfeitDate || termDate,
+            expiredDate: expireDate || termDate,
           })
           parsed++
         } catch (err: any) {

@@ -174,8 +174,10 @@ export default defineEventHandler(async (event) => {
           id, company_id, stakeholder_id, recipient_name, recipient_type, round,
           quantity, strike, issue_date, vesting_start, vest_months, cliff_months,
           quantity_issued, quantity_exercised, quantity_forfeited, quantity_expired,
-          award_type, acceleration, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outstanding')
+          award_type, acceleration,
+          last_exercised_date, forfeited_date, expired_date,
+          status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outstanding')
       `)
       for (const g of parsed.grants) {
         try {
@@ -198,6 +200,9 @@ export default defineEventHandler(async (event) => {
             g.quantityExpired ?? null,
             g.awardType ?? null,
             g.acceleration ?? null,
+            g.lastExercisedDate ?? null,
+            g.forfeitedDate ?? null,
+            g.expiredDate ?? null,
           )
         } catch (err: any) {
           parsed.warnings.push(`Couldn't import grant for "${g.recipientName}": ${err?.message || err}`)
