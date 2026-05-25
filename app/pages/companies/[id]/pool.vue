@@ -666,7 +666,12 @@ const chart = computed(() => {
     <!-- Overall heading: pool math as equation + lifetime row + pie/line
          charts side-by-side. Stays put while the timeline below scrolls. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-4 p-4 shrink-0">
-      <!-- Pool math equation (matches the Option Grants layout). -->
+      <!-- Pool math equation (matches Carta's accounting):
+             Authorized = Outstanding + Exercised + Proposed + Available
+           Exercised shares are permanently allocated against the pool
+           (gone to Common). Forfeited/Expired aren't shown explicitly
+           because they're already excluded from Outstanding — they flow
+           into Available implicitly. -->
       <div class="flex flex-wrap items-end gap-3 text-ink-900 num">
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Pool authorized</span>
@@ -676,6 +681,11 @@ const chart = computed(() => {
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Outstanding</span>
           <span class="text-2xl font-semibold">{{ fmtShares(totals.outstandingShares) }}</span>
+        </div>
+        <span v-if="totals.totalExercised > 0" class="text-2xl text-ink-400 pb-1">+</span>
+        <div v-if="totals.totalExercised > 0" class="flex flex-col items-start">
+          <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Exercised options have moved to Common stock but stay allocated against the pool.">Exercised</span>
+          <span class="text-2xl font-semibold text-accent-700">{{ fmtShares(totals.totalExercised) }}</span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">+</span>
         <div class="flex flex-col items-start">
