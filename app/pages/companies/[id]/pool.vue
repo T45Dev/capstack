@@ -9,7 +9,7 @@
 //   - "vest-schedule" -> each grant reduces the pool month-by-month as shares
 //                        vest (1/vest_months after the cliff, lump-sum at the
 //                        cliff date).
-import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, Lightbulb, TrendingUp, TrendingDown as ArrowDownIcon, X } from 'lucide-vue-next'
+import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, ChevronRight, Lightbulb, TrendingUp, TrendingDown as ArrowDownIcon, X } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtUSD, fmtDate } from '~/utils/format'
 
 const route = useRoute()
@@ -22,6 +22,17 @@ const { data: ideas, refresh: refreshIdeas } = await useFetch<any[]>(() => `/api
 // Round-summary supplies per-round option_pool_issued + close_date, which
 // is what drives the chronological pool top-up events on the timeline.
 const { data: roundSummary } = await useFetch<{ rounds: Array<{ round_id: string; code: string; name: string | null; close_date: string | null; option_pool_issued: number }> }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
+
+// Visuals (pie + line graph) are collapsible — they eat vertical space
+// on smaller screens so the operator wants the option to fold them
+// away. Persisted to localStorage so the choice sticks across reloads.
+const visualsCollapsed = ref(false)
+if (typeof window !== 'undefined') {
+  try { visualsCollapsed.value = localStorage.getItem('capstack:pool:visuals-collapsed') === 'true' } catch { /* ignore */ }
+  watch(visualsCollapsed, (v) => {
+    try { localStorage.setItem('capstack:pool:visuals-collapsed', String(v)) } catch { /* ignore */ }
+  })
+}
 
 // Sensible fallback date used when an event has no date in the source data.
 // Prefer the company's starting-round date (the closest "anchor" we have),
@@ -671,44 +682,59 @@ const chart = computed(() => {
         </div>
       </div>
 
-      <!-- Pie + line side-by-side. Pie takes a fixed column on the left;
-           line takes whatever's left to the right. Wraps on narrow screens. -->
-      <div v-if="pieTotal > 0 || chartPoints.length" class="mt-4 pt-4 border-t border-ink-200 flex gap-6 flex-wrap items-start">
-        <div v-if="pieTotal > 0" class="flex items-center gap-3 shrink-0">
-          <svg viewBox="0 0 120 120" width="100" height="100" class="shrink-0">
-            <g>
-              <path v-for="s in pieSlices" :key="s.key" :d="s.path" :fill="s.color" stroke="white" stroke-width="1" />
-            </g>
-          </svg>
-          <ul class="text-[11px] text-ink-700 space-y-1 num">
-            <li v-for="s in pieSlices" :key="s.key" class="flex items-center gap-1.5">
-              <span class="inline-block w-2.5 h-2.5 rounded-sm" :style="{ background: s.color }" />
-              <span class="text-ink-600 w-[68px]">{{ s.label }}</span>
-              <span class="text-ink-900 font-medium">{{ fmtShares(s.value) }}</span>
-            </li>
-            <li v-if="totals.floorShares > 0" class="flex items-center gap-1.5">
-              <span class="inline-block w-2.5 h-2.5 rounded-sm border-2 border-dashed border-ink-400" />
-              <span class="text-ink-600 w-[68px]">Floor</span>
-              <span class="text-ink-900 font-medium">{{ fmtShares(totals.floorShares) }}</span>
-            </li>
-          </ul>
-        </div>
-        <div v-if="chartPoints.length" class="flex-1 min-w-[320px]">
-          <div class="text-[10px] uppercase tracking-wider text-ink-500 mb-1">Pool balance over time</div>
-          <svg :viewBox="`0 0 ${chartW} ${chartH}`" class="w-full" :style="{ height: chartH + 'px' }">
-            <g v-for="(t, i) in chart.yTicks" :key="i">
-              <line :x1="padL" :x2="chartW - padR" :y1="t.y" :y2="t.y" stroke="#e2e8f0" stroke-width="1" />
-              <text :x="padL - 6" :y="t.y + 3" text-anchor="end" font-size="9" fill="#64748b" class="num">{{ t.label }}</text>
-            </g>
-            <g v-for="(t, i) in chart.xTicks" :key="`x-${i}`">
-              <text :x="t.x" :y="chartH - 8" text-anchor="middle" font-size="9" fill="#64748b">{{ t.label }}</text>
-            </g>
-            <line v-if="chart.yMin < 0" :x1="padL" :x2="chartW - padR" :y1="chart.yTicks[0]?.y" :y2="chart.yTicks[0]?.y" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 3" />
-            <path :d="chart.path" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round" />
-            <circle v-for="(d, i) in chart.dots" :key="`d-${i}`" :cx="d.x" :cy="d.y" r="3" fill="#2563eb">
-              <title>{{ d.label }} — {{ fmtDate(d.t) }} → balance {{ fmtShares(d.balance) }}</title>
-            </circle>
-          </svg>
+      <!-- Pie + line side-by-side. Collapsible: a click on the section
+           header folds the visuals away (persisted in localStorage) so
+           smaller-screen operators can hide the charts and devote the
+           viewport to the equation + timeline. -->
+      <div v-if="pieTotal > 0 || chartPoints.length" class="mt-4 pt-4 border-t border-ink-200">
+        <button
+          type="button"
+          class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-ink-500 hover:text-ink-700 transition-colors"
+          @click="visualsCollapsed = !visualsCollapsed"
+          :title="visualsCollapsed ? 'Show pie + line charts' : 'Hide pie + line charts'"
+        >
+          <ChevronDown v-if="!visualsCollapsed" :size="12" />
+          <ChevronRight v-else :size="12" />
+          <span>Visuals</span>
+          <span v-if="visualsCollapsed" class="text-ink-400 normal-case tracking-normal">(hidden)</span>
+        </button>
+        <div v-if="!visualsCollapsed" class="mt-3 flex gap-6 flex-wrap items-start">
+          <div v-if="pieTotal > 0" class="flex items-center gap-3 shrink-0">
+            <svg viewBox="0 0 120 120" width="100" height="100" class="shrink-0">
+              <g>
+                <path v-for="s in pieSlices" :key="s.key" :d="s.path" :fill="s.color" stroke="white" stroke-width="1" />
+              </g>
+            </svg>
+            <ul class="text-[11px] text-ink-700 space-y-1 num">
+              <li v-for="s in pieSlices" :key="s.key" class="flex items-center gap-1.5">
+                <span class="inline-block w-2.5 h-2.5 rounded-sm" :style="{ background: s.color }" />
+                <span class="text-ink-600 w-[68px]">{{ s.label }}</span>
+                <span class="text-ink-900 font-medium">{{ fmtShares(s.value) }}</span>
+              </li>
+              <li v-if="totals.floorShares > 0" class="flex items-center gap-1.5">
+                <span class="inline-block w-2.5 h-2.5 rounded-sm border-2 border-dashed border-ink-400" />
+                <span class="text-ink-600 w-[68px]">Floor</span>
+                <span class="text-ink-900 font-medium">{{ fmtShares(totals.floorShares) }}</span>
+              </li>
+            </ul>
+          </div>
+          <div v-if="chartPoints.length" class="flex-1 min-w-[320px]">
+            <div class="text-[10px] uppercase tracking-wider text-ink-500 mb-1">Pool balance over time</div>
+            <svg :viewBox="`0 0 ${chartW} ${chartH}`" class="w-full" :style="{ height: chartH + 'px' }">
+              <g v-for="(t, i) in chart.yTicks" :key="i">
+                <line :x1="padL" :x2="chartW - padR" :y1="t.y" :y2="t.y" stroke="#e2e8f0" stroke-width="1" />
+                <text :x="padL - 6" :y="t.y + 3" text-anchor="end" font-size="9" fill="#64748b" class="num">{{ t.label }}</text>
+              </g>
+              <g v-for="(t, i) in chart.xTicks" :key="`x-${i}`">
+                <text :x="t.x" :y="chartH - 8" text-anchor="middle" font-size="9" fill="#64748b">{{ t.label }}</text>
+              </g>
+              <line v-if="chart.yMin < 0" :x1="padL" :x2="chartW - padR" :y1="chart.yTicks[0]?.y" :y2="chart.yTicks[0]?.y" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 3" />
+              <path :d="chart.path" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round" />
+              <circle v-for="(d, i) in chart.dots" :key="`d-${i}`" :cx="d.x" :cy="d.y" r="3" fill="#2563eb">
+                <title>{{ d.label }} — {{ fmtDate(d.t) }} → balance {{ fmtShares(d.balance) }}</title>
+              </circle>
+            </svg>
+          </div>
         </div>
       </div>
     </div>
