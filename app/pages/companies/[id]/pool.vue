@@ -85,10 +85,11 @@ function labelFor(type: EventType, kind?: string | null): string {
   if (type === 'pool_topup') return 'Pool top-up'
   if (type === 'grant')      return kind || 'Grant'
   if (type === 'exercise')   return 'Exercise'
-  // Expirations share the forfeit direction (both return shares to
-  // Available) but the operator audits them independently — surface
-  // the kind label when set so the timeline distinguishes them.
-  if (type === 'forfeit')    return kind === 'Expire' ? 'Expire' : 'Forfeit'
+  // Forfeit + Expire share the same pool effect (Outstanding → Available
+  // with Authorized unchanged) so they're collapsed under one label on
+  // the timeline. The underlying kind ('Expire' vs null) is still on
+  // the event for audit / tooltip purposes if needed later.
+  if (type === 'forfeit')    return 'Forfeit/Expire'
   if (type === 'floor')      return 'Floor'
   if (type === 'reserve')    return 'Reserve'
   return type
@@ -257,6 +258,31 @@ const eventsWithRunning = computed(() => {
     return { ...e, running }
   })
 })
+
+// Per-type filter for the timeline table. Running balance is still
+// computed over the FULL event sequence (so the "Running pool"
+// column reflects true state even when a category is filtered out);
+// only the displayed rows are filtered. 'idea' is a meta-bucket that
+// matches any event from the user's hypothetical Ideas (not a real
+// EventType — checked against the source field).
+type EventFilter = 'all' | 'pool_topup' | 'grant' | 'exercise' | 'forfeit' | 'idea'
+const eventFilter = ref<EventFilter>('all')
+const filteredEvents = computed(() => {
+  const f = eventFilter.value
+  if (f === 'all') return eventsWithRunning.value
+  if (f === 'idea') return eventsWithRunning.value.filter(e => e.source === 'idea')
+  return eventsWithRunning.value.filter(e => e.type === f)
+})
+// Counts per filter category — surfaced as small badges on the chips
+// so the operator can see how many events fall in each bucket.
+const filterCounts = computed(() => ({
+  all: events.value.length,
+  pool_topup: events.value.filter(e => e.type === 'pool_topup').length,
+  grant: events.value.filter(e => e.type === 'grant').length,
+  exercise: events.value.filter(e => e.type === 'exercise').length,
+  forfeit: events.value.filter(e => e.type === 'forfeit').length,
+  idea: events.value.filter(e => e.source === 'idea').length,
+}))
 
 // Chart points. Honours the vest-vs-single mode toggle.
 //   Each chart point = { t: ISO date, balance: pool shares available at that t }.
@@ -742,14 +768,47 @@ const chart = computed(() => {
     <!-- Timeline table: takes the remaining viewport height, scrolls
          vertically inside, sticky header so the column labels stay put. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card flex flex-col min-h-0 flex-1">
-      <div class="flex items-center justify-between px-4 py-3 border-b border-ink-200 shrink-0">
-        <div>
+      <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-ink-200 shrink-0 flex-wrap">
+        <div class="shrink-0">
           <h2 class="text-sm font-semibold text-ink-900">Timeline</h2>
           <p class="text-xs text-ink-500">All events in chronological order. "Single-event" mode shown — vest curves only affect the chart above.</p>
+        </div>
+        <!-- Filter chips: filter the timeline rows by event type. The
+             running-balance column still reflects the full event
+             history (we only hide rows, not recompute) so values stay
+             honest. -->
+        <div class="flex items-center gap-1 flex-wrap">
+          <button
+            v-for="opt in [
+              { value: 'all',        label: 'All' },
+              { value: 'pool_topup', label: 'Top-ups' },
+              { value: 'grant',      label: 'Grants' },
+              { value: 'exercise',   label: 'Exercises' },
+              { value: 'forfeit',    label: 'Forfeit/Expire' },
+              { value: 'idea',       label: 'Ideas' },
+            ] as const"
+            :key="opt.value"
+            type="button"
+            class="text-[11px] px-2 py-0.5 rounded-full border transition-colors inline-flex items-center gap-1"
+            :class="eventFilter === opt.value
+              ? 'bg-accent-600 text-white border-accent-600'
+              : 'bg-white text-ink-600 border-ink-300 hover:border-ink-400 hover:text-ink-800'"
+            @click="eventFilter = opt.value"
+          >
+            <span>{{ opt.label }}</span>
+            <span
+              class="text-[10px] num"
+              :class="eventFilter === opt.value ? 'text-accent-100' : 'text-ink-400'"
+            >{{ filterCounts[opt.value] }}</span>
+          </button>
         </div>
       </div>
       <div v-if="!events.length" class="px-4 py-8 text-sm text-ink-500 text-center">
         No events yet. The first pool top-up or grant will appear here.
+      </div>
+      <div v-else-if="!filteredEvents.length" class="px-4 py-8 text-sm text-ink-500 text-center">
+        No events match the current filter.
+        <button type="button" class="ml-2 text-accent-600 hover:text-accent-700 underline" @click="eventFilter = 'all'">Show all</button>
       </div>
       <div v-else class="overflow-y-auto min-h-0 flex-1">
         <table class="w-full text-[13px] num">
@@ -765,7 +824,7 @@ const chart = computed(() => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="e in eventsWithRunning" :key="e.id" class="hover:bg-accent-50/40 border-b border-ink-200">
+          <tr v-for="e in filteredEvents" :key="e.id" class="hover:bg-accent-50/40 border-b border-ink-200">
             <!-- Date cell: inline date picker when this is a grant event
                  (so the operator can fix missing/wrong import dates without
                  leaving the page). Pool top-ups + ideas read-only. -->
