@@ -276,6 +276,13 @@ function migrate(d: Database.Database): void {
   // new_money / share_price". A numeric value (including 0) overrides for
   // rounds where the math doesn't apply, e.g. debt-only or bridge rounds.
   ensureColumn('rounds', 'preferred_issued_override', 'REAL')
+  // Formation-snapshot overrides for the shares-side derived columns.
+  // Formation is a snapshot, not a transaction — the operator may know
+  // the starting Total FDS and any pre-existing converted-note shares
+  // directly. NULL = derive normally (sum the breakdown / sum CN
+  // attributions); a numeric value short-circuits the derivation.
+  ensureColumn('rounds', 'notes_converted_override', 'REAL')
+  ensureColumn('rounds', 'total_shares_fds_override', 'REAL')
   // Liquidation preference terms. Default to 0x — i.e. no preference,
   // tranche participates pro-rata only — so that the default exit math
   // matches the user's existing spreadsheet practice (pure pro-rata).
