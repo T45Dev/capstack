@@ -27,7 +27,10 @@ export function fmtPct(n: number | null | undefined, digits = 2): string {
 
 export function fmtShares(n: number | null | undefined): string {
   if (n == null || !isFinite(n)) return '—'
-  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Math.round(n))
+  // Shares are integers — floor (round down) so 4.99 displays as 4.
+  // Negative values floor toward −∞ which matches the operator's
+  // expectation for over-allocated pool stats (e.g. −0.5 → −1).
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Math.floor(n))
 }
 
 export function fmtPricePerShare(n: number | null | undefined): string {

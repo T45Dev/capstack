@@ -50,7 +50,7 @@ export default defineEventHandler(async (event) => {
     body.recipient_name.trim(),
     body.recipient_type || null,
     body.round || null,
-    Math.round(body.quantity),
+    Math.floor(body.quantity),
     body.strike ?? null,
     body.issue_date || null,
     body.vesting_start || null,

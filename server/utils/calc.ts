@@ -122,7 +122,7 @@ export function computeRound(a: RoundInputs): RoundResult {
     // to cnConvertedShares / cnConvertedDollars — the resulting shares are
     // already represented in cap-table holdings.
     if (cn.destinationPPS && cn.destinationPPS > 0) {
-      const shares = total / cn.destinationPPS
+      const shares = Math.floor(total / cn.destinationPPS)
       cnDetails.push({
         id: cn.id,
         stakeholderName: cn.stakeholderName,
@@ -163,7 +163,7 @@ export function computeRound(a: RoundInputs): RoundResult {
       if (cap) chosen = cap.price < pricePerShare ? cap : { label: 'round', price: pricePerShare }
     }
 
-    const shares = chosen.price > 0 ? total / chosen.price : 0
+    const shares = chosen.price > 0 ? Math.floor(total / chosen.price) : 0
     cnConvertedShares += shares
     cnDetails.push({
       id: cn.id,

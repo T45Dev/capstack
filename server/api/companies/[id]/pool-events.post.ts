@@ -38,7 +38,7 @@ export default defineEventHandler(async (event) => {
     body.type,
     body.name.trim(),
     isGrant ? (body.kind || null) : null,
-    Math.round(body.shares),
+    Math.floor(body.shares),
     isGrant ? (body.vest_months ?? 48) : null,
     isGrant ? (body.cliff_months ?? 12) : null,
     body.notes || null,

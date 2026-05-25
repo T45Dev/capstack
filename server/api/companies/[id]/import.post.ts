@@ -157,7 +157,7 @@ export default defineEventHandler(async (event) => {
       const scId = codeToId.get(h.shareClassCode)
       if (!shId || !scId) continue
       try {
-        insH.run(id, shId, scId, Math.round(h.shares))
+        insH.run(id, shId, scId, Math.floor(h.shares))
       } catch (err: any) {
         parsed.warnings.push(`Couldn't import holding for "${h.stakeholderName}" / ${h.shareClassCode}: ${err?.message || err}`)
       }
@@ -188,7 +188,7 @@ export default defineEventHandler(async (event) => {
             g.recipientName,
             null,
             null,
-            Math.round(g.quantity),
+            Math.floor(g.quantity),
             g.strike ?? null,
             g.issueDate ?? null,
             g.vestingStart ?? null,

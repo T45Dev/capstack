@@ -175,7 +175,9 @@ export default defineEventHandler((event) => {
       } else if (cap > 0 && preFDS > 0) {
         eff = cap / preFDS
       }
-      const shares = eff > 0 ? total / eff : 0
+      // Shares are integers — floor every derived share count (no
+      // partial shares).
+      const shares = eff > 0 ? Math.floor(total / eff) : 0
       sharesByCn.set(c.id, { shares, effectiveConvPrice: eff, convPrice, preFDS })
       bucketShares += shares
     }

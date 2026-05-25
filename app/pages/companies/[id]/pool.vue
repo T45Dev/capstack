@@ -314,22 +314,29 @@ const chartPoints = computed<ChartPoint[]>(() => {
       deltas.push({ t: e.date, d: -total, label: e.name })
       continue
     }
+    // Shares are integers — every delta is floored. Any remainder
+    // from the division goes to the last month so the deltas still
+    // sum to the original grant `total`.
     if (cm > 0) {
-      const cliffShares = Math.round(total * (cm / vm))
+      const cliffShares = Math.floor(total * (cm / vm))
       deltas.push({ t: addMonths(e.date, cm), d: -cliffShares, label: `${e.name} (cliff)` })
       const remaining = total - cliffShares
       const monthsLeft = Math.max(0, vm - cm)
       if (monthsLeft > 0) {
-        const perMonth = remaining / monthsLeft
+        const perMonth = Math.floor(remaining / monthsLeft)
+        const remainder = remaining - perMonth * monthsLeft
         for (let i = 1; i <= monthsLeft; i++) {
-          deltas.push({ t: addMonths(e.date, cm + i), d: -perMonth })
+          const d = i === monthsLeft ? perMonth + remainder : perMonth
+          deltas.push({ t: addMonths(e.date, cm + i), d: -d })
         }
       }
     } else {
       // no cliff — straight monthly 1/vm
-      const perMonth = total / vm
+      const perMonth = Math.floor(total / vm)
+      const remainder = total - perMonth * vm
       for (let i = 1; i <= vm; i++) {
-        deltas.push({ t: addMonths(e.date, i), d: -perMonth })
+        const d = i === vm ? perMonth + remainder : perMonth
+        deltas.push({ t: addMonths(e.date, i), d: -d })
       }
     }
   }
