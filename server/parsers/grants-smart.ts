@@ -272,7 +272,7 @@ export async function parseGrantsXlsx(buf: Buffer): Promise<GrantsImportResult> 
     parsed.push({
       recipientName: name,
       recipientType: cellString(get('recipientType')) || null,
-      quantity: Math.round(qty),
+      quantity: Math.floor(qty),
       // Strike: empty cell → null, 0 → 0 (e.g. early founder grants).
       strike: 'strike' in colByField && cellHasValue(get('strike')) ? cellNumber(get('strike')) : null,
       issueDate: 'issueDate' in colByField ? cellDate(get('issueDate')) : null,
@@ -363,7 +363,7 @@ export function parseGrantsCsv(text: string): GrantsImportResult {
     parsed.push({
       recipientName: name,
       recipientType: cellString(get('recipientType')) || null,
-      quantity: Math.round(qty),
+      quantity: Math.floor(qty),
       strike: 'strike' in colByField ? cellNumber(get('strike')) || null : null,
       issueDate: 'issueDate' in colByField ? cellDate(get('issueDate')) : null,
       vestingStart: 'vestingStart' in colByField ? cellDate(get('vestingStart')) : null,

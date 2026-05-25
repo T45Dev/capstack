@@ -33,7 +33,7 @@ export default defineEventHandler((event) => {
       stakeholder_name: r.stakeholder_name,
       stakeholder_type: r.stakeholder_type,
       amount: r.amount || 0,
-      shares: pps > 0 ? (r.amount || 0) / pps : 0,
+      shares: pps > 0 ? Math.floor((r.amount || 0) / pps) : 0,
       notes: r.notes,
     })),
     total_amount: rows.reduce((s, r) => s + (r.amount || 0), 0),

@@ -207,7 +207,7 @@ export default defineEventHandler((event) => {
       // shares from whatever they entered (the UI is the place to flag the
       // mismatch — we shouldn't silently fudge the math here).
       for (const ri of investorAllocs) {
-        const shares = (ri.amount || 0) / pps
+        const shares = Math.floor((ri.amount || 0) / pps)
         if (shares <= 0) continue
         holders.push({
           stakeholderId: ri.stakeholder_id,
@@ -222,7 +222,7 @@ export default defineEventHandler((event) => {
         holders.push({
           stakeholderId: `new:${openRound?.id || 'round'}:unallocated`,
           name: `Unallocated ${openRound?.name || openRound?.code || 'new'} money`,
-          shares: remainingDollars / pps,
+          shares: Math.floor(remainingDollars / pps),
         })
       }
     } else if (round.newPreferredShares > 0) {

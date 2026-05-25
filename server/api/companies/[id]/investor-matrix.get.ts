@@ -48,7 +48,7 @@ export default defineEventHandler((event) => {
     matrix[a.round_id][a.stakeholder_id] = {
       id: a.id,
       amount: a.amount || 0,
-      shares: pps > 0 ? (a.amount || 0) / pps : 0,
+      shares: pps > 0 ? Math.floor((a.amount || 0) / pps) : 0,
       notes: a.notes,
     }
   }

@@ -47,7 +47,7 @@ function cellShares(roundId: string, stakeholderId: string): number {
   const amt = cellAmount(roundId, stakeholderId) || 0
   const r = data.value?.rounds.find(x => x.id === roundId)
   const pps = r?.share_price && r.share_price > 0 ? r.share_price : 0
-  return pps > 0 ? amt / pps : 0
+  return pps > 0 ? Math.floor(amt / pps) : 0
 }
 function setDraft(roundId: string, stakeholderId: string, value: number | null) {
   const v = value ?? 0

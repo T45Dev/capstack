@@ -255,9 +255,11 @@ export default defineEventHandler((event) => {
     // use the formula. common and option_pool_issued remain user-typed.
     const roundPPS = r.share_price && r.share_price > 0 ? r.share_price : 0
     const newMoney = r.new_money || 0
+    // Shares are integers — no partial shares. Floor every derived
+    // share count (Math.floor, not Math.round) so 4.99 stays 4.
     const preferredIssued = r.preferred_issued_override != null
-      ? Number(r.preferred_issued_override)
-      : (roundPPS > 0 ? newMoney / roundPPS : (Number(r.preferred_issued) || 0))
+      ? Math.floor(Number(r.preferred_issued_override))
+      : (roundPPS > 0 ? Math.floor(newMoney / roundPPS) : Math.floor(Number(r.preferred_issued) || 0))
     const common = Number(r.common) || 0
     const poolIssued = Number(r.option_pool_issued) || 0
 
@@ -292,7 +294,7 @@ export default defineEventHandler((event) => {
       } else if (a.cap > 0 && preFDS > 0) {
         eff = a.cap / preFDS
       }
-      const sharesForThisCn = eff > 0 ? a.total / eff : 0
+      const sharesForThisCn = eff > 0 ? Math.floor(a.total / eff) : 0
       if (sharesForThisCn > 0) cnShares += sharesForThisCn
       notesAttributed.push({
         id: a.id,

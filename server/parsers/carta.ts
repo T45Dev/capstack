@@ -931,17 +931,17 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
           const expireDate = cExpireDate > 0 ? asDate(row.getCell(cExpireDate).value) : null
           result.grants.push({
             recipientName: name,
-            quantity: Math.round(quantity),
+            quantity: Math.floor(quantity),
             strike: cStrike > 0 ? asNumber(row.getCell(cStrike).value) || null : null,
             issueDate: cIssueDate > 0 ? asDate(row.getCell(cIssueDate).value) : null,
             vestingStart: cVestStart > 0 ? asDate(row.getCell(cVestStart).value) : null,
             vestMonths: months,
             cliffMonths: cliff,
             awardType: cAwardType > 0 ? (asString(row.getCell(cAwardType).value) || null) : null,
-            quantityIssued: qtyIssued > 0 ? Math.round(qtyIssued) : null,
-            quantityExercised: cQtyExercised > 0 ? Math.round(asNumber(row.getCell(cQtyExercised).value)) || null : null,
-            quantityForfeited: cQtyCancelled > 0 ? Math.round(asNumber(row.getCell(cQtyCancelled).value)) || null : null,
-            quantityExpired: cQtyExpired > 0 ? Math.round(asNumber(row.getCell(cQtyExpired).value)) || null : null,
+            quantityIssued: qtyIssued > 0 ? Math.floor(qtyIssued) : null,
+            quantityExercised: cQtyExercised > 0 ? Math.floor(asNumber(row.getCell(cQtyExercised).value)) || null : null,
+            quantityForfeited: cQtyCancelled > 0 ? Math.floor(asNumber(row.getCell(cQtyCancelled).value)) || null : null,
+            quantityExpired: cQtyExpired > 0 ? Math.floor(asNumber(row.getCell(cQtyExpired).value)) || null : null,
             acceleration,
             lastExercisedDate: cExerciseDate > 0 ? asDate(row.getCell(cExerciseDate).value) : null,
             // Termination Date is a useful fallback when the export doesn't
