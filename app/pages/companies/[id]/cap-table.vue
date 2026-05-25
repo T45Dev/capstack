@@ -114,15 +114,32 @@ const openRoundName = computed<string | null>(() => {
 // Master toggle for the matrix's formula chips + per-column hint sublines.
 // Persisted in localStorage so the operator's preference sticks. Default on.
 const showFormulas = ref(true)
+// Row density. Same persistence pattern as showFormulas.
+const matrixDensity = ref<'compact' | 'regular' | 'comfy'>('regular')
+
 if (typeof window !== 'undefined') {
   try {
     const v = localStorage.getItem('capstack:financings:show-formulas')
     if (v !== null) showFormulas.value = v === '1'
+    const d = localStorage.getItem('capstack:financings:density')
+    if (d === 'compact' || d === 'regular' || d === 'comfy') matrixDensity.value = d
   } catch { /* ignore */ }
   watch(showFormulas, (v) => {
     try { localStorage.setItem('capstack:financings:show-formulas', v ? '1' : '0') } catch { /* ignore */ }
   })
+  watch(matrixDensity, (v) => {
+    try { localStorage.setItem('capstack:financings:density', v) } catch { /* ignore */ }
+  })
 }
+
+// Round-name search filter applied to the matrix rows. Lives on the page
+// so the toolbar (above the matrix) and the matrix itself can share it.
+const matrixQuery = ref('')
+const filteredRoundCols = computed<RoundColumn[]>(() => {
+  const q = matrixQuery.value.trim().toLowerCase()
+  if (!q) return roundCols.value
+  return roundCols.value.filter(r => (r.name || r.code).toLowerCase().includes(q))
+})
 
 const query = ref('')
 const currentPPS = computed(() => data.value?.current_pps || 0)
@@ -428,7 +445,22 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
       <NuxtLink :to="`/companies/${id}/import`"><UiButton variant="primary"><Upload :size="14" /> Import Carta export</UiButton></NuxtLink>
     </UiEmpty>
 
-    <div class="space-y-6">
+    <div class="space-y-4">
+      <!-- 6-stat summary above the matrix. Reads off the rounds array — no
+           extra fetch — and is hidden when there are no rounds. -->
+      <FinancingsSummaryBar v-if="roundCols.length" :rounds="roundCols" />
+
+      <!-- Toolbar: search + density segment + formula-chips toggle. -->
+      <FinancingsToolbar
+        v-if="roundCols.length"
+        v-model="matrixQuery"
+        :density="matrixDensity"
+        :show-formulas="showFormulas"
+        :round-count="filteredRoundCols.length"
+        @update:density="(v) => matrixDensity = v"
+        @update:show-formulas="(v) => showFormulas = v"
+      />
+
       <!-- Financings matrix — one row per round, columns grouped into
            Money / Shares. Open round is editable; closed rounds are
            read-only. Tooltip diagnostics live on each cell. -->
@@ -437,8 +469,9 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
       </div>
       <div v-else>
         <FinancingsMatrix
-          :rounds="roundCols"
+          :rounds="filteredRoundCols"
           :show-formulas="showFormulas"
+          :density="matrixDensity"
           @refresh="refreshRoundSummary"
           @update:saving-count="(n) => savingCount = n"
         />
