@@ -182,8 +182,8 @@ function isEditingRow(row: T): boolean {
           >
             <span class="inline-flex items-center gap-1" :class="col.align === 'right' ? 'flex-row-reverse' : ''">
               <slot :name="`header-${col.key}`" :col="col">{{ col.label }}</slot>
-              <ChevronUp v-if="table.sort.key === col.key && table.sort.dir === 'asc'" :size="12" class="text-accent-600" />
-              <ChevronDown v-if="table.sort.key === col.key && table.sort.dir === 'desc'" :size="12" class="text-accent-600" />
+              <ChevronUp v-if="table.sort.key === col.key && table.sort.dir === 'asc'" :size="12" class="text-brand-600" />
+              <ChevronDown v-if="table.sort.key === col.key && table.sort.dir === 'desc'" :size="12" class="text-brand-600" />
             </span>
             <span class="resize-handle" @mousedown.prevent.stop="table.startResize($event, col.key)" @click.stop />
           </th>
@@ -196,7 +196,7 @@ function isEditingRow(row: T): boolean {
           :key="(row as any)[rowKey]"
           class="group transition-colors"
           :class="[
-            isEditingRow(row) ? 'bg-accent-50/40' : 'hover:bg-accent-50/20 cursor-pointer',
+            isEditingRow(row) ? 'bg-brand-50/40' : 'hover:bg-brand-50/20 cursor-pointer',
             isReadOnly?.(row) ? 'opacity-90' : '',
           ]"
           @click="!isEditingRow(row) && startEdit(row)"
@@ -209,8 +209,8 @@ function isEditingRow(row: T): boolean {
               col.align === 'right' ? 'text-right' : (col.align === 'center' ? 'text-center' : 'text-left'),
               stickyFirst && colIdx === 0
                 ? (isEditingRow(row)
-                  ? 'sticky left-0 z-10 bg-accent-50 shadow-[1px_0_0_0_rgb(0_0_0/0.06)]'
-                  : 'sticky left-0 z-10 bg-white shadow-[1px_0_0_0_rgb(0_0_0/0.06)] group-hover:bg-accent-50/20')
+                  ? 'sticky left-0 z-10 bg-brand-50 shadow-[1px_0_0_0_rgb(0_0_0/0.06)]'
+                  : 'sticky left-0 z-10 bg-white shadow-[1px_0_0_0_rgb(0_0_0/0.06)] group-hover:bg-brand-50/20')
                 : '',
             ]"
             @click.stop="!isEditingRow(row) && startEdit(row)"
@@ -221,7 +221,7 @@ function isEditingRow(row: T): boolean {
                 v-model="draft[col.key]"
                 type="text"
                 :placeholder="col.placeholder"
-                class="w-full rounded border border-ink-300 bg-white px-1.5 py-0.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-accent-500"
+                class="w-full rounded border border-ink-300 bg-white px-1.5 py-0.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-brand-500"
                 @keydown.enter="saveEdit(row)"
                 @keydown.esc="cancelEdit"
               />
@@ -231,7 +231,7 @@ function isEditingRow(row: T): boolean {
                 type="number"
                 :step="col.step ?? '1'"
                 :placeholder="col.placeholder"
-                class="w-full rounded border border-ink-300 bg-white px-1.5 py-0.5 text-[13px] text-right focus:outline-none focus:ring-2 focus:ring-accent-500"
+                class="w-full rounded border border-ink-300 bg-white px-1.5 py-0.5 text-[13px] text-right focus:outline-none focus:ring-2 focus:ring-brand-500"
                 @keydown.enter="saveEdit(row)"
                 @keydown.esc="cancelEdit"
               />
@@ -240,7 +240,7 @@ function isEditingRow(row: T): boolean {
                 v-model.number="draft[col.key]"
                 type="number"
                 :step="col.step ?? '1000'"
-                class="w-full rounded border border-ink-300 bg-white px-1.5 py-0.5 text-[13px] text-right focus:outline-none focus:ring-2 focus:ring-accent-500"
+                class="w-full rounded border border-ink-300 bg-white px-1.5 py-0.5 text-[13px] text-right focus:outline-none focus:ring-2 focus:ring-brand-500"
                 @keydown.enter="saveEdit(row)"
                 @keydown.esc="cancelEdit"
               />
@@ -249,7 +249,7 @@ function isEditingRow(row: T): boolean {
                 v-model.number="draft[col.key]"
                 type="number"
                 :step="col.step ?? '0.01'"
-                class="w-full rounded border border-ink-300 bg-white px-1.5 py-0.5 text-[13px] text-right focus:outline-none focus:ring-2 focus:ring-accent-500"
+                class="w-full rounded border border-ink-300 bg-white px-1.5 py-0.5 text-[13px] text-right focus:outline-none focus:ring-2 focus:ring-brand-500"
                 @keydown.enter="saveEdit(row)"
                 @keydown.esc="cancelEdit"
               />
@@ -257,14 +257,14 @@ function isEditingRow(row: T): boolean {
                 v-else-if="col.type === 'date'"
                 v-model="draft[col.key]"
                 type="date"
-                class="w-full rounded border border-ink-300 bg-white px-1.5 py-0.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-accent-500"
+                class="w-full rounded border border-ink-300 bg-white px-1.5 py-0.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-brand-500"
                 @keydown.enter="saveEdit(row)"
                 @keydown.esc="cancelEdit"
               />
               <select
                 v-else-if="col.type === 'select'"
                 v-model="draft[col.key]"
-                class="w-full rounded border border-ink-300 bg-white px-1.5 py-0.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-accent-500"
+                class="w-full rounded border border-ink-300 bg-white px-1.5 py-0.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-brand-500"
                 @keydown.enter="saveEdit(row)"
                 @keydown.esc="cancelEdit"
               >
@@ -291,7 +291,7 @@ function isEditingRow(row: T): boolean {
 
         <!-- Inline add-row: a draft row at the bottom that becomes editable
              once the user clicks "Add". -->
-        <tr v-if="adding" class="bg-accent-50/40">
+        <tr v-if="adding" class="bg-brand-50/40">
           <td
             v-for="col in table.cols"
             :key="col.key"
@@ -304,7 +304,7 @@ function isEditingRow(row: T): boolean {
                 v-model="draft[col.key]"
                 type="text"
                 :placeholder="col.placeholder"
-                class="w-full rounded border border-accent-300 bg-white px-1.5 py-0.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-accent-500"
+                class="w-full rounded border border-brand-300 bg-white px-1.5 py-0.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-brand-500"
                 @keydown.enter="commitAdd"
                 @keydown.esc="cancelEdit"
               />
@@ -313,7 +313,7 @@ function isEditingRow(row: T): boolean {
                 v-model.number="draft[col.key]"
                 type="number"
                 :step="col.step ?? '1'"
-                class="w-full rounded border border-accent-300 bg-white px-1.5 py-0.5 text-[13px] text-right focus:outline-none focus:ring-2 focus:ring-accent-500"
+                class="w-full rounded border border-brand-300 bg-white px-1.5 py-0.5 text-[13px] text-right focus:outline-none focus:ring-2 focus:ring-brand-500"
                 @keydown.enter="commitAdd"
                 @keydown.esc="cancelEdit"
               />
@@ -322,7 +322,7 @@ function isEditingRow(row: T): boolean {
                 v-model.number="draft[col.key]"
                 type="number"
                 :step="col.step ?? '1000'"
-                class="w-full rounded border border-accent-300 bg-white px-1.5 py-0.5 text-[13px] text-right focus:outline-none focus:ring-2 focus:ring-accent-500"
+                class="w-full rounded border border-brand-300 bg-white px-1.5 py-0.5 text-[13px] text-right focus:outline-none focus:ring-2 focus:ring-brand-500"
                 @keydown.enter="commitAdd"
                 @keydown.esc="cancelEdit"
               />
@@ -331,7 +331,7 @@ function isEditingRow(row: T): boolean {
                 v-model.number="draft[col.key]"
                 type="number"
                 :step="col.step ?? '0.01'"
-                class="w-full rounded border border-accent-300 bg-white px-1.5 py-0.5 text-[13px] text-right focus:outline-none focus:ring-2 focus:ring-accent-500"
+                class="w-full rounded border border-brand-300 bg-white px-1.5 py-0.5 text-[13px] text-right focus:outline-none focus:ring-2 focus:ring-brand-500"
                 @keydown.enter="commitAdd"
                 @keydown.esc="cancelEdit"
               />
@@ -339,14 +339,14 @@ function isEditingRow(row: T): boolean {
                 v-else-if="col.type === 'date'"
                 v-model="draft[col.key]"
                 type="date"
-                class="w-full rounded border border-accent-300 bg-white px-1.5 py-0.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-accent-500"
+                class="w-full rounded border border-brand-300 bg-white px-1.5 py-0.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-brand-500"
                 @keydown.enter="commitAdd"
                 @keydown.esc="cancelEdit"
               />
               <select
                 v-else-if="col.type === 'select'"
                 v-model="draft[col.key]"
-                class="w-full rounded border border-accent-300 bg-white px-1.5 py-0.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-accent-500"
+                class="w-full rounded border border-brand-300 bg-white px-1.5 py-0.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-brand-500"
                 @keydown.enter="commitAdd"
                 @keydown.esc="cancelEdit"
               >
@@ -367,7 +367,7 @@ function isEditingRow(row: T): boolean {
           <td :colspan="table.cols.length + 1" class="px-2.5 py-1.5 border-b border-ink-200 text-left">
             <button
               type="button"
-              class="inline-flex items-center gap-1 text-xs text-ink-500 hover:text-accent-700 hover:bg-accent-50 px-2 py-1 rounded"
+              class="inline-flex items-center gap-1 text-xs text-ink-500 hover:text-brand-700 hover:bg-brand-50 px-2 py-1 rounded"
               @click="startAdd"
             >
               <Plus :size="12" /> {{ addLabel }}

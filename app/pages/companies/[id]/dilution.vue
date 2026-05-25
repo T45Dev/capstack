@@ -279,7 +279,7 @@ function fmtDeltaUSD(n: number): string {
           <h1 class="text-xl font-semibold tracking-tight text-ink-900">Overall Dilution</h1>
           <p class="text-sm text-ink-600 mt-1">
             Comparing <span class="font-medium text-ink-800">pre-{{ openRoundName }}</span> vs.
-            <span class="font-medium text-accent-700">post-{{ openRoundName }}</span>.
+            <span class="font-medium text-brand-700">post-{{ openRoundName }}</span>.
             Δ = post − pre; red = dilution, green = growth.
           </p>
         </div>
@@ -287,7 +287,7 @@ function fmtDeltaUSD(n: number): string {
              Per the operator's spec, future not-yet-issued shares
              should fall under "post" (never "pre"). -->
         <label class="inline-flex items-center gap-2 cursor-pointer select-none text-xs text-ink-700 bg-white border border-ink-300 rounded-md px-3 py-1.5 hover:border-ink-400">
-          <input type="checkbox" v-model="includeFuture" class="accent-accent-500" />
+          <input type="checkbox" v-model="includeFuture" class="brand-brand-500" />
           <span>Include proposed + ideas in post</span>
           <span class="text-[10px] text-ink-400 num">
             ({{ fmtShares(proposedTotal) }} prop · {{ fmtShares(ideaConsumingShares) }} ideas)
@@ -344,7 +344,7 @@ function fmtDeltaUSD(n: number): string {
                   :class="[
                     col.align === 'right' ? 'text-right' : 'text-left',
                     ci === 1 || ci === 4 || ci === 7 ? 'border-l' : '',
-                    ci === 2 || ci === 5 || ci === 8 ? 'text-accent-700' : '',
+                    ci === 2 || ci === 5 || ci === 8 ? 'text-brand-700' : '',
                   ]"
               >
                 <button
@@ -354,19 +354,19 @@ function fmtDeltaUSD(n: number): string {
                   @click="table.toggleSort(col.key)"
                 >
                   {{ col.label }}
-                  <component :is="sortIconFor(col.key)" v-if="sortIconFor(col.key)" :size="11" class="text-accent-600" />
+                  <component :is="sortIconFor(col.key)" v-if="sortIconFor(col.key)" :size="11" class="text-brand-600" />
                 </button>
                 <span class="resize-handle" @mousedown.prevent.stop="table.startResize($event, col.key)" @click.stop />
               </th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in sortedRows" :key="r.stakeholderId" class="hover:bg-accent-50/40">
+            <tr v-for="r in sortedRows" :key="r.stakeholderId" class="hover:bg-brand-50/40">
               <td class="px-3 py-1.5 border-b border-ink-200">
                 <span class="text-ink-900 font-medium" :title="r.name">{{ r.name }}</span>
                 <span v-if="r.type" class="ml-1.5 text-[9px] uppercase tracking-wide text-ink-500 bg-ink-100 border border-ink-200 px-1 py-0.5 rounded align-middle">{{ r.type }}</span>
                 <span v-if="r.isFuture" class="ml-1.5 text-[9px] uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded align-middle">future</span>
-                <span v-else-if="r.isNewRound" class="ml-1.5 text-[9px] uppercase tracking-wide text-accent-700 bg-accent-50 border border-accent-200 px-1 py-0.5 rounded align-middle">new</span>
+                <span v-else-if="r.isNewRound" class="ml-1.5 text-[9px] uppercase tracking-wide text-brand-700 bg-brand-50 border border-brand-200 px-1 py-0.5 rounded align-middle">new</span>
               </td>
 
               <!-- ---- Shares group ---- -->

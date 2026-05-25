@@ -73,7 +73,7 @@ const importHref = computed(() => companyId.value ? `/companies/${companyId.valu
     <header class="border-b border-ink-300 bg-white sticky top-0 z-30 shadow-sm">
       <div class="px-6 h-14 flex items-center gap-6">
         <NuxtLink to="/" class="flex items-center gap-2 font-semibold tracking-tight text-ink-900">
-          <span class="grid place-items-center w-7 h-7 rounded bg-accent-500 text-white text-xs font-bold shadow-sm">CS</span>
+          <span class="grid place-items-center w-7 h-7 rounded bg-brand-500 text-white text-xs font-bold shadow-sm">CS</span>
           <span>CapStack</span>
         </NuxtLink>
 
@@ -87,11 +87,11 @@ const importHref = computed(() => companyId.value ? `/companies/${companyId.valu
                the deprecated Assumptions page. Now the operator can switch
                which closed round defines the "pre" snapshot directly from the
                breadcrumb, since every page below the nav depends on it. -->
-          <label class="ml-2 inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-accent-700" title="Most-recently-closed round (pre-baseline). Switch when you change what you're modeling.">
+          <label class="ml-2 inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-brand-700" title="Most-recently-closed round (pre-baseline). Switch when you change what you're modeling.">
             <span class="text-ink-500">pre-baseline</span>
             <select
               :value="company.starting_round || ''"
-              class="bg-accent-50 border border-accent-200 hover:border-accent-300 text-accent-700 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide focus:outline-none focus:ring-1 focus:ring-accent-500"
+              class="bg-brand-50 border border-brand-200 hover:border-brand-300 text-brand-700 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide focus:outline-none focus:ring-1 focus:ring-brand-500"
               @change="setStartingRound(($event.target as HTMLSelectElement).value)"
             >
               <option value="">—</option>
@@ -119,7 +119,7 @@ const importHref = computed(() => companyId.value ? `/companies/${companyId.valu
             class="inline-flex items-center gap-2 px-2.5 py-1.5 text-sm rounded-md transition-colors"
             :class="[
               route.path === t.to
-                ? 'bg-accent-500 text-white shadow-sm'
+                ? 'bg-brand-500 text-white shadow-sm'
                 : 'text-ink-700 hover:text-ink-900 hover:bg-ink-100',
               navCollapsed ? 'justify-center' : '',
             ]"

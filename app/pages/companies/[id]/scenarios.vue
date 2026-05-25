@@ -250,7 +250,7 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
           v-for="s in orderedScenarios"
           :key="s.id"
           class="group w-full text-left rounded-lg border p-3 transition-all"
-          :class="selected === s.id ? 'border-accent-500 bg-accent-50 shadow-sm' : 'border-ink-300 bg-white hover:border-accent-300 hover:shadow-card'"
+          :class="selected === s.id ? 'border-brand-500 bg-brand-50 shadow-sm' : 'border-ink-300 bg-white hover:border-brand-300 hover:shadow-card'"
           @click="selected = s.id"
         >
           <div class="flex items-center justify-between gap-2">
@@ -268,7 +268,7 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
           </div>
           <div class="mt-1 text-[10px] text-ink-500">{{ fmtDate(s.created_at) }}</div>
           <div class="mt-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button class="text-[11px] text-ink-600 hover:text-accent-700 inline-flex items-center gap-1" @click.stop="startCreate(s)"><Copy :size="11" /> clone</button>
+            <button class="text-[11px] text-ink-600 hover:text-brand-700 inline-flex items-center gap-1" @click.stop="startCreate(s)"><Copy :size="11" /> clone</button>
             <button class="text-[11px] text-ink-600 hover:text-red-600 inline-flex items-center gap-1" @click.stop="destroy(s)"><Trash2 :size="11" /> delete</button>
           </div>
         </button>
@@ -316,8 +316,8 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
                           <span>{{ c.label }}</span>
                           <span v-if="c.sublabel" class="text-[9px] font-normal normal-case text-ink-400 num">{{ c.sublabel }}</span>
                         </span>
-                        <ChevronUp v-if="sortIconFor(payoutTable, c.key) === 'asc'" :size="12" class="text-accent-600" />
-                        <ChevronDown v-if="sortIconFor(payoutTable, c.key) === 'desc'" :size="12" class="text-accent-600" />
+                        <ChevronUp v-if="sortIconFor(payoutTable, c.key) === 'asc'" :size="12" class="text-brand-600" />
+                        <ChevronDown v-if="sortIconFor(payoutTable, c.key) === 'desc'" :size="12" class="text-brand-600" />
                       </span>
                       <span class="resize-handle" @mousedown.prevent.stop="payoutTable.startResize($event, c.key)" @click.stop />
                     </th>
@@ -328,7 +328,7 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
                     v-for="r in sortedPayouts"
                     :key="r.stakeholderId"
                     class="transition-colors"
-                    :class="r.isIdea ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-accent-50/40'"
+                    :class="r.isIdea ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-brand-50/40'"
                   >
                     <template v-for="c in payoutTable.cols" :key="c.key">
                       <td v-if="c.key === 'name'" class="px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate" :title="r.name">

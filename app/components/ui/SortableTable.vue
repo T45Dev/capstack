@@ -69,8 +69,8 @@ const totalWidth = computed(() => table.cols.reduce((sum, c) => sum + c.width, 0
           >
             <span class="inline-flex items-center gap-1" :class="col.align === 'right' ? 'flex-row-reverse' : ''">
               <slot :name="`header-${col.key}`" :col="col">{{ col.label }}</slot>
-              <ChevronUp v-if="table.sort.key === col.key && table.sort.dir === 'asc'" :size="12" class="text-accent-600" />
-              <ChevronDown v-if="table.sort.key === col.key && table.sort.dir === 'desc'" :size="12" class="text-accent-600" />
+              <ChevronUp v-if="table.sort.key === col.key && table.sort.dir === 'asc'" :size="12" class="text-brand-600" />
+              <ChevronDown v-if="table.sort.key === col.key && table.sort.dir === 'desc'" :size="12" class="text-brand-600" />
             </span>
             <span
               class="resize-handle"
@@ -84,7 +84,7 @@ const totalWidth = computed(() => table.cols.reduce((sum, c) => sum + c.width, 0
         <tr
           v-for="(row, idx) in sortedRows"
           :key="(row as any)[rowKey] ?? idx"
-          class="hover:bg-accent-50/40 transition-colors"
+          class="hover:bg-brand-50/40 transition-colors"
         >
           <td
             v-for="col in table.cols"

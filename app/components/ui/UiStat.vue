@@ -8,7 +8,7 @@ defineProps<{ label: string; value: string | number; hint?: string; emphasis?: b
     <div
       class="mt-1 text-base font-semibold num"
       :class="[
-        emphasis ? 'text-accent-600' : 'text-ink-900',
+        emphasis ? 'text-brand-600' : 'text-ink-900',
         tone === 'positive' ? 'text-emerald-600' : '',
         tone === 'warn' ? 'text-amber-600' : '',
       ]"

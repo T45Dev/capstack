@@ -30,7 +30,7 @@ const chips: { key: 'shares' | 'pct' | 'value'; label: string }[] = [
         type="button"
         class="px-2.5 py-1 rounded-[5px] font-medium transition-colors"
         :class="u.show.value[c.key]
-          ? 'bg-accent-500 text-white shadow-sm'
+          ? 'bg-brand-500 text-white shadow-sm'
           : 'text-ink-500 hover:text-ink-900'"
         @click="u.toggle(c.key)"
       >{{ c.label }}</button>

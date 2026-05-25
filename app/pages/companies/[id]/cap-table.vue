@@ -270,12 +270,12 @@ async function commitRound(roundId: string): Promise<void> {
 
 // Soft amber tint marks every cell that's a user-input field, so the operator
 // can tell at a glance which numbers they own vs which are derived from the
-// ledger import. Focus state clears the tint and switches to the accent ring.
-const inputCellClass = 'w-full bg-amber-50 border border-amber-300 hover:border-amber-500 focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-accent-500 rounded px-1 py-0.5 text-left text-[12px] text-ink-900 num'
+// ledger import. Focus state clears the tint and switches to the brand ring.
+const inputCellClass = 'w-full bg-amber-50 border border-amber-300 hover:border-amber-500 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-500 rounded px-1 py-0.5 text-left text-[12px] text-ink-900 num'
 // Cells that show a computed value but allow override (Preferred issued).
 // When the formula's in effect we render in a muted style so the user can
 // see at a glance which cells are derived vs manually set.
-const formulaCellClass = 'w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-accent-500 rounded px-1 py-0.5 text-left text-[12px] text-ink-500 italic num'
+const formulaCellClass = 'w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-500 rounded px-1 py-0.5 text-left text-[12px] text-ink-500 italic num'
 
 // Preferred issued: when the user has overridden the formula, show the
 // override value with the standard amber input chrome. Otherwise display
@@ -697,14 +697,14 @@ function colWidthFor(roundId: string): number {
               v-for="r in roundCols"
               :key="r.round_id"
               class="shrink-0 relative rounded border flex flex-col"
-              :class="effectiveKind(r) === 'open' ? 'border-accent-300 bg-accent-50/30 ring-1 ring-accent-200' : 'border-ink-200 bg-white'"
+              :class="effectiveKind(r) === 'open' ? 'border-brand-300 bg-brand-50/30 ring-1 ring-brand-200' : 'border-ink-200 bg-white'"
               :style="{ width: colWidthFor(r.round_id) + 'px' }"
             >
               <!-- Card header: round name + Closed/Open toggle + delete.
                    Sticky-top so it stays visible if the card body scrolls. -->
               <div
                 class="sticky top-0 z-10 px-2 py-2 border-b rounded-t"
-                :class="effectiveKind(r) === 'open' ? 'border-accent-200 bg-accent-50' : 'border-ink-200 bg-ink-100'"
+                :class="effectiveKind(r) === 'open' ? 'border-brand-200 bg-brand-50' : 'border-ink-200 bg-ink-100'"
               >
                 <div class="flex items-center gap-1.5">
                   <button
@@ -719,8 +719,8 @@ function colWidthFor(roundId: string): number {
                   <input
                     type="text"
                     :value="effective(r, 'name') ?? r.code"
-                    class="flex-1 min-w-0 bg-transparent font-semibold text-[12px] border border-transparent hover:border-ink-300 focus:border-accent-500 focus:bg-white focus:outline-none rounded px-1 py-0.5"
-                    :class="effectiveKind(r) === 'open' ? 'text-accent-700' : 'text-ink-800'"
+                    class="flex-1 min-w-0 bg-transparent font-semibold text-[12px] border border-transparent hover:border-ink-300 focus:border-brand-500 focus:bg-white focus:outline-none rounded px-1 py-0.5"
+                    :class="effectiveKind(r) === 'open' ? 'text-brand-700' : 'text-ink-800'"
                     @input="setDraft(r.round_id, 'name', ($event.target as HTMLInputElement).value)"
                     @blur="commitRound(r.round_id)"
                     @keydown.enter="($event.target as HTMLInputElement).blur()"
@@ -739,7 +739,7 @@ function colWidthFor(roundId: string): number {
                     type="button"
                     class="text-[9px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors"
                     :class="effectiveKind(r) === 'open'
-                      ? 'bg-accent-600 text-white border-accent-600'
+                      ? 'bg-brand-600 text-white border-brand-600'
                       : 'bg-white text-ink-500 border-ink-200 hover:border-ink-300'"
                     @click="setKind(r.round_id, 'open')"
                   >Open</button>
@@ -820,7 +820,7 @@ function colWidthFor(roundId: string): number {
                      Notes financing is reported below as its own line. -->
                 <div :title="tooltipPostMoney(r)">
                   <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Post-money ($)</div>
-                  <div class="px-1 py-0.5 text-left text-[13px] font-medium" :class="effectiveKind(r) === 'open' ? 'text-accent-700' : 'text-ink-900'">
+                  <div class="px-1 py-0.5 text-left text-[13px] font-medium" :class="effectiveKind(r) === 'open' ? 'text-brand-700' : 'text-ink-900'">
                     <span v-if="r.post_money" class="cursor-help underline decoration-dotted decoration-ink-400">{{ fmtUSD(r.post_money) }}</span>
                     <template v-else><span class="text-ink-400 font-normal">—</span></template>
                   </div>
@@ -867,7 +867,7 @@ function colWidthFor(roundId: string): number {
                 <!-- Total fully diluted (cumulative through this round) -->
                 <div :title="tooltipTotalFDS(r)">
                   <div class="text-[9px] uppercase tracking-wider text-ink-700 font-semibold mb-0.5">Total FDS</div>
-                  <div class="px-1 py-0.5 text-left text-[14px] font-semibold" :class="effectiveKind(r) === 'open' ? 'text-accent-700' : 'text-ink-900'">
+                  <div class="px-1 py-0.5 text-left text-[14px] font-semibold" :class="effectiveKind(r) === 'open' ? 'text-brand-700' : 'text-ink-900'">
                     {{ r.total_shares_fds ? fmtShares(r.total_shares_fds) : '—' }}
                   </div>
                 </div>
@@ -889,7 +889,7 @@ function colWidthFor(roundId: string): number {
                 <div :title="tooltipPreferredIssued(r)">
                   <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">
                     Preferred issued
-                    <span v-if="isPreferredOverridden(r)" class="ml-1 text-[8px] text-accent-600 normal-case font-medium">override</span>
+                    <span v-if="isPreferredOverridden(r)" class="ml-1 text-[8px] text-brand-600 normal-case font-medium">override</span>
                   </div>
                   <NumberInput
                     variant="bare"

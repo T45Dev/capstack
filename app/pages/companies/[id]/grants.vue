@@ -672,7 +672,7 @@ const fieldLabels: Record<string, string> = {
         </div>
         <div class="flex items-end gap-1.5">
           <span class="text-ink-500" title="Exercised → Common Stock (left the pool entirely)">Exercised</span>
-          <span class="font-medium" :class="totalExercised > 0 ? 'text-accent-700' : 'text-ink-400'">{{ fmtShares(totalExercised) }}</span>
+          <span class="font-medium" :class="totalExercised > 0 ? 'text-brand-700' : 'text-ink-400'">{{ fmtShares(totalExercised) }}</span>
         </div>
         <div class="flex items-end gap-1.5" :title="`Forfeited (unvested at termination) ${fmtShares(totalForfeited)} + Expired (vested but unexercised) ${fmtShares(totalExpired)} — both returned to Available`">
           <span class="text-ink-500">Forfeited/Expired</span>
@@ -693,7 +693,7 @@ const fieldLabels: Record<string, string> = {
             </summary>
             <div class="absolute right-0 top-full mt-1 z-20 bg-white border border-ink-300 rounded shadow-card p-2 min-w-[180px]">
               <label v-for="c in outstandingTable.cols.filter(c => !ALWAYS_VISIBLE.has(c.key))" :key="c.key" class="flex items-center gap-1.5 text-xs py-0.5 cursor-pointer">
-                <input type="checkbox" :checked="!outstandingHidden.hidden.value.has(c.key)" @change="outstandingHidden.toggle(c.key)" class="accent-accent-500">
+                <input type="checkbox" :checked="!outstandingHidden.hidden.value.has(c.key)" @change="outstandingHidden.toggle(c.key)" class="brand-brand-500">
                 <span>{{ c.label || c.key }}</span>
               </label>
             </div>
@@ -721,8 +721,8 @@ const fieldLabels: Record<string, string> = {
                 >
                   <span class="inline-flex items-center gap-1" :class="c.align === 'right' ? 'flex-row-reverse' : ''">
                     {{ c.label }}
-                    <ChevronUp v-if="sortIconFor(outstandingTable, c.key) === 'asc'" :size="12" class="text-accent-600" />
-                    <ChevronDown v-if="sortIconFor(outstandingTable, c.key) === 'desc'" :size="12" class="text-accent-600" />
+                    <ChevronUp v-if="sortIconFor(outstandingTable, c.key) === 'asc'" :size="12" class="text-brand-600" />
+                    <ChevronDown v-if="sortIconFor(outstandingTable, c.key) === 'desc'" :size="12" class="text-brand-600" />
                   </span>
                   <span class="resize-handle" @mousedown.prevent.stop="outstandingTable.startResize($event, c.key)" @click.stop />
                 </th>
@@ -731,7 +731,7 @@ const fieldLabels: Record<string, string> = {
             <tbody class="num">
               <tr v-for="g in sortedOutstanding" :key="g.id" class="group">
                 <template v-for="c in outstandingVisibleCols" :key="c.key">
-                  <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-accent-50/40" :title="g.recipient_name">
+                  <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-brand-50/40" :title="g.recipient_name">
                     <span>{{ g.recipient_name }}</span>
                     <span
                       class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle"
@@ -741,19 +741,19 @@ const fieldLabels: Record<string, string> = {
                     >{{ optionTypeOf(g.recipient_type) }}</span>
                     <span v-if="!g.linked_stakeholder" class="ml-1 text-[9px] uppercase tracking-wide text-amber-700">unlinked</span>
                   </td>
-                  <td v-else-if="c.key === 'strike'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-accent-50/40">{{ fmtPricePerShare(g.strike) }}</td>
-                  <td v-else-if="c.key === 'issue_date'" class="px-2.5 py-1.5 text-ink-600 border-b border-ink-200 group-hover:bg-accent-50/40">{{ fmtDate(g.issue_date) }}</td>
-                  <td v-else-if="c.key === 'vest'" class="px-2.5 py-1.5 text-right text-ink-600 border-b border-ink-200 group-hover:bg-accent-50/40" :title="g.vest_months ? `${g.vest_months}m vest / ${g.cliff_months ?? 0}m cliff` : ''">{{ vestingLabel(g) }}</td>
+                  <td v-else-if="c.key === 'strike'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">{{ fmtPricePerShare(g.strike) }}</td>
+                  <td v-else-if="c.key === 'issue_date'" class="px-2.5 py-1.5 text-ink-600 border-b border-ink-200 group-hover:bg-brand-50/40">{{ fmtDate(g.issue_date) }}</td>
+                  <td v-else-if="c.key === 'vest'" class="px-2.5 py-1.5 text-right text-ink-600 border-b border-ink-200 group-hover:bg-brand-50/40" :title="g.vest_months ? `${g.vest_months}m vest / ${g.cliff_months ?? 0}m cliff` : ''">{{ vestingLabel(g) }}</td>
                   <td
                     v-else-if="c.bucket"
-                    class="px-2.5 py-1.5 text-right border-b border-ink-200 group-hover:bg-accent-50/40"
+                    class="px-2.5 py-1.5 text-right border-b border-ink-200 group-hover:bg-brand-50/40"
                     :class="[
                       c.bucket === 'post' ? 'text-ink-900 font-medium' : 'text-ink-700',
                       c.groupEnd ? 'border-r border-ink-200' : '',
                     ]"
                   >{{ fmtUnit(c.unit!, (g as any)[c.key]) }}</td>
-                  <td v-else-if="c.key === 'actions'" class="px-2 py-1 text-right border-b border-ink-200 whitespace-nowrap group-hover:bg-accent-50/40">
-                    <button class="text-ink-500 hover:text-accent-600 px-1 py-0.5 rounded" @click="startEdit(g)" title="Edit"><Edit3 :size="13" /></button>
+                  <td v-else-if="c.key === 'actions'" class="px-2 py-1 text-right border-b border-ink-200 whitespace-nowrap group-hover:bg-brand-50/40">
+                    <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded" @click="startEdit(g)" title="Edit"><Edit3 :size="13" /></button>
                     <button class="text-ink-500 hover:text-amber-600 px-1 py-0.5 rounded" @click="demote(g)" title="Demote to proposed"><ArrowDownCircle :size="13" /></button>
                     <button class="text-ink-500 hover:text-red-600 px-1 py-0.5 rounded" @click="cancel(g)" title="Cancel"><Trash2 :size="13" /></button>
                   </td>
@@ -774,7 +774,7 @@ const fieldLabels: Record<string, string> = {
             </summary>
             <div class="absolute right-0 top-full mt-1 z-20 bg-white border border-ink-300 rounded shadow-card p-2 min-w-[180px]">
               <label v-for="c in proposedTable.cols.filter(c => !ALWAYS_VISIBLE.has(c.key))" :key="c.key" class="flex items-center gap-1.5 text-xs py-0.5 cursor-pointer">
-                <input type="checkbox" :checked="!proposedHidden.hidden.value.has(c.key)" @change="proposedHidden.toggle(c.key)" class="accent-accent-500">
+                <input type="checkbox" :checked="!proposedHidden.hidden.value.has(c.key)" @change="proposedHidden.toggle(c.key)" class="brand-brand-500">
                 <span>{{ c.label || c.key }}</span>
               </label>
             </div>
@@ -802,8 +802,8 @@ const fieldLabels: Record<string, string> = {
                 >
                   <span class="inline-flex items-center gap-1" :class="c.align === 'right' ? 'flex-row-reverse' : ''">
                     {{ c.label }}
-                    <ChevronUp v-if="sortIconFor(proposedTable, c.key) === 'asc'" :size="12" class="text-accent-600" />
-                    <ChevronDown v-if="sortIconFor(proposedTable, c.key) === 'desc'" :size="12" class="text-accent-600" />
+                    <ChevronUp v-if="sortIconFor(proposedTable, c.key) === 'asc'" :size="12" class="text-brand-600" />
+                    <ChevronDown v-if="sortIconFor(proposedTable, c.key) === 'desc'" :size="12" class="text-brand-600" />
                   </span>
                   <span class="resize-handle" @mousedown.prevent.stop="proposedTable.startResize($event, c.key)" @click.stop />
                 </th>
@@ -812,7 +812,7 @@ const fieldLabels: Record<string, string> = {
             <tbody class="num">
               <tr v-for="g in sortedProposed" :key="g.id" class="group">
                 <template v-for="c in proposedVisibleCols" :key="c.key">
-                  <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-accent-50/40" :title="g.recipient_name">
+                  <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-brand-50/40" :title="g.recipient_name">
                     <span>{{ g.recipient_name }}</span>
                     <span
                       class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle"
@@ -821,39 +821,39 @@ const fieldLabels: Record<string, string> = {
                         : 'border-slate-300 bg-slate-100 text-slate-700'"
                     >{{ optionTypeOf(g.recipient_type) }}</span>
                   </td>
-                  <td v-else-if="c.key === 'existing_options'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-accent-50/40">
+                  <td v-else-if="c.key === 'existing_options'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">
                     <span v-if="g.existing_options">{{ fmtShares(g.existing_options) }}</span>
                     <span v-else class="text-ink-400">—</span>
                   </td>
-                  <td v-else-if="c.key === 'existing_common'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-accent-50/40">
+                  <td v-else-if="c.key === 'existing_common'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">
                     <span v-if="g.existing_common">{{ fmtShares(g.existing_common) }}</span>
                     <span v-else class="text-ink-400">—</span>
                   </td>
-                  <td v-else-if="c.key === 'existing_pref'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-accent-50/40">
+                  <td v-else-if="c.key === 'existing_pref'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">
                     <span v-if="g.existing_pref">{{ fmtShares(g.existing_pref) }}</span>
                     <span v-else class="text-ink-400">—</span>
                   </td>
-                  <td v-else-if="c.key === 'existing_cn'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-accent-50/40">
+                  <td v-else-if="c.key === 'existing_cn'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">
                     <span v-if="g.existing_cn">{{ fmtShares(g.existing_cn) }}</span>
                     <span v-else class="text-ink-400">—</span>
                   </td>
-                  <td v-else-if="c.key === 'existing_total'" class="px-2.5 py-1.5 text-right font-medium text-ink-900 border-b border-ink-200 border-r border-ink-200 group-hover:bg-accent-50/40">
+                  <td v-else-if="c.key === 'existing_total'" class="px-2.5 py-1.5 text-right font-medium text-ink-900 border-b border-ink-200 border-r border-ink-200 group-hover:bg-brand-50/40">
                     <span v-if="g.existing_total">{{ fmtShares(g.existing_total) }}</span>
                     <span v-else class="text-ink-400">—</span>
                   </td>
                   <td
                     v-else-if="c.bucket"
-                    class="px-2.5 py-1.5 text-right border-b border-ink-200 group-hover:bg-accent-50/40"
+                    class="px-2.5 py-1.5 text-right border-b border-ink-200 group-hover:bg-brand-50/40"
                     :class="[
-                      c.bucket === 'new'  ? 'text-accent-700 font-medium' : '',
+                      c.bucket === 'new'  ? 'text-brand-700 font-medium' : '',
                       c.bucket === 'post' ? 'text-ink-900 font-medium' : '',
                       c.bucket === 'pre'  ? 'text-ink-700' : '',
                       c.groupEnd ? 'border-r border-ink-200' : '',
                     ]"
                   >{{ fmtUnit(c.unit!, (g as any)[c.key]) }}</td>
-                  <td v-else-if="c.key === 'actions'" class="px-2 py-1 text-right border-b border-ink-200 whitespace-nowrap group-hover:bg-accent-50/40">
-                    <button class="text-ink-500 hover:text-accent-600 px-1 py-0.5 rounded" @click="startEdit(g)" title="Edit"><Edit3 :size="13" /></button>
-                    <button class="text-ink-500 hover:text-accent-600 px-1 py-0.5 rounded" @click="promote(g)" title="Promote to outstanding"><ArrowUpCircle :size="13" /></button>
+                  <td v-else-if="c.key === 'actions'" class="px-2 py-1 text-right border-b border-ink-200 whitespace-nowrap group-hover:bg-brand-50/40">
+                    <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded" @click="startEdit(g)" title="Edit"><Edit3 :size="13" /></button>
+                    <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded" @click="promote(g)" title="Promote to outstanding"><ArrowUpCircle :size="13" /></button>
                     <button class="text-ink-500 hover:text-red-600 px-1 py-0.5 rounded" @click="destroy(g)" title="Delete"><Trash2 :size="13" /></button>
                   </td>
                 </template>
@@ -872,7 +872,7 @@ const fieldLabels: Record<string, string> = {
           <UiInput v-model="form.recipient_name" label="Recipient" placeholder="Marwan Berrada" class="col-span-2" />
           <label class="block col-span-1">
             <span class="block text-xs font-medium text-ink-700 mb-1">Type</span>
-            <select v-model="form.recipient_type" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500">
+            <select v-model="form.recipient_type" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
               <option>Employee</option>
               <option>Board Member</option>
               <option>Consultant</option>
@@ -898,7 +898,7 @@ const fieldLabels: Record<string, string> = {
                   :key="m"
                   type="button"
                   class="px-2.5 py-2 transition-colors"
-                  :class="inputMode === m ? 'bg-accent-500 text-white' : 'bg-white text-ink-700 hover:bg-ink-100'"
+                  :class="inputMode === m ? 'bg-brand-500 text-white' : 'bg-white text-ink-700 hover:bg-ink-100'"
                   @click="inputMode = m"
                 >{{ m === 'shares' ? 'Shares' : m === 'pct' ? '%' : '$' }}</button>
               </div>
@@ -920,14 +920,14 @@ const fieldLabels: Record<string, string> = {
           <UiInput v-model="form.cliff_months" type="number" label="Cliff months" />
           <label class="block col-span-2">
             <span class="block text-xs font-medium text-ink-700 mb-1">Status</span>
-            <select v-model="form.status" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500">
+            <select v-model="form.status" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
               <option value="proposed">Proposed (draft)</option>
               <option value="outstanding">Outstanding (live)</option>
             </select>
           </label>
           <label class="block col-span-2">
             <span class="block text-xs font-medium text-ink-700 mb-1">Notes</span>
-            <textarea v-model="form.notes" rows="2" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500" />
+            <textarea v-model="form.notes" rows="2" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
           </label>
         </div>
         <div class="mt-5 flex justify-end gap-2">
@@ -961,14 +961,14 @@ const fieldLabels: Record<string, string> = {
             <UploadCloud :size="28" class="mx-auto text-ink-500" />
             <p class="mt-2 text-sm text-ink-700">
               <span class="font-medium">Drop a file here</span> or
-              <label class="text-accent-600 hover:text-accent-700 cursor-pointer underline font-medium">
+              <label class="text-brand-600 hover:text-brand-700 cursor-pointer underline font-medium">
                 browse
                 <input type="file" accept=".xlsx,.xlsm,.csv,.tsv" class="hidden" @change="onImportFile" />
               </label>
             </p>
             <p v-if="importFile" class="mt-1 text-xs text-ink-600">{{ importFile.name }} ({{ Math.round(importFile.size / 1024) }} KB)</p>
             <p class="mt-2 text-[11px] text-ink-500">xlsx / xlsm / csv / tsv. Headers can appear anywhere in the first 8 rows.</p>
-            <p v-if="importPreviewing" class="mt-3 text-xs text-accent-700">Analyzing…</p>
+            <p v-if="importPreviewing" class="mt-3 text-xs text-brand-700">Analyzing…</p>
           </div>
 
           <!-- Step 2: detected mapping + sample preview -->
