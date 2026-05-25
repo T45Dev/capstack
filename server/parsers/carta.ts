@@ -781,8 +781,26 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
           warnings.push(`"${planSheet.name}": name column matched by position (column A). Header was "${asString(planSheet.getRow(planHeaderRow).getCell(1).value)}".`)
         }
       }
-      const cQtyIssued = findHeader(/^quantity ?issued$/, /^shares? ?issued$/, /^granted$/)
-      const cQtyOutstanding = findHeader(/^quantity ?outstanding$/, /^outstanding$/)
+      const cQtyIssued = findHeader(
+        /^quantity ?issued$/, /^shares? ?issued$/, /^granted$/,
+        // Wider bank for variant Carta templates that don't include the
+        // word "issued"/"outstanding" on the count column.
+        /^total ?(issued|granted)$/, /^original ?(issued|granted)$/,
+        /^shares? ?granted$/, /^options? ?granted$/, /^number ?granted$/,
+      )
+      const cQtyOutstanding = findHeader(
+        /^quantity ?outstanding$/, /^outstanding$/,
+        /^(vested|unvested|remaining|active|current) ?(options|shares)?$/,
+        /^outstanding ?(shares|options)$/,
+      )
+      // Last-ditch generic quantity column. Some Carta templates use just
+      // "Quantity" or "Shares" or "Options" without an Issued/Outstanding
+      // suffix. Treat that single column as Outstanding (the more useful
+      // number for the live-grant view).
+      let cQtyGeneric = -1
+      if (cQtyIssued < 0 && cQtyOutstanding < 0) {
+        cQtyGeneric = findHeader(/^quantity$/, /^qty$/, /^shares?$/, /^options?$/, /^amount$/)
+      }
       const cQtyExercised = findHeader(/^quantity ?exercised$/, /^exercised$/)
       // Forfeited and Expired are tracked separately in Carta:
       //   Forfeited = unvested at termination (cancelled/forfeited are
@@ -832,16 +850,43 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
       const cAwardType = findHeader(/^(award|grant) ?type$/, /^(iso|nso|rsu)/)
       const cAcceleration = findHeader(/^acceleration$/, /^accel/)
 
+      // Diagnostic: dump exactly which columns we resolved on the Plan
+      // sheet. This is the single most useful warning when the parser
+      // produces 0 grants — the operator can read it and see at a glance
+      // which column went unmatched.
+      const colReport = (n: string, idx: number) => {
+        if (idx <= 0) return `${n}=NOT FOUND`
+        const hdr = (planSheet.getRow(planHeaderRow).values as any[])[idx]
+        return `${n}=col ${String.fromCharCode(64 + Math.min(idx, 26))} ("${asString(hdr)}")`
+      }
+      warnings.push(
+        `"${planSheet.name}" columns: `
+        + [
+          colReport('name', cName),
+          colReport('qty_issued', cQtyIssued),
+          colReport('qty_outstanding', cQtyOutstanding),
+          colReport('qty_generic', cQtyGeneric),
+          colReport('strike', cStrike),
+          colReport('issue_date', cIssueDate),
+          colReport('vest_start', cVestStart),
+        ].join(', '),
+      )
+
       let parsed = 0
+      let skippedNoName = 0
+      let skippedNoQty = 0
       for (let r = planHeaderRow + 1; r <= planSheet.rowCount; r++) {
         try {
           const row = planSheet.getRow(r)
           const name = cName > 0 ? asString(row.getCell(cName).value) : ''
-          if (!name) continue
+          if (!name) { skippedNoName++; continue }
           const qtyIssued = cQtyIssued > 0 ? asNumber(row.getCell(cQtyIssued).value) : 0
           const qtyOutstanding = cQtyOutstanding > 0 ? asNumber(row.getCell(cQtyOutstanding).value) : 0
-          const quantity = qtyOutstanding > 0 ? qtyOutstanding : qtyIssued
-          if (quantity <= 0) continue
+          const qtyGeneric = cQtyGeneric > 0 ? asNumber(row.getCell(cQtyGeneric).value) : 0
+          const quantity = qtyOutstanding > 0 ? qtyOutstanding
+                         : qtyIssued > 0 ? qtyIssued
+                         : qtyGeneric
+          if (quantity <= 0) { skippedNoQty++; continue }
 
           const scheduleText = cVestSchedule > 0 ? asString(row.getCell(cVestSchedule).value) : ''
           const { months, cliff } = parseVestingSchedule(scheduleText)
@@ -870,6 +915,13 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
           warnings.push(`Skipped grant row ${r} on "${planSheet.name}": ${err?.message || err}`)
         }
       }
+      // Per-iteration skip diagnostics. Surfacing exactly why rows didn't
+      // turn into grants is the difference between "it works" and "the
+      // operator stares at zero grants with no idea why."
+      warnings.push(
+        `"${planSheet.name}" row outcome: parsed=${parsed}, skipped_no_name=${skippedNoName}, skipped_no_qty=${skippedNoQty}, total_rows_after_header=${planSheet.rowCount - planHeaderRow}.`,
+      )
+
       if (parsed > 0) {
         // De-dupe: the Plan sheet just produced richer per-grant detail
         // for some stakeholders. Drop EVERY grant the Detailed Cap Table
@@ -891,8 +943,19 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
           + `(stakeholders not covered by the Plan sheet) = ${result.grants.length} total.`,
         )
       } else {
+        // Zero per-grant rows parsed — fall back to Detailed Cap Table.
+        // Emit a sample of the first data row so the operator can see
+        // what the parser actually read at the cells where it expected
+        // name + quantity.
+        const sampleRow = planSheet.getRow(planHeaderRow + 1)
+        const sampleCells: string[] = []
+        for (let c = 1; c <= Math.min(planSheet.columnCount, 10); c++) {
+          sampleCells.push(`${String.fromCharCode(64 + c)}="${asString(sampleRow.getCell(c).value)}"`)
+        }
         warnings.push(
-          `"${planSheet.name}": found the sheet but parsed 0 grant rows. Falling back to the Detailed Cap Table's aggregated-per-stakeholder grants, so Option Pool Impact will show one event per person (not per grant). Check that the sheet has Quantity Issued / Quantity Outstanding columns with positive values.`,
+          `"${planSheet.name}": parsed 0 per-grant rows — falling back to the Detailed Cap Table's aggregated grants. `
+          + `First data row (row ${planHeaderRow + 1}) looks like: ${sampleCells.join(', ')}. `
+          + `If this looks like real grant data, the column headers in row ${planHeaderRow} aren't matching the parser's patterns — pick "Option grants" from the dropdown on the import page to force this sheet.`,
         )
       }
 
