@@ -35,7 +35,7 @@ const emit = defineEmits<{
   (e: 'update-name', v: string): void
   (e: 'update-date', v: string | null): void
   (e: 'update-parent', v: string | null): void
-  (e: 'set-kind', v: 'open' | 'closed'): void
+  (e: 'set-kind', v: 'open' | 'closed' | 'formation'): void
   (e: 'commit'): void
   (e: 'delete'): void
 }>()
@@ -68,6 +68,11 @@ const parentRound = computed(() => props.otherRounds.find(r => r.code === props.
           @keydown.enter="($event.target as HTMLInputElement).blur()"
         />
         <span v-if="isOpen" class="text-[9px] uppercase tracking-wider text-brand-edge font-semibold">Open</span>
+        <span
+          v-else-if="status === 'formation'"
+          class="text-[9px] uppercase tracking-wider text-ink-700 font-semibold bg-ink-100 px-1.5 py-0.5 rounded"
+          title="Foundation snapshot — sets the starting cap structure. All values are user-typed; transaction columns hide."
+        >Formation</span>
       </div>
 
       <!-- Date row. Editable inline; the parser accepts "9/9/24", "Sep 9
@@ -110,13 +115,24 @@ const parentRound = computed(() => props.otherRounds.find(r => r.code === props.
         </span>
       </div>
 
-      <!-- Kind toggle + delete. Lives at the bottom so the row's visual
-           focus stays on name/date/tranche above. -->
-      <div class="mt-1.5 flex items-center gap-1">
+      <!-- Kind toggle + delete. Formation is its own kind because it's a
+           snapshot, not a transaction — the derived money/preferred/notes
+           columns don't apply to it. Closed and Open both behave as
+           transaction rounds; only one round can be Open at a time. -->
+      <div class="mt-1.5 flex items-center gap-1 flex-wrap">
         <button
           type="button"
           class="text-[9px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors"
-          :class="status === 'closed' || status === 'formation'
+          :class="status === 'formation'
+            ? 'bg-ink-700 text-white border-ink-700'
+            : 'bg-white text-ink-500 border-ink-200 hover:border-ink-300'"
+          title="Formation = the founding snapshot. All values are user-typed; transaction columns (post-money, notes, preferred) hide because they don't apply."
+          @click="emit('set-kind', 'formation')"
+        >Formation</button>
+        <button
+          type="button"
+          class="text-[9px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors"
+          :class="status === 'closed'
             ? 'bg-ink-200 text-ink-800 border-ink-300'
             : 'bg-white text-ink-500 border-ink-200 hover:border-ink-300'"
           @click="emit('set-kind', 'closed')"

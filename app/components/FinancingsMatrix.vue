@@ -131,7 +131,10 @@ async function commitRound(roundId: string): Promise<void> {
 
 // Single-open invariant: setting one round Open drafts every other open
 // round back to Closed in the same buffer, then commits each affected row.
-async function setKind(roundId: string, newKind: 'closed' | 'open'): Promise<void> {
+// Formation is special: it's a snapshot kind (no money math) but multiple
+// formations are technically allowed — though in practice the operator
+// will only have one.
+async function setKind(roundId: string, newKind: 'closed' | 'open' | 'formation'): Promise<void> {
   const affected: string[] = [roundId]
   if (newKind === 'open') {
     for (const r of props.rounds) {
@@ -517,6 +520,9 @@ const displayRows = computed<Row[]>(() => {
                   groupAccent(idx),
                 ]"
               >
+                <!-- Typed cells: always editable on every row (closed,
+                     open, formation). The operator may backfill historical
+                     numbers on closed rounds and is free to overwrite. -->
                 <MatrixTypedCell
                   v-if="c.kind === 'typed'"
                   :value="valueOf(row.round, c.key)"
@@ -527,6 +533,16 @@ const displayRows = computed<Row[]>(() => {
                   @update="(v) => setDraft(row.round.round_id, c.key as any, v ?? (c.cellKind === 'shares' ? 0 : null))"
                   @commit="commitRound(row.round.round_id)"
                 />
+                <!-- Override (preferred): Formation rounds issue Common,
+                     not Preferred, so the cell is N/A there. Otherwise
+                     it's derived-with-override as elsewhere. -->
+                <MatrixDerivedCell
+                  v-else-if="c.kind === 'override' && effectiveKind(row.round) === 'formation'"
+                  :value="null"
+                  :kind="c.cellKind"
+                  align="right"
+                  :title="'Formation rounds issue Common, not Preferred — Preferred doesn\'t apply.'"
+                />
                 <MatrixOverrideCell
                   v-else-if="c.kind === 'override'"
                   :derived-value="row.round.preferred_issued || null"
@@ -535,6 +551,18 @@ const displayRows = computed<Row[]>(() => {
                   :title="tooltip(c.key, row.round)"
                   @update="(v) => setDraft(row.round.round_id, 'preferred_issued_override', v)"
                   @commit="commitRound(row.round.round_id)"
+                />
+                <!-- Derived columns: on Formation rounds the notes columns
+                     are N/A (no convertibles in a snapshot). The money
+                     totals (post-money / cumulative financing / total FDS)
+                     still compute correctly from the typed inputs the
+                     operator enters so they stay visible. -->
+                <MatrixDerivedCell
+                  v-else-if="effectiveKind(row.round) === 'formation' && (c.key === 'notes_financing' || c.key === 'notes_converted')"
+                  :value="null"
+                  :kind="c.cellKind"
+                  align="right"
+                  :title="'Formation rounds don\'t have convertibles attributed.'"
                 />
                 <MatrixDerivedCell
                   v-else
