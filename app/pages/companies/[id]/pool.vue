@@ -254,30 +254,45 @@ const eventsWithRunning = computed(() => {
   })
 })
 
-// Per-type filter for the timeline table. Running balance is still
-// computed over the FULL event sequence (so the "Running pool"
-// column reflects true state even when a category is filtered out);
-// only the displayed rows are filtered. 'idea' is a meta-bucket that
-// matches any event from the user's hypothetical Ideas (not a real
-// EventType — checked against the source field).
-type EventFilter = 'all' | 'pool_topup' | 'grant' | 'exercise' | 'forfeit' | 'idea'
+// Two side-by-side tables: real events (timeline) and ideas
+// (hypothetical). Running balance on the Timeline reflects ONLY real
+// events — ideas don't move it (the projected end-state appears in
+// the headline equation). The chart uses eventsWithRunning (combined,
+// chronological) so the user can still see how ideas land.
+const realEventsWithRunning = computed(() => {
+  let running = 0
+  return events.value
+    .filter(e => e.source !== 'idea')
+    .map(e => {
+      running += e.direction * e.shares
+      return { ...e, running }
+    })
+})
+const ideaEventsList = computed(() =>
+  events.value.filter(e => e.source === 'idea'),
+)
+
+// Per-type filter for the timeline table only (ideas live in their
+// own table now, so the 'idea' filter is gone).
+type EventFilter = 'all' | 'pool_topup' | 'grant' | 'exercise' | 'forfeit'
 const eventFilter = ref<EventFilter>('all')
 const filteredEvents = computed(() => {
   const f = eventFilter.value
-  if (f === 'all') return eventsWithRunning.value
-  if (f === 'idea') return eventsWithRunning.value.filter(e => e.source === 'idea')
-  return eventsWithRunning.value.filter(e => e.type === f)
+  if (f === 'all') return realEventsWithRunning.value
+  return realEventsWithRunning.value.filter(e => e.type === f)
 })
 // Counts per filter category — surfaced as small badges on the chips
 // so the operator can see how many events fall in each bucket.
-const filterCounts = computed(() => ({
-  all: events.value.length,
-  pool_topup: events.value.filter(e => e.type === 'pool_topup').length,
-  grant: events.value.filter(e => e.type === 'grant').length,
-  exercise: events.value.filter(e => e.type === 'exercise').length,
-  forfeit: events.value.filter(e => e.type === 'forfeit').length,
-  idea: events.value.filter(e => e.source === 'idea').length,
-}))
+const filterCounts = computed(() => {
+  const real = events.value.filter(e => e.source !== 'idea')
+  return {
+    all: real.length,
+    pool_topup: real.filter(e => e.type === 'pool_topup').length,
+    grant: real.filter(e => e.type === 'grant').length,
+    exercise: real.filter(e => e.type === 'exercise').length,
+    forfeit: real.filter(e => e.type === 'forfeit').length,
+  }
+})
 
 // Chart points. Honours the vest-vs-single mode toggle.
 //   Each chart point = { t: ISO date, balance: pool shares available at that t }.
@@ -381,19 +396,21 @@ const totals = computed(() => {
   // Idea exercises shrink Authorized (per the mental model table).
   const ideaExercises = events.value.filter(e => isIdea(e.source) && e.type === 'exercise').reduce((a, e) => a + e.shares, 0)
   const floorShares = events.value.filter(e => isIdea(e.source) && e.type === 'floor').reduce((a, e) => Math.max(a, e.shares), 0)
-  // Authorized stays CONSTANT. Available is solved from the identity:
-  //   Authorized = Outstanding + Proposed + Available
-  //   Available  = Authorized − Outstanding − Proposed
-  // Outstanding already excludes Exercised / Forfeited / Expired (it's
-  // Issued − all three), so those shares flow into Available implicitly.
-  // The lifetime decomposition row shows the breakdown for audit.
+  // Authorized stays CONSTANT. Available subtracts everything that's
+  // claimed against the pool — Outstanding, Proposed, and Ideas
+  // (hypothetical consuming events: grants + reserves). Equation:
+  //   Authorized = Outstanding + Proposed + Ideas + Available
+  // Outstanding already excludes Exercised/Forfeited/Expired (it's
+  // Issued − all three), so those shares flow into Available
+  // implicitly. The lifetime decomposition row shows the breakdown
+  // for audit.
   const poolAuthorized = poolAuthorizedOriginal
-  const available = poolAuthorized - outstandingShares - proposedShares
-  // Projected end-state Available after applying all ideas: grants
-  // and reserves subtract from Available; topups, forfeits, AND idea
-  // exercises all grow it (each shrinks Outstanding under a constant
-  // Authorized).
-  const projectedEnd = poolAuthorized + ideaTopups + ideaForfeits + ideaExercises - outstandingShares - proposedShares - ideaGrants
+  const available = poolAuthorized - outstandingShares - proposedShares - ideaGrants
+  // Projected = Available plus idea events that ADD to it (top-ups,
+  // forfeits, exercises). Available itself only nets consuming ideas;
+  // projectedEnd shows what Available would be if every idea
+  // including the positive ones lands.
+  const projectedEnd = available + ideaTopups + ideaForfeits + ideaExercises
   return { poolAuthorized, outstandingShares, proposedShares, ideaGrants, ideaTopups, ideaForfeits, ideaExercises, floorShares, available, projectedEnd, totalExercised, totalForfeited, totalExpired, totalForfeitedOrExpired, totalIssued }
 })
 
@@ -630,6 +647,9 @@ const chart = computed(() => {
         <p class="text-sm text-ink-600 mt-1">Chronological view of every event that affects the pool — pool top-ups, outstanding grants, proposed grants, and your future ideas.</p>
       </div>
       <div class="flex items-center gap-2">
+        <!-- Vest-vs-single chart mode toggle. "Add idea" lives in the
+             Ideas card header (right of the two side-by-side tables
+             below) so it sits next to the ideas list it manages. -->
         <div class="inline-flex items-center rounded-md border border-ink-300 bg-white p-0.5 text-xs">
           <button type="button" class="px-2.5 py-1 rounded-[5px] font-medium transition-colors"
             :class="mode === 'single' ? 'bg-accent-500 text-white' : 'text-ink-600 hover:text-ink-900'"
@@ -638,7 +658,6 @@ const chart = computed(() => {
             :class="mode === 'vest' ? 'bg-accent-500 text-white' : 'text-ink-600 hover:text-ink-900'"
             @click="mode = 'vest'">Vest schedule</button>
         </div>
-        <UiButton variant="primary" @click="openModal()"><Plus :size="14" /> Add idea</UiButton>
       </div>
     </div>
 
@@ -685,7 +704,7 @@ const chart = computed(() => {
         <span class="text-2xl text-ink-400 pb-1">+</span>
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Available</span>
-          <span class="text-2xl font-semibold" :class="totals.projectedEnd < 0 ? 'text-red-700' : 'text-emerald-700'">{{ fmtShares(totals.available) }}</span>
+          <span class="text-2xl font-semibold" :class="totals.available < 0 ? 'text-red-700' : 'text-emerald-700'">{{ fmtShares(totals.available) }}</span>
         </div>
       </div>
       <!-- Lifetime equation: Issued = Outstanding + Exercised
@@ -771,120 +790,161 @@ const chart = computed(() => {
       </div>
     </div>
 
-    <!-- Timeline table: takes the remaining viewport height, scrolls
-         vertically inside, sticky header so the column labels stay put. -->
-    <div class="rounded-lg border border-ink-300 bg-white shadow-card flex flex-col min-h-0 flex-1">
-      <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-ink-200 shrink-0 flex-wrap">
-        <div class="shrink-0">
-          <h2 class="text-sm font-semibold text-ink-900">Timeline</h2>
-          <p class="text-xs text-ink-500">All events in chronological order. "Single-event" mode shown — vest curves only affect the chart above.</p>
-        </div>
-        <!-- Filter chips: filter the timeline rows by event type. The
-             running-balance column still reflects the full event
-             history (we only hide rows, not recompute) so values stay
-             honest. -->
-        <div class="flex items-center gap-1 flex-wrap">
-          <button
-            v-for="opt in [
-              { value: 'all',        label: 'All' },
-              { value: 'pool_topup', label: 'Top-ups' },
-              { value: 'grant',      label: 'Grants' },
-              { value: 'exercise',   label: 'Exercises' },
-              { value: 'forfeit',    label: 'Forfeit/Expire' },
-              { value: 'idea',       label: 'Ideas' },
-            ] as const"
-            :key="opt.value"
-            type="button"
-            class="text-[11px] px-2 py-0.5 rounded-full border transition-colors inline-flex items-center gap-1"
-            :class="eventFilter === opt.value
-              ? 'bg-accent-600 text-white border-accent-600'
-              : 'bg-white text-ink-600 border-ink-300 hover:border-ink-400 hover:text-ink-800'"
-            @click="eventFilter = opt.value"
-          >
-            <span>{{ opt.label }}</span>
-            <span
-              class="text-[10px] num"
-              :class="eventFilter === opt.value ? 'text-accent-100' : 'text-ink-400'"
-            >{{ filterCounts[opt.value] }}</span>
-          </button>
-        </div>
-      </div>
-      <div v-if="!events.length" class="px-4 py-8 text-sm text-ink-500 text-center">
-        No events yet. The first pool top-up or grant will appear here.
-      </div>
-      <div v-else-if="!filteredEvents.length" class="px-4 py-8 text-sm text-ink-500 text-center">
-        No events match the current filter.
-        <button type="button" class="ml-2 text-accent-600 hover:text-accent-700 underline" @click="eventFilter = 'all'">Show all</button>
-      </div>
-      <div v-else class="overflow-y-auto min-h-0 flex-1">
-        <table class="w-full text-[13px] num">
-        <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100 sticky top-0 z-10">
-          <tr>
-            <th class="px-2.5 py-1.5 font-semibold w-28">Date</th>
-            <th class="px-2.5 py-1.5 font-semibold">Event</th>
-            <th class="px-2.5 py-1.5 font-semibold w-32">Type</th>
-            <th class="px-2.5 py-1.5 font-semibold text-right w-32">Shares</th>
-            <th class="px-2.5 py-1.5 font-semibold text-right w-32">Running pool</th>
-            <th class="px-2.5 py-1.5 font-semibold text-right w-20">% FDS</th>
-            <th class="px-2.5 py-1.5 font-semibold text-right w-24"></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="e in filteredEvents" :key="e.id" class="hover:bg-accent-50/40 border-b border-ink-200">
-            <!-- Date cell: inline date picker when this is a grant event
-                 (so the operator can fix missing/wrong import dates without
-                 leaving the page). Pool top-ups + ideas read-only. -->
-            <td class="px-2.5 py-1.5" :class="e.dateIsPlaceholder ? 'text-amber-700' : 'text-ink-600'">
-              <template v-if="e.grantId">
-                <input
-                  type="date"
-                  :value="e.dateIsPlaceholder ? '' : e.date"
-                  :class="['bg-transparent border rounded px-1 py-0.5 text-[12px] focus:outline-none focus:ring-1 focus:ring-accent-500 focus:border-accent-500 num',
-                           e.dateIsPlaceholder ? 'border-amber-300 text-amber-700 hover:border-amber-500' : 'border-transparent text-ink-700 hover:border-ink-300']"
-                  :title="e.dateIsPlaceholder ? `Placeholder — no issue date on the source grant. Pick one to set it.` : 'Grant issue date — edit to update.'"
-                  @change="commitGrantDate(e.grantId!, ($event.target as HTMLInputElement).value)"
-                />
-                <span v-if="e.dateIsPlaceholder" class="ml-0.5 text-[9px] uppercase tracking-wide text-amber-700/80">est</span>
-              </template>
-              <template v-else>
-                {{ fmtDate(e.date) }}
-                <span v-if="e.dateIsPlaceholder" class="ml-0.5 text-[9px] uppercase tracking-wide text-amber-700/80">est</span>
-              </template>
-            </td>
-            <td class="px-2.5 py-1.5">
-              <span class="text-ink-900 font-medium">{{ e.name }}</span>
+    <!-- Two tables side-by-side: real Timeline (left) + hypothetical
+         Ideas (right). They stack on smaller screens. The cards share
+         the remaining viewport height; each scrolls vertically inside,
+         sticky header keeps column labels visible. -->
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 flex-1 min-h-0">
+      <!-- ===== Timeline (real events) ===== -->
+      <div class="rounded-lg border border-ink-300 bg-white shadow-card flex flex-col min-h-0">
+        <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-ink-200 shrink-0 flex-wrap">
+          <div class="shrink-0">
+            <h2 class="text-sm font-semibold text-ink-900">Timeline</h2>
+            <p class="text-xs text-ink-500">Real events — pool top-ups, grants, and lifecycle activity from imported data.</p>
+          </div>
+          <!-- Filter chips: filter the timeline rows by event type.
+               Running pool reflects the full event history we only hide rows, not recompute) so values stay honest. -->
+          <div class="flex items-center gap-1 flex-wrap">
+            <button
+              v-for="opt in [
+                { value: 'all',        label: 'All' },
+                { value: 'pool_topup', label: 'Top-ups' },
+                { value: 'grant',      label: 'Grants' },
+                { value: 'exercise',   label: 'Exercises' },
+                { value: 'forfeit',    label: 'Forfeit/Expire' },
+              ] as const"
+              :key="opt.value"
+              type="button"
+              class="text-[11px] px-2 py-0.5 rounded-full border transition-colors inline-flex items-center gap-1"
+              :class="eventFilter === opt.value
+                ? 'bg-accent-600 text-white border-accent-600'
+                : 'bg-white text-ink-600 border-ink-300 hover:border-ink-400 hover:text-ink-800'"
+              @click="eventFilter = opt.value"
+            >
+              <span>{{ opt.label }}</span>
               <span
-                v-if="e.source === 'idea'"
-                class="ml-2 text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border border-amber-300 bg-amber-50 text-amber-800 inline-flex items-center gap-1 align-middle"
-              ><Lightbulb :size="10" /> idea</span>
-              <span
-                v-else-if="e.source === 'grant_proposed'"
-                class="ml-2 text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border border-accent-300 bg-accent-50 text-accent-700 align-middle"
-              >proposed</span>
-            </td>
-            <td class="px-2.5 py-1.5 text-ink-700">
-              <span class="inline-flex items-center gap-1">
-                <TrendingUp v-if="e.direction > 0" :size="12" class="text-emerald-600" />
-                <ArrowDownIcon v-else-if="e.direction < 0" :size="12" class="text-red-500" />
-                <span v-else class="inline-block w-3 h-3 rounded-full border border-ink-400" />
-                {{ labelFor(e.type, e.kind) }}
-              </span>
-            </td>
-            <td class="px-2.5 py-1.5 text-right" :class="e.direction > 0 ? 'text-emerald-700' : e.direction < 0 ? 'text-red-600' : 'text-ink-500'">
-              <template v-if="e.direction === 0">{{ fmtShares(e.shares) }}</template>
-              <template v-else>{{ e.direction > 0 ? '+' : '−' }}{{ fmtShares(e.shares) }}</template>
-            </td>
-            <td class="px-2.5 py-1.5 text-right text-ink-900 font-medium">{{ fmtShares(e.running) }}</td>
-            <td class="px-2.5 py-1.5 text-right text-ink-600">{{ fmtPct(fdsIncludingPool > 0 ? e.shares / fdsIncludingPool : 0, 2) }}</td>
-            <td class="px-2.5 py-1.5 text-right whitespace-nowrap">
-              <template v-if="e.source === 'idea'">
-                <button class="text-ink-500 hover:text-accent-600 px-1 py-0.5 rounded" @click="openModal(ideas.find(i => i.id === e.ideaId))" title="Edit"><Edit3 :size="13" /></button>
-                <button class="text-ink-500 hover:text-red-600 px-1 py-0.5 rounded" @click="deleteIdea(ideas.find(i => i.id === e.ideaId))" title="Delete"><Trash2 :size="13" /></button>
-              </template>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+                class="text-[10px] num"
+                :class="eventFilter === opt.value ? 'text-accent-100' : 'text-ink-400'"
+              >{{ filterCounts[opt.value] }}</span>
+            </button>
+          </div>
+        </div>
+        <div v-if="!realEventsWithRunning.length" class="px-4 py-8 text-sm text-ink-500 text-center">
+          No events yet. The first pool top-up or grant will appear here.
+        </div>
+        <div v-else-if="!filteredEvents.length" class="px-4 py-8 text-sm text-ink-500 text-center">
+          No events match the current filter.
+          <button type="button" class="ml-2 text-accent-600 hover:text-accent-700 underline" @click="eventFilter = 'all'">Show all</button>
+        </div>
+        <div v-else class="overflow-y-auto min-h-0 flex-1">
+          <table class="w-full text-[13px] num">
+            <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100 sticky top-0 z-10">
+              <tr>
+                <th class="px-2.5 py-1.5 font-semibold w-24">Date</th>
+                <th class="px-2.5 py-1.5 font-semibold">Event</th>
+                <th class="px-2.5 py-1.5 font-semibold w-28">Type</th>
+                <th class="px-2.5 py-1.5 font-semibold text-right w-28">Shares</th>
+                <th class="px-2.5 py-1.5 font-semibold text-right w-28">Running pool</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="e in filteredEvents" :key="e.id" class="hover:bg-accent-50/40 border-b border-ink-200">
+                <td class="px-2.5 py-1.5" :class="e.dateIsPlaceholder ? 'text-amber-700' : 'text-ink-600'">
+                  <template v-if="e.grantId">
+                    <input
+                      type="date"
+                      :value="e.dateIsPlaceholder ? '' : e.date"
+                      :class="['bg-transparent border rounded px-1 py-0.5 text-[12px] focus:outline-none focus:ring-1 focus:ring-accent-500 focus:border-accent-500 num',
+                               e.dateIsPlaceholder ? 'border-amber-300 text-amber-700 hover:border-amber-500' : 'border-transparent text-ink-700 hover:border-ink-300']"
+                      :title="e.dateIsPlaceholder ? `Placeholder — no issue date on the source grant. Pick one to set it.` : 'Grant issue date — edit to update.'"
+                      @change="commitGrantDate(e.grantId!, ($event.target as HTMLInputElement).value)"
+                    />
+                    <span v-if="e.dateIsPlaceholder" class="ml-0.5 text-[9px] uppercase tracking-wide text-amber-700/80">est</span>
+                  </template>
+                  <template v-else>
+                    {{ fmtDate(e.date) }}
+                    <span v-if="e.dateIsPlaceholder" class="ml-0.5 text-[9px] uppercase tracking-wide text-amber-700/80">est</span>
+                  </template>
+                </td>
+                <td class="px-2.5 py-1.5">
+                  <span class="text-ink-900 font-medium">{{ e.name }}</span>
+                  <span
+                    v-if="e.source === 'grant_proposed'"
+                    class="ml-2 text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border border-accent-300 bg-accent-50 text-accent-700 align-middle"
+                  >proposed</span>
+                </td>
+                <td class="px-2.5 py-1.5 text-ink-700">
+                  <span class="inline-flex items-center gap-1">
+                    <TrendingUp v-if="e.direction > 0" :size="12" class="text-emerald-600" />
+                    <ArrowDownIcon v-else-if="e.direction < 0" :size="12" class="text-red-500" />
+                    <span v-else class="inline-block w-3 h-3 rounded-full border border-ink-400" />
+                    {{ labelFor(e.type, e.kind) }}
+                  </span>
+                </td>
+                <td class="px-2.5 py-1.5 text-right" :class="e.direction > 0 ? 'text-emerald-700' : e.direction < 0 ? 'text-red-600' : 'text-ink-500'">
+                  <template v-if="e.direction === 0">{{ fmtShares(e.shares) }}</template>
+                  <template v-else>{{ e.direction > 0 ? '+' : '−' }}{{ fmtShares(e.shares) }}</template>
+                </td>
+                <td class="px-2.5 py-1.5 text-right text-ink-900 font-medium">{{ fmtShares(e.running) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ===== Ideas (hypothetical) ===== -->
+      <div class="rounded-lg border border-ink-300 bg-white shadow-card flex flex-col min-h-0">
+        <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-ink-200 shrink-0 flex-wrap">
+          <div class="shrink-0">
+            <h2 class="text-sm font-semibold text-ink-900 inline-flex items-center gap-1.5">
+              <Lightbulb :size="14" class="text-amber-500" />
+              Ideas
+              <span class="text-ink-400 font-normal">({{ ideaEventsList.length }})</span>
+            </h2>
+            <p class="text-xs text-ink-500">Hypothetical future events. Folded into the projected Available + chart above, but not the Timeline.</p>
+          </div>
+          <UiButton variant="primary" @click="openModal()"><Plus :size="14" /> Add idea</UiButton>
+        </div>
+        <div v-if="!ideaEventsList.length" class="px-4 py-8 text-sm text-ink-500 text-center">
+          No ideas yet. Click <span class="font-medium text-ink-700">Add idea</span> to model a future top-up, grant, exercise, forfeit, or floor.
+        </div>
+        <div v-else class="overflow-y-auto min-h-0 flex-1">
+          <table class="w-full text-[13px] num">
+            <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100 sticky top-0 z-10">
+              <tr>
+                <th class="px-2.5 py-1.5 font-semibold w-24">Date</th>
+                <th class="px-2.5 py-1.5 font-semibold">Idea</th>
+                <th class="px-2.5 py-1.5 font-semibold w-28">Type</th>
+                <th class="px-2.5 py-1.5 font-semibold text-right w-28">Shares</th>
+                <th class="px-2.5 py-1.5 font-semibold text-right w-20"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="e in ideaEventsList" :key="e.id" class="hover:bg-amber-50/40 border-b border-ink-200">
+                <td class="px-2.5 py-1.5 text-ink-600">{{ fmtDate(e.date) }}</td>
+                <td class="px-2.5 py-1.5">
+                  <span class="text-ink-900 font-medium">{{ e.name }}</span>
+                </td>
+                <td class="px-2.5 py-1.5 text-ink-700">
+                  <span class="inline-flex items-center gap-1">
+                    <TrendingUp v-if="e.direction > 0" :size="12" class="text-emerald-600" />
+                    <ArrowDownIcon v-else-if="e.direction < 0" :size="12" class="text-red-500" />
+                    <span v-else class="inline-block w-3 h-3 rounded-full border border-ink-400" />
+                    {{ labelFor(e.type, e.kind) }}
+                  </span>
+                </td>
+                <td class="px-2.5 py-1.5 text-right" :class="e.direction > 0 ? 'text-emerald-700' : e.direction < 0 ? 'text-red-600' : 'text-ink-500'">
+                  <template v-if="e.direction === 0">{{ fmtShares(e.shares) }}</template>
+                  <template v-else>{{ e.direction > 0 ? '+' : '−' }}{{ fmtShares(e.shares) }}</template>
+                </td>
+                <td class="px-2.5 py-1.5 text-right whitespace-nowrap">
+                  <button class="text-ink-500 hover:text-accent-600 px-1 py-0.5 rounded" @click="openModal(ideas.find(i => i.id === e.ideaId))" title="Edit"><Edit3 :size="13" /></button>
+                  <button class="text-ink-500 hover:text-red-600 px-1 py-0.5 rounded" @click="deleteIdea(ideas.find(i => i.id === e.ideaId))" title="Delete"><Trash2 :size="13" /></button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
