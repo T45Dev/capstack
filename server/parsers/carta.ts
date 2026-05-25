@@ -267,6 +267,44 @@ function parseLedgerSheet(sheet: import('exceljs').Worksheet, code: string, warn
   }
 }
 
+// Scan a Ledger sheet for certificate-id → issue-date pairs. When an
+// option grant on the plan sheet has been exercised and its
+// "destination" column points to a certificate ID (e.g. CS-100), the
+// destination's Issue Date is the exercise date. Carta creates a new
+// common-stock certificate the day the option is exercised; the
+// option's destination column tells you which one.
+function collectLedgerCertDates(sheet: import('exceljs').Worksheet, into: Map<string, string>) {
+  let headerRow = -1
+  for (let r = 1; r <= Math.min(sheet.rowCount, 12); r++) {
+    const flat = (sheet.getRow(r).values as any[]).map(v => asString(v).toLowerCase()).join('|')
+    if (flat.includes('quantity issued') && flat.includes('issue date')) {
+      headerRow = r
+      break
+    }
+  }
+  if (headerRow < 0) return
+  const headerCells = sheet.getRow(headerRow).values as any[]
+  const findCol = (...patterns: RegExp[]): number => {
+    for (let c = 1; c < headerCells.length; c++) {
+      const label = asString(headerCells[c]).replace(/\s+/g, ' ').trim()
+      if (patterns.some(p => p.test(label))) return c
+    }
+    return -1
+  }
+  const cCert = findCol(/^(formatted\s*)?(certificate|security)\s*id$/i, /^cert\s*id$/i, /^id$/i)
+  const cIssueDate = findCol(/^issue\s*date$/i)
+  if (cCert < 0 || cIssueDate < 0) return
+  for (let r = headerRow + 1; r <= sheet.rowCount; r++) {
+    const certId = asString(sheet.getRow(r).getCell(cCert).value)
+    const issueDate = asDate(sheet.getRow(r).getCell(cIssueDate).value)
+    if (!certId || !issueDate) continue
+    // Store both raw and uppercased keys, plus an unsuffixed variant
+    // (CS-100 → also "CS-100"). Lookup will normalize the same way.
+    const key = certId.toUpperCase().replace(/\s+/g, '')
+    if (!into.has(key)) into.set(key, issueDate)
+  }
+}
+
 function classifyKind(name: string): 'common' | 'preferred' {
   const n = name.toLowerCase()
   if (n.includes('common')) return 'common'
@@ -382,12 +420,19 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
   // the Cap Table page (close date, share price, cash contributed, debt
   // canceled). The CS Ledger maps to the Formation row; everything else is a
   // closed preferred round.
+  //
+  // We ALSO build a certificate-id → issue-date lookup here so the plan
+  // sheet can resolve exercise dates by cross-referencing: when an
+  // ES-# option grant's destination is CS-100, Carta's CS Ledger has
+  // a CS-100 row whose Issue Date IS the exercise date.
+  const ledgerCertDates = new Map<string, string>()
   for (const sheet of wb.worksheets) {
     const m = /^([A-Z][A-Z0-9]*)\s+Ledger$/i.exec(sheet.name.trim())
     if (!m || !m[1]) continue
     const code = m[1].toUpperCase()
     const round = parseLedgerSheet(sheet, code, warnings)
     if (round) result.rounds.push(round)
+    collectLedgerCertDates(sheet, ledgerCertDates)
   }
 
   // ----- Detailed Cap Table -----
@@ -876,6 +921,15 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
       const cTerminationDate = findHeader(
         /^termination ?date$/, /^date ?of ?termination$/, /^terminated ?date$/,
       )
+      // Destination column: when an option is exercised, the resulting
+      // common-stock certificate ID lives here (e.g. CS-100). The CS
+      // Ledger sheet has that certificate's Issue Date — which IS the
+      // exercise date. Used as a fallback when no explicit Last
+      // Exercise Date column is present.
+      const cDestination = findHeader(
+        /^destination$/, /^converted ?(to|into)$/, /^common ?cert(ificate)? ?id$/,
+        /^resulting ?cert(ificate)? ?id$/, /^target ?cert(ificate)? ?id$/,
+      )
 
       // Diagnostic: dump exactly which columns we resolved on the Plan
       // sheet. This is the single most useful warning when the parser
@@ -900,8 +954,12 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
           colReport('forfeit_date', cForfeitDate),
           colReport('expire_date', cExpireDate),
           colReport('termination_date', cTerminationDate),
+          colReport('destination', cDestination),
         ].join(', '),
       )
+      if (ledgerCertDates.size > 0) {
+        warnings.push(`Cross-reference lookup ready: ${ledgerCertDates.size} certificate IDs found in ledger sheets (used to resolve exercise dates when an option's destination column points to a CS-#).`)
+      }
 
       let parsed = 0
       let skippedNoName = 0
@@ -929,6 +987,19 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
           const termDate = cTerminationDate > 0 ? asDate(row.getCell(cTerminationDate).value) : null
           const forfeitDate = cForfeitDate > 0 ? asDate(row.getCell(cForfeitDate).value) : null
           const expireDate = cExpireDate > 0 ? asDate(row.getCell(cExpireDate).value) : null
+          // Exercise date resolution. Priority order:
+          //   1. Explicit "Last Exercise Date" column on the plan sheet.
+          //   2. Cross-reference: when the "destination" column on this
+          //      row points at a certificate ID (e.g. CS-100), look up
+          //      that certificate's Issue Date in the ledger map. Carta
+          //      creates the destination cert ON the exercise date, so
+          //      its Issue Date IS the exercise date.
+          let lastExercisedDate: string | null = cExerciseDate > 0 ? asDate(row.getCell(cExerciseDate).value) : null
+          const destination = cDestination > 0 ? asString(row.getCell(cDestination).value).toUpperCase().replace(/\s+/g, '') : ''
+          if (!lastExercisedDate && destination) {
+            const fromLedger = ledgerCertDates.get(destination)
+            if (fromLedger) lastExercisedDate = fromLedger
+          }
           result.grants.push({
             recipientName: name,
             quantity: Math.floor(quantity),
@@ -943,7 +1014,7 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
             quantityForfeited: cQtyCancelled > 0 ? Math.floor(asNumber(row.getCell(cQtyCancelled).value)) || null : null,
             quantityExpired: cQtyExpired > 0 ? Math.floor(asNumber(row.getCell(cQtyExpired).value)) || null : null,
             acceleration,
-            lastExercisedDate: cExerciseDate > 0 ? asDate(row.getCell(cExerciseDate).value) : null,
+            lastExercisedDate,
             // Termination Date is a useful fallback when the export doesn't
             // break out forfeit/expire dates separately — the date the
             // grantee left, which is when both forfeitures (unvested) and
