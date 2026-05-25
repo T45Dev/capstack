@@ -47,6 +47,8 @@ interface RoundColumn {
     stakeholderName: string
     destinationCode: string | null
     dollars: number
+    principal: number
+    accrued: number
     shares: number
   }>
 }
@@ -287,15 +289,29 @@ function tooltip(key: string, r: RoundColumn): string {
     case 'post_money':          return `Post-money = Pre-money + New money\n${fmtUSD(r.pre_money || 0)} + ${fmtUSD(r.new_money)} = ${fmtUSD(r.post_money)}\n(Notes financing is reported separately.)`
     case 'notes_financing': {
       if (!r.notes_attributed?.length) return 'No CNs attributed to this round.'
-      const header = `${fmtUSD(r.notes_financing)} = sum of ${r.notes_attributed.length} CN${r.notes_attributed.length === 1 ? '' : 's'}:`
-      const lines = r.notes_attributed.map(n => `  ${n.stakeholderName} [${n.destinationCode || '—'}]: ${fmtUSD(n.dollars)}`)
-      return [header, ...lines].join('\n')
+      const totalPrincipal = r.notes_attributed.reduce((a, n) => a + (n.principal || 0), 0)
+      const totalAccrued = r.notes_attributed.reduce((a, n) => a + (n.accrued || 0), 0)
+      const header = `${fmtUSD(r.notes_financing)} = ${r.notes_attributed.length} CN${r.notes_attributed.length === 1 ? '' : 's'} converting at this round:\n  ${fmtUSD(totalPrincipal)} principal + ${fmtUSD(totalAccrued)} accrued interest = ${fmtUSD(r.notes_financing)}`
+      const lines = r.notes_attributed.map(n =>
+        `  • ${n.stakeholderName} [${n.destinationCode || '—'}]: ${fmtUSD(n.principal)} + ${fmtUSD(n.accrued)} = ${fmtUSD(n.dollars)}`,
+      )
+      return [header, '', 'Per-note breakdown:', ...lines].join('\n')
     }
     case 'share_price':         return 'Share price ($) — user input, 5-dp precision. Drives Preferred issued (new_money ÷ share_price).'
     case 'cumulated_financing': {
       const idx = props.rounds.findIndex(x => x.round_id === r.round_id)
-      const parts = props.rounds.slice(0, idx + 1).map(x => `  ${x.name || x.code}: ${fmtUSD((x.new_money || 0) + (x.notes_financing || 0))}`)
-      return [`Sum of (New money + Notes financing) through ${r.name || r.code}:`, ...parts, `= ${fmtUSD(r.cumulated_financing)}`].join('\n')
+      const parts = props.rounds.slice(0, idx + 1).map(x => {
+        const nm = x.new_money || 0
+        const nf = x.notes_financing || 0
+        return `  ${x.name || x.code}: ${fmtUSD(nm)} new money + ${fmtUSD(nf)} notes = ${fmtUSD(nm + nf)}`
+      })
+      return [
+        `Sum of (New money + Notes financing) through ${r.name || r.code}:`,
+        ...parts,
+        '',
+        `= ${fmtUSD(r.cumulated_financing)}`,
+        '(Notes financing includes principal + accrued interest per CN, since that\'s the dollar amount each note converts at.)',
+      ].join('\n')
     }
     case 'total_shares_fds': {
       const idx = props.rounds.findIndex(x => x.round_id === r.round_id)
