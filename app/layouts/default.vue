@@ -1,13 +1,14 @@
 <script setup lang="ts">
-// Workspace layout — left-side nav per spec §4 when inside a company; no nav
-// on the Companies index page (entry point). Drop the "Overview" tab; route
-// labels follow the spec vocabulary (Option Grants, Exit Scenarios, etc.).
+// Workspace layout — top app bar (AppTopBar) + left-side nav per spec §4
+// when inside a company; just the top bar on the Companies index.
+//
+// The page-level header (breadcrumb, H1, status pill, action buttons) is
+// owned by each page — see FinancingsPageHeader for the Financings page.
 import {
   FileSpreadsheet, Award, GitCompare, TrendingDown,
-  FlaskConical, Building2, Upload, PanelLeftClose, PanelLeftOpen,
+  FlaskConical, Upload, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-vue-next'
 const route = useRoute()
-const config = useRuntimeConfig()
 
 const companyId = computed(() => (route.params.id as string) || null)
 
@@ -16,9 +17,9 @@ const { data: company, refresh: refreshCompany } = await useFetch(() =>
   { default: () => null, watch: [companyId] },
 )
 
-// Rounds list for the "most-recently-closed" picker in the breadcrumb. Only
-// closed / formation rounds qualify as the baseline; the open round is what
-// the operator is modeling, so it can't be its own pre-baseline.
+// Rounds list for the pre-baseline picker in the top bar. Only closed /
+// formation rounds qualify as the baseline; the open round is what the
+// operator is modeling, so it can't be its own pre-baseline.
 const { data: roundsForBaseline } = await useFetch<{ rounds: Array<{ code: string; name: string | null; kind: string }> }>(() =>
   companyId.value ? `/api/companies/${companyId.value}/round-summary` : null,
   { default: () => ({ rounds: [] }), watch: [companyId] },
@@ -51,16 +52,12 @@ function toggleNav() { navCollapsed.value = !navCollapsed.value }
 // Spec §4 nav order. Routes use the spec page names where they differ from
 // the legacy filenames (e.g. /grants is still /grants on disk, but labelled
 // "Option Grants" everywhere in the UI).
-// Assumptions page was deprecated — round math now lives inline on the
-// Financings table (one column per round, type the values, auto-save).
-// Routes still exist in the backend for the rare bookmark hit, but the
-// nav doesn't surface them.
 const tabs = computed(() => companyId.value ? [
-  { to: `/companies/${companyId.value}/cap-table`,         label: 'Financings',         icon: FileSpreadsheet },
-  { to: `/companies/${companyId.value}/grants`,            label: 'Option Grants',      icon: Award },
-  { to: `/companies/${companyId.value}/dilution`,          label: 'Overall Dilution',   icon: GitCompare },
-  { to: `/companies/${companyId.value}/pool`,              label: 'Option Pool Impact', icon: TrendingDown },
-  { to: `/companies/${companyId.value}/scenarios`,         label: 'Exit Scenarios',     icon: FlaskConical },
+  { to: `/companies/${companyId.value}/cap-table`, label: 'Financings',         icon: FileSpreadsheet },
+  { to: `/companies/${companyId.value}/grants`,    label: 'Option Grants',      icon: Award },
+  { to: `/companies/${companyId.value}/dilution`,  label: 'Overall Dilution',   icon: GitCompare },
+  { to: `/companies/${companyId.value}/pool`,      label: 'Option Pool Impact', icon: TrendingDown },
+  { to: `/companies/${companyId.value}/scenarios`, label: 'Exit Scenarios',     icon: FlaskConical },
 ] : [])
 
 const importHref = computed(() => companyId.value ? `/companies/${companyId.value}/import` : null)
@@ -68,47 +65,17 @@ const importHref = computed(() => companyId.value ? `/companies/${companyId.valu
 
 <template>
   <div class="min-h-screen bg-ink-100 text-ink-900">
-    <!-- Top app bar: always present. Brand on left, breadcrumb in the middle,
-         version on the right. The left-side nav lives in the page shell below. -->
-    <header class="border-b border-ink-300 bg-white sticky top-0 z-30 shadow-sm">
-      <div class="px-6 h-14 flex items-center gap-6">
-        <NuxtLink to="/" class="flex items-center gap-2 font-semibold tracking-tight text-ink-900">
-          <span class="grid place-items-center w-7 h-7 rounded bg-brand-500 text-white text-xs font-bold shadow-sm">CS</span>
-          <span>CapStack</span>
-        </NuxtLink>
-
-        <div v-if="company" class="flex items-center gap-2 text-sm text-ink-600 min-w-0">
-          <NuxtLink to="/" class="hover:text-ink-900 inline-flex items-center gap-1">
-            <Building2 :size="14" /> Companies
-          </NuxtLink>
-          <span class="text-ink-400">/</span>
-          <span class="text-ink-900 font-medium truncate">{{ company.name }}</span>
-          <!-- Pre-baseline round picker — was previously a static badge tied to
-               the deprecated Assumptions page. Now the operator can switch
-               which closed round defines the "pre" snapshot directly from the
-               breadcrumb, since every page below the nav depends on it. -->
-          <label class="ml-2 inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-brand-700" title="Most-recently-closed round (pre-baseline). Switch when you change what you're modeling.">
-            <span class="text-ink-500">pre-baseline</span>
-            <select
-              :value="company.starting_round || ''"
-              class="bg-brand-50 border border-brand-200 hover:border-brand-300 text-brand-700 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide focus:outline-none focus:ring-1 focus:ring-brand-500"
-              @change="setStartingRound(($event.target as HTMLSelectElement).value)"
-            >
-              <option value="">—</option>
-              <option v-for="o in baselineOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-            </select>
-          </label>
-        </div>
-
-        <div class="flex-1" />
-        <div class="text-xs text-ink-500">v{{ config.public.version }}</div>
-      </div>
-    </header>
+    <AppTopBar
+      :company-name="company?.name"
+      :baseline-value="company?.starting_round"
+      :baseline-options="baselineOptions"
+      @update:baseline="setStartingRound"
+    />
 
     <!-- Workspace shell: left-side nav + main content. -->
     <div v-if="companyId" class="flex">
       <aside
-        class="shrink-0 border-r border-ink-300 bg-white min-h-[calc(100vh-3.5rem)] sticky top-14 self-start transition-[width] duration-150"
+        class="shrink-0 border-r border-ink-200 bg-white min-h-[calc(100vh-3rem)] sticky top-12 self-start transition-[width] duration-150"
         :class="navCollapsed ? 'w-14' : 'w-56'"
       >
         <nav class="px-2 py-3 flex flex-col gap-0.5">
@@ -116,10 +83,10 @@ const importHref = computed(() => companyId.value ? `/companies/${companyId.valu
             v-for="t in tabs"
             :key="t.to"
             :to="t.to"
-            class="inline-flex items-center gap-2 px-2.5 py-1.5 text-sm rounded-md transition-colors"
+            class="inline-flex items-center gap-2 px-2.5 py-1.5 text-[12.5px] rounded-md transition-colors"
             :class="[
               route.path === t.to
-                ? 'bg-brand-500 text-white shadow-sm'
+                ? 'bg-brand text-white shadow-sm'
                 : 'text-ink-700 hover:text-ink-900 hover:bg-ink-100',
               navCollapsed ? 'justify-center' : '',
             ]"
@@ -132,7 +99,7 @@ const importHref = computed(() => companyId.value ? `/companies/${companyId.valu
           <NuxtLink
             v-if="importHref"
             :to="importHref"
-            class="inline-flex items-center gap-2 px-2.5 py-1.5 text-sm rounded-md text-ink-500 hover:text-ink-900 hover:bg-ink-100"
+            class="inline-flex items-center gap-2 px-2.5 py-1.5 text-[12.5px] rounded-md text-ink-500 hover:text-ink-900 hover:bg-ink-100"
             :class="navCollapsed ? 'justify-center' : ''"
             :title="navCollapsed ? 'Import Carta' : undefined"
           >
@@ -141,7 +108,7 @@ const importHref = computed(() => companyId.value ? `/companies/${companyId.valu
           </NuxtLink>
           <button
             type="button"
-            class="inline-flex items-center gap-2 px-2.5 py-1.5 mt-1 text-sm rounded-md text-ink-500 hover:text-ink-900 hover:bg-ink-100"
+            class="inline-flex items-center gap-2 px-2.5 py-1.5 mt-1 text-[12.5px] rounded-md text-ink-500 hover:text-ink-900 hover:bg-ink-100"
             :class="navCollapsed ? 'justify-center' : ''"
             :title="navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
             @click="toggleNav"

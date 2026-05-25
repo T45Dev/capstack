@@ -336,6 +336,14 @@ async function deleteRound(roundId: string, label: string) {
 const query = ref('')
 const currentPPS = computed(() => data.value?.current_pps || 0)
 
+// Name of the round currently flagged "open" (used by the page header's
+// status pill). Drafts win when an in-flight kind toggle hasn't committed
+// yet so the pill flips instantly on click.
+const openRoundName = computed<string | null>(() => {
+  const open = roundCols.value.find(r => effectiveKind(r) === 'open')
+  return open ? (open.name || open.code) : null
+})
+
 // Per-table unit visibility.
 const holdUnits = useTableUnits('capstack:cap-table:holdings:units')
 
@@ -644,21 +652,17 @@ function colWidthFor(roundId: string): number {
 
 <template>
   <div v-if="data">
-    <div class="flex items-end justify-between mb-2 gap-3 flex-wrap">
-      <div>
-        <h1 class="text-xl font-semibold tracking-tight text-ink-900">Financings</h1>
-      </div>
-      <div class="flex items-center gap-2 flex-wrap">
-        <NuxtLink :to="`/companies/${id}/import`">
-          <UiButton><Upload :size="14" /> Re-import</UiButton>
-        </NuxtLink>
-      </div>
-    </div>
+    <FinancingsPageHeader
+      :open-round-name="openRoundName"
+      :saving-count="savingCount"
+      :company-id="id"
+      @add-round="addRound"
+    />
 
     <UiEmpty
       v-if="!data.stakeholders.length && !roundCols.length"
       title="No cap table loaded"
-      description="Import a Carta export to populate stakeholders, share classes, and convertibles — or click Add round on the Summary card below to start typing your funding history."
+      description="Import a Carta export to populate stakeholders, share classes, and convertibles — or click Add round above to start typing your funding history."
     >
       <NuxtLink :to="`/companies/${id}/import`"><UiButton variant="primary"><Upload :size="14" /> Import Carta export</UiButton></NuxtLink>
     </UiEmpty>
@@ -676,12 +680,6 @@ function colWidthFor(roundId: string): number {
         subtitle="One column per round — type the values; each cell auto-saves when you tab off."
         :padded="false"
       >
-        <template #header>
-          <div class="flex items-center gap-2">
-            <span v-if="savingCount > 0" class="text-[11px] text-ink-500 italic">Saving…</span>
-            <UiButton @click="addRound"><Plus :size="14" /> Add round</UiButton>
-          </div>
-        </template>
         <div v-if="!roundCols.length" class="px-4 py-8 text-center text-sm text-ink-500">
           No rounds yet. Click <span class="font-medium text-ink-700">Add round</span> to start typing your funding history.
         </div>
