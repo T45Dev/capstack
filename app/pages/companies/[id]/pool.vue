@@ -62,21 +62,16 @@ const fdsIncludingPool = computed(() => {
 type EventType = 'pool_topup' | 'grant' | 'exercise' | 'forfeit' | 'floor' | 'reserve'
 
 function directionFor(type: EventType): -1 | 0 | 1 {
-  // Running balance tracks AVAILABLE over time. Carta's convention:
-  // Authorized stays constant; exercise/forfeit/expire all decrease
-  // Outstanding but DIFFER in what they do to Available.
+  // Running balance tracks AVAILABLE over time. Authorized stays
+  // constant; every lifecycle event that drops Outstanding grows
+  // Available by the same amount (Available = Authorized − Outstanding).
   //   - pool_topup: Authorized grows; Available grows by topup amount
   //   - grant:      Available → Outstanding (Available shrinks)
-  //   - forfeit:    Outstanding → Available (Available grows)
-  //   - expire:     Outstanding → Available (Available grows) — uses
-  //                 'forfeit' type with kind='Expire'
-  //   - exercise:   Outstanding → Common. Outstanding shrinks, but
-  //                 Available does NOT grow — the shares are gone to
-  //                 Common, permanently allocated against the pool.
-  //                 Direction = 0 (informational marker on timeline).
+  //   - forfeit / expire / exercise: Outstanding decreases →
+  //                 Available grows by the same amount.
   //   - reserve:    pre-commit shares for a future grant → Available shrinks
   //   - floor:      a constraint, not a balance change
-  if (type === 'pool_topup' || type === 'forfeit') return 1
+  if (type === 'pool_topup' || type === 'forfeit' || type === 'exercise') return 1
   if (type === 'grant' || type === 'reserve') return -1
   return 0
 }
@@ -181,11 +176,10 @@ const events = computed<TimelineEvent[]>(() => {
     // the UI it's a guess).
     const grantBaseDate = g.issue_date || g.vesting_start || fallbackDate.value
     if (g.quantity_exercised && g.quantity_exercised > 0) {
-      // Exercise: Outstanding → Common. Outstanding shrinks but
-      // Authorized AND Available do not change (Carta's convention —
-      // exercised shares stay allocated against the pool). Direction
-      // = 0: event shows as a timeline marker but doesn't move the
-      // chart line.
+      // Exercise: Outstanding → Common. Outstanding drops; Available
+      // grows by the same amount (Authorized = Out + Avail and
+      // Authorized is constant). Direction = +1: chart line steps up,
+      // matching forfeit/expire.
       out.push({
         id: `exercise:${g.id}`,
         date: g.last_exercised_date || grantBaseDate,
@@ -194,7 +188,7 @@ const events = computed<TimelineEvent[]>(() => {
         type: 'exercise',
         kind: null,
         shares: g.quantity_exercised,
-        direction: 0,
+        direction: 1,
         source: 'grant_outstanding',
         grantId: g.id,
       })
@@ -387,23 +381,19 @@ const totals = computed(() => {
   // Idea exercises shrink Authorized (per the mental model table).
   const ideaExercises = events.value.filter(e => isIdea(e.source) && e.type === 'exercise').reduce((a, e) => a + e.shares, 0)
   const floorShares = events.value.filter(e => isIdea(e.source) && e.type === 'floor').reduce((a, e) => Math.max(a, e.shares), 0)
-  // Authorized stays CONSTANT (Carta's convention). Carta's pool
-  // accounting:
-  //   - Outstanding = Issued − Exercised − Forfeited − Expired
-  //     (drops on every lifecycle event)
-  //   - Forfeit / Expire: shares return to Available (Outstanding ↓,
-  //     Available ↑)
-  //   - Exercise: shares move to Common — Outstanding drops but
-  //     Available does NOT grow. They're allocated against the pool
-  //     permanently.
-  // So Available subtracts BOTH Outstanding AND Exercised:
-  //   Available = Authorized − Outstanding − Exercised − Proposed
+  // Authorized stays CONSTANT. Available is solved from the identity:
+  //   Authorized = Outstanding + Proposed + Available
+  //   Available  = Authorized − Outstanding − Proposed
+  // Outstanding already excludes Exercised / Forfeited / Expired (it's
+  // Issued − all three), so those shares flow into Available implicitly.
+  // The lifetime decomposition row shows the breakdown for audit.
   const poolAuthorized = poolAuthorizedOriginal
-  const available = poolAuthorized - outstandingShares - totalExercised - proposedShares
-  // Projected end-state Available after applying all ideas: grants,
-  // reserves, AND idea exercises all subtract from Available; topups
-  // and forfeits add to it.
-  const projectedEnd = poolAuthorized + ideaTopups + ideaForfeits - outstandingShares - totalExercised - proposedShares - ideaGrants - ideaExercises
+  const available = poolAuthorized - outstandingShares - proposedShares
+  // Projected end-state Available after applying all ideas: grants
+  // and reserves subtract from Available; topups, forfeits, AND idea
+  // exercises all grow it (each shrinks Outstanding under a constant
+  // Authorized).
+  const projectedEnd = poolAuthorized + ideaTopups + ideaForfeits + ideaExercises - outstandingShares - proposedShares - ideaGrants
   return { poolAuthorized, outstandingShares, proposedShares, ideaGrants, ideaTopups, ideaForfeits, ideaExercises, floorShares, available, projectedEnd, totalExercised, totalForfeited, totalExpired, totalForfeitedOrExpired, totalIssued }
 })
 
@@ -666,12 +656,12 @@ const chart = computed(() => {
     <!-- Overall heading: pool math as equation + lifetime row + pie/line
          charts side-by-side. Stays put while the timeline below scrolls. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-4 p-4 shrink-0">
-      <!-- Pool math equation (matches Carta's accounting):
-             Authorized = Outstanding + Exercised + Proposed + Available
-           Exercised shares are permanently allocated against the pool
-           (gone to Common). Forfeited/Expired aren't shown explicitly
-           because they're already excluded from Outstanding — they flow
-           into Available implicitly. -->
+      <!-- Pool math equation:
+             Authorized = Outstanding + Proposed + Available
+           Exercised / Forfeited / Expired are already pulled out of
+           Outstanding (= Issued − all three), so they flow into
+           Available implicitly. Lifetime row below shows the breakdown
+           for audit. -->
       <div class="flex flex-wrap items-end gap-3 text-ink-900 num">
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Pool authorized</span>
@@ -681,11 +671,6 @@ const chart = computed(() => {
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Outstanding</span>
           <span class="text-2xl font-semibold">{{ fmtShares(totals.outstandingShares) }}</span>
-        </div>
-        <span v-if="totals.totalExercised > 0" class="text-2xl text-ink-400 pb-1">+</span>
-        <div v-if="totals.totalExercised > 0" class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Exercised options have moved to Common stock but stay allocated against the pool.">Exercised</span>
-          <span class="text-2xl font-semibold text-accent-700">{{ fmtShares(totals.totalExercised) }}</span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">+</span>
         <div class="flex flex-col items-start">
@@ -707,24 +692,23 @@ const chart = computed(() => {
            + (Forfeited+Expired). Forfeit and Expire have identical
            pool effect (Outstanding → Available with Authorized
            unchanged), so they're combined here. -->
-      <div class="mt-3 pt-3 border-t border-ink-200 flex flex-wrap items-end gap-3 text-ink-700 num text-sm">
+      <!-- Lifetime decomposition. Where every option ever issued is
+           now — not a formula, just the breakdown for audit. -->
+      <div class="mt-3 pt-3 border-t border-ink-200 flex flex-wrap items-end gap-x-5 gap-y-2 text-ink-700 num text-sm">
         <span class="text-[10px] uppercase tracking-wider text-ink-500">Lifetime</span>
         <div class="flex items-end gap-1.5">
           <span class="text-ink-500">Issued</span>
           <span class="font-medium">{{ fmtShares(totals.totalIssued) }}</span>
         </div>
-        <span class="text-ink-400">=</span>
         <div class="flex items-end gap-1.5">
           <span class="text-ink-500">Outstanding</span>
           <span class="font-medium">{{ fmtShares(totals.outstandingShares) }}</span>
         </div>
-        <span class="text-ink-400">+</span>
         <div class="flex items-end gap-1.5">
-          <span class="text-ink-500">Exercised</span>
+          <span class="text-ink-500" title="Exercised → Common Stock (left the pool entirely)">Exercised</span>
           <span class="font-medium" :class="totals.totalExercised > 0 ? 'text-accent-700' : 'text-ink-400'">{{ fmtShares(totals.totalExercised) }}</span>
         </div>
-        <span class="text-ink-400">+</span>
-        <div class="flex items-end gap-1.5" :title="`Forfeited ${fmtShares(totals.totalForfeited)} + Expired ${fmtShares(totals.totalExpired)}`">
+        <div class="flex items-end gap-1.5" :title="`Forfeited (unvested at termination) ${fmtShares(totals.totalForfeited)} + Expired (vested but unexercised) ${fmtShares(totals.totalExpired)} — both returned to Available`">
           <span class="text-ink-500">Forfeited/Expired</span>
           <span class="font-medium" :class="totals.totalForfeitedOrExpired > 0 ? 'text-red-700' : 'text-ink-400'">{{ fmtShares(totals.totalForfeitedOrExpired) }}</span>
         </div>

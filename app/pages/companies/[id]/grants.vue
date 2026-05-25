@@ -123,19 +123,16 @@ const totalProposed = computed(() => proposed.value.reduce((a, g) => a + g.quant
 // the Financings page). Falls back to option_pools (Carta import) when
 // no per-round values are set. Pool Impact uses the same source.
 //
-// Authorized stays CONSTANT — matching Carta's convention. The pool
-// math model:
-//   - Outstanding = Issued − Exercised − Forfeited − Expired
-//     (drops on every lifecycle event)
-//   - Forfeit / Expire: return shares to Available (Outstanding ↓,
-//     Available ↑)
-//   - Exercise: shares move to Common — Outstanding ↓ but Available
-//     does NOT grow. They're permanently allocated against the pool.
-// So Available subtracts BOTH Outstanding AND Exercised:
-//   Available = Authorized − Outstanding − Exercised − Proposed
-// (Authorized = Out + Available doesn't hold strictly when Exercised
-// > 0; the missing slice is the Exercised bucket — shares allocated
-// to Common but still counted against the pool's used capacity.)
+// Authorized stays constant. The headline equation:
+//   Authorized = Outstanding + Proposed + Available
+// Outstanding = Issued − Exercised − Forfeited − Expired (current held).
+// Every lifecycle event (exercise, forfeit, expire) decreases
+// Outstanding, so Available picks up the difference — including
+// exercised shares. Conceptually: those shares are no longer
+// outstanding, so they're available for new grants under the same
+// authorization. The lifetime decomposition row below tracks where
+// every option ever issued went (still allocated, gone to Common,
+// returned to pool).
 const poolAuthorized = computed(() => {
   const fromRounds = (roundSummary.value?.rounds || [])
     .reduce((a: number, r: any) => a + (r.option_pool_issued || 0), 0)
@@ -143,7 +140,7 @@ const poolAuthorized = computed(() => {
   return data.value!.pools.reduce((a, p) => a + p.authorized, 0)
 })
 const poolAvailable = computed(() =>
-  poolAuthorized.value - totalOutstanding.value - totalExercised.value - totalProposed.value,
+  poolAuthorized.value - totalOutstanding.value - totalProposed.value,
 )
 
 // FDS denominator for the % toggle. Holdings + outstanding options + available pool.
@@ -623,16 +620,14 @@ const fieldLabels: Record<string, string> = {
     </div>
 
     <!-- Pool math (Carta's accounting):
-           Authorized = Outstanding + Exercised + Proposed + Available
-         Exercised shares stay subtracted from Available — they've
-         moved to Common but remain allocated against the pool.
-         Forfeited/Expired don't appear explicitly because they're
-         already excluded from Outstanding (which is Issued − Ex −
-         Forf − Exp); they flow into Available implicitly.
-         Authorized is the 4xl headline, color-coded by Available's sign
-         (green = headroom, red = over-allocated). Outstanding is
-         subdued (lifecycle state). Exercised + Proposed + Available
-         are the live numbers. -->
+           Authorized = Outstanding + Proposed + Available
+         Exercised, Forfeited, and Expired don't appear in the headline
+         equation — they've already been pulled out of Outstanding
+         (= Issued − Exercised − Forfeited − Expired) and flow into
+         Available implicitly via Authorized − Outstanding.
+         Lifetime row below shows the decomposition for audit (no
+         formula — just the breakdown of where every option ever
+         issued went). -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-6 p-4">
       <div class="flex flex-wrap items-end gap-3 num">
         <div class="flex flex-col items-start">
@@ -647,13 +642,6 @@ const fieldLabels: Record<string, string> = {
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Outstanding</span>
           <span class="text-lg font-medium text-ink-500">{{ fmtShares(totalOutstanding) }}</span>
         </div>
-        <template v-if="totalExercised > 0">
-          <span class="text-2xl text-ink-400 pb-1">+</span>
-          <div class="flex flex-col items-start">
-            <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Exercised options have moved to Common stock but stay allocated against the pool.">Exercised</span>
-            <span class="text-2xl font-semibold text-accent-700">{{ fmtShares(totalExercised) }}</span>
-          </div>
-        </template>
         <span class="text-2xl text-ink-400 pb-1">+</span>
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Proposed</span>
@@ -668,29 +656,25 @@ const fieldLabels: Record<string, string> = {
           >{{ fmtShares(poolAvailable) }}</span>
         </div>
       </div>
-      <!-- Lifetime row: Issued = Outstanding + Exercised + Forfeited/
-           Expired. Decomposes every option ever granted into where
-           those shares are now (live, gone to common, or returned to
-           Available). Forfeit and Expire are combined — they have
-           identical pool effect; Carta tracks them separately for
-           audit and the split is visible on tooltip. -->
-      <div class="mt-3 pt-3 border-t border-ink-200 flex flex-wrap items-end gap-3 text-ink-700 num text-sm">
-        <span class="text-[10px] uppercase tracking-wider text-ink-500">Lifetime issued</span>
+      <!-- Lifetime decomposition. Where every option ever issued is
+           now — not a formula, just the breakdown. Forfeit/Expire is
+           lumped (same pool effect — both shares return to Available);
+           tooltip shows the split. -->
+      <div class="mt-3 pt-3 border-t border-ink-200 flex flex-wrap items-end gap-x-5 gap-y-2 text-ink-700 num text-sm">
+        <span class="text-[10px] uppercase tracking-wider text-ink-500">Lifetime</span>
         <div class="flex items-end gap-1.5">
+          <span class="text-ink-500">Issued</span>
           <span class="font-medium">{{ fmtShares(totalIssued) }}</span>
-          <span class="text-ink-500">=</span>
         </div>
         <div class="flex items-end gap-1.5">
           <span class="text-ink-500">Outstanding</span>
           <span class="font-medium">{{ fmtShares(totalOutstanding) }}</span>
         </div>
-        <span class="text-ink-400">+</span>
         <div class="flex items-end gap-1.5">
           <span class="text-ink-500" title="Exercised → Common Stock (left the pool entirely)">Exercised</span>
           <span class="font-medium" :class="totalExercised > 0 ? 'text-accent-700' : 'text-ink-400'">{{ fmtShares(totalExercised) }}</span>
         </div>
-        <span class="text-ink-400">+</span>
-        <div class="flex items-end gap-1.5" :title="`Forfeited (unvested at termination) ${fmtShares(totalForfeited)} + Expired (vested but unexercised) ${fmtShares(totalExpired)} — both return shares to Available`">
+        <div class="flex items-end gap-1.5" :title="`Forfeited (unvested at termination) ${fmtShares(totalForfeited)} + Expired (vested but unexercised) ${fmtShares(totalExpired)} — both returned to Available`">
           <span class="text-ink-500">Forfeited/Expired</span>
           <span class="font-medium" :class="totalForfeitedOrExpired > 0 ? 'text-red-700' : 'text-ink-400'">{{ fmtShares(totalForfeitedOrExpired) }}</span>
         </div>
