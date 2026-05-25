@@ -2,6 +2,14 @@
 // Overall Dilution — simple table: per-stakeholder pre/post shares and
 // ownership %, plus the Δ% that shows the dilution effect of the open
 // round at a glance. Sorted by Δ% ascending (most-diluted at top).
+//
+// Denominators (per user spec):
+//   - post% denominator = the open round's total FDS (from Financings)
+//   - pre%  denominator = the round IMMEDIATELY BEFORE the open round's
+//                         total FDS (from Financings)
+// This is what produces visible dilution: most existing holders'
+// share counts don't change in a new round, but the denominator
+// grows, so their % drops.
 import { fmtPct, fmtShares } from '~/utils/format'
 
 const route = useRoute()
@@ -13,14 +21,27 @@ const { data: compute } = await useFetch(() => `/api/companies/${id.value}/compu
   body: computeBody,
   watch: [id],
 })
-const { data: roundSummary } = await useFetch<{ rounds: Array<{ code: string; name: string | null; kind: string }> }>(
+const { data: roundSummary } = await useFetch<{ rounds: Array<{ code: string; name: string | null; kind: string; total_shares_fds: number }> }>(
   () => `/api/companies/${id.value}/round-summary`,
   { watch: [id], default: () => ({ rounds: [] }) },
 )
-const openRoundName = computed(() => {
-  const r = roundSummary.value?.rounds.find(x => x.kind === 'open')
-  return r?.name || r?.code || 'open round'
+
+// Identify the open round and the round immediately before it in the
+// chronological round list. roundSummary returns rounds sorted with
+// the open round last (closed rounds first by close_date), so the
+// "previous" round is the one at openIndex - 1.
+const openRound = computed(() => roundSummary.value?.rounds.find(r => r.kind === 'open') || null)
+const openRoundName = computed(() => openRound.value?.name || openRound.value?.code || 'open round')
+const previousRound = computed(() => {
+  const rounds = roundSummary.value?.rounds || []
+  const openIdx = rounds.findIndex(r => r.kind === 'open')
+  if (openIdx <= 0) return null
+  return rounds[openIdx - 1] || null
 })
+
+// Denominators from the Financings table.
+const preFDS = computed(() => previousRound.value?.total_shares_fds || 0)
+const postFDS = computed(() => openRound.value?.total_shares_fds || 0)
 
 interface DilRow {
   stakeholderId: string
@@ -35,16 +56,22 @@ interface DilRow {
 
 const rows = computed<DilRow[]>(() => {
   const list = (compute.value?.dilution || []) as any[]
-  return list.map(d => ({
-    stakeholderId: d.stakeholderId,
-    name: d.name,
-    type: d.type || null,
-    preShares: d.preShares || 0,
-    postShares: d.postShares || 0,
-    prePct: d.prePct || 0,
-    postPct: d.postPct || 0,
-    isNewRound: String(d.stakeholderId).startsWith('new:') || String(d.stakeholderId).startsWith('idea:'),
-  }))
+  const pre = preFDS.value
+  const post = postFDS.value
+  return list.map(d => {
+    const preShares = d.preShares || 0
+    const postShares = d.postShares || 0
+    return {
+      stakeholderId: d.stakeholderId,
+      name: d.name,
+      type: d.type || null,
+      preShares,
+      postShares,
+      prePct: pre > 0 ? preShares / pre : 0,
+      postPct: post > 0 ? postShares / post : 0,
+      isNewRound: String(d.stakeholderId).startsWith('new:') || String(d.stakeholderId).startsWith('idea:'),
+    }
+  })
 })
 
 // Sort by Δ% ascending — most-diluted (largest negative Δ) at the
@@ -73,6 +100,27 @@ function barWidth(pct: number): string {
         <span class="font-medium text-accent-700">post-{{ openRoundName }}</span>.
         Δ% = post − pre; red = dilution, green = growth.
       </p>
+      <!-- Surface the two denominators so the math reads honestly:
+           pre% uses the round-before-open's total FDS, post% uses the
+           open round's total FDS. Both come from the Financings table
+           (round-summary endpoint). -->
+      <div v-if="openRound" class="mt-2 text-[11px] num text-ink-500 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span>
+          <span class="uppercase tracking-wider">Pre FDS</span>
+          <span class="ml-1 text-ink-700">{{ fmtShares(preFDS) }}</span>
+          <span v-if="previousRound" class="ml-0.5 text-ink-400">({{ previousRound.name || previousRound.code }})</span>
+          <span v-else class="ml-0.5 text-amber-700">(no round before open — pre% will be 0)</span>
+        </span>
+        <span class="text-ink-300">·</span>
+        <span>
+          <span class="uppercase tracking-wider">Post FDS</span>
+          <span class="ml-1 text-ink-700">{{ fmtShares(postFDS) }}</span>
+          <span class="ml-0.5 text-ink-400">({{ openRound.name || openRound.code }})</span>
+        </span>
+      </div>
+      <div v-else class="mt-2 text-[11px] text-amber-700">
+        No round is flagged as "Open" on the Financings page — set one to model dilution against it.
+      </div>
     </div>
 
     <!-- Table -->
