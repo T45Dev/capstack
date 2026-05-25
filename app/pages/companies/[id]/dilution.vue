@@ -108,11 +108,13 @@ const proposedTotal = computed(() => {
   return total
 })
 const preFDS = computed(() => previousRound.value?.total_shares_fds || 0)
-const postFDS = computed(() => {
-  const base = openRound.value?.total_shares_fds || 0
-  if (!includeFuture.value) return base
-  return base + proposedTotal.value + ideaConsumingShares.value
-})
+// PostFDS is STATIC — it's the open round's total_shares_fds, which
+// already includes the option pool authorization. Proposed grants
+// and idea grants don't grow the denominator; they just attribute
+// some of the already-counted Available pool capacity to specific
+// holders. (Sum of postShares + remaining unattributed Available =
+// postFDS.)
+const postFDS = computed(() => openRound.value?.total_shares_fds || 0)
 
 interface DilRow {
   stakeholderId: string
@@ -303,7 +305,7 @@ function fmtDeltaUSD(n: number): string {
         <span>
           <span class="uppercase tracking-wider">Post FDS</span>
           <span class="ml-1 text-ink-700">{{ fmtShares(postFDS) }}</span>
-          <span class="ml-0.5 text-ink-400">({{ openRound.name || openRound.code }}<span v-if="includeFuture"> + future</span>)</span>
+          <span class="ml-0.5 text-ink-400">({{ openRound.name || openRound.code }})</span>
         </span>
         <span v-if="pps > 0" class="text-ink-300">·</span>
         <span v-if="pps > 0">
