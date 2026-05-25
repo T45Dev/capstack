@@ -53,7 +53,9 @@ interface RoundColumn {
     id: string
     stakeholderName: string
     destinationCode: string | null
-    dollars: number
+    dollars: number      // = principal + accrued (the converting amount)
+    principal: number
+    accrued: number
     shares: number
   }>
 }
@@ -156,6 +158,8 @@ export default defineEventHandler((event) => {
     id: string                  // for the per-cell tooltip diagnostic
     stakeholderName: string
     total: number               // principal + accrued interest
+    principal: number           // split out for tooltip breakdown
+    accrued: number             // ditto
     storedConvPrice: number     // Carta-imported or user-typed
     discount: number
     cap: number
@@ -179,7 +183,9 @@ export default defineEventHandler((event) => {
   let attributedCnDollars = 0
 
   for (const c of cnRows) {
-    const total = (c.principal || 0) + accruedInterestFor(c)
+    const principal = c.principal || 0
+    const accrued = accruedInterestFor(c)
+    const total = principal + accrued
     if (total <= 0) continue
     const codeRaw = c.destination_class_code ? String(c.destination_class_code).replace(/-\d+$/, '').toUpperCase() : ''
     const excluded = c.include_in_summary === 0
@@ -206,6 +212,8 @@ export default defineEventHandler((event) => {
       id: c.id,
       stakeholderName: c.stakeholder_name || '',
       total,
+      principal,
+      accrued,
       storedConvPrice: c.conversion_price && c.conversion_price > 0 ? c.conversion_price : 0,
       discount: c.conversion_discount || 0,
       cap: c.valuation_cap || 0,
@@ -301,6 +309,8 @@ export default defineEventHandler((event) => {
         stakeholderName: a.stakeholderName,
         destinationCode: a.destinationCode,
         dollars: a.total,
+        principal: a.principal,
+        accrued: a.accrued,
         shares: sharesForThisCn,
       })
     }

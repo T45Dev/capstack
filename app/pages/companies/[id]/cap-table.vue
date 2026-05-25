@@ -49,6 +49,8 @@ interface RoundColumn {
     stakeholderName: string
     destinationCode: string | null
     dollars: number
+    principal: number
+    accrued: number
     shares: number
   }>
 }
