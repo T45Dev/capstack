@@ -326,7 +326,7 @@ function exportCsv() {
 
     <!-- Convertible notes tab: just the CN ledger, full width. -->
     <div v-show="activeTab === 'notes'">
-      <CnLedger :company-id="id" @refreshed="refreshRoundSummary" />
+      <CnLedger :company-id="id" :rounds="roundCols" @refreshed="refreshRoundSummary" />
     </div>
 
     <!-- Preferred investors tab: per-investor allocation matrix —

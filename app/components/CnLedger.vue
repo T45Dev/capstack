@@ -8,7 +8,16 @@ import { CheckSquare, Square } from 'lucide-vue-next'
 import { fmtUSD, fmtPricePerShare, fmtPct } from '~/utils/format'
 import type { EditableCol } from '~/components/ui/UiEditableTable.vue'
 
-const props = defineProps<{ companyId: string }>()
+// `rounds` is provided by the parent (cap-table.vue) — the same array
+// that drives the Financings matrix. CnLedger reads from it for the
+// Destination dropdown so adding a round on the Financings tab shows up
+// here immediately, no refresh needed. Falling back to an empty array
+// keeps the component composable in isolation (tests / Storybook).
+interface RoundLite { code: string; name: string | null; kind: 'formation' | 'closed' | 'open'; share_class_code: string | null }
+const props = defineProps<{
+  companyId: string
+  rounds?: RoundLite[]
+}>()
 const emit = defineEmits<{ refreshed: [] }>()
 
 interface CnRow {
@@ -31,7 +40,9 @@ interface CnRow {
 
 const companyId = computed(() => props.companyId)
 
-const { data: roundSummary } = await useFetch<{ rounds: Array<{ code: string; name: string | null; kind: 'formation' | 'closed' | 'open'; share_class_code: string | null }> }>(() => `/api/companies/${companyId.value}/round-summary`, { watch: [companyId], default: () => ({ rounds: [] }) })
+// Rounds come from the parent. Wrap in a computed-with-default for the
+// existing read sites (`roundSummary.value?.rounds`).
+const roundSummary = computed(() => ({ rounds: props.rounds || [] }))
 
 const { data: convertibles, refresh: refreshConvertibles } = await useFetch<{ convertibles: CnRow[] }>(() => `/api/companies/${companyId.value}/convertibles`, { watch: [companyId], default: () => ({ convertibles: [] }) })
 
@@ -73,15 +84,20 @@ const roundsByCode = computed(() => {
   return m
 })
 
+// Destinations the operator can pick from. UiEditableTable's <select> emits
+// its own "no selection" default (renders as "—") that maps to null on the
+// model, so we DON'T add an explicit "Unassigned" entry here — that would
+// double up with the default and confuse the operator about which one means
+// what. When the rounds list is empty we surface a hint above the table
+// instead of polluting the dropdown.
 const destinationOptions = computed(() => {
-  const opts: Array<{ value: string; label: string }> = [
-    { value: '', label: '— Unassigned' },
-  ]
-  for (const r of (roundSummary.value?.rounds || [])) {
-    opts.push({ value: r.code, label: roundLabel(r) })
-  }
-  return opts
+  return (roundSummary.value?.rounds || []).map(r => ({ value: r.code, label: roundLabel(r) }))
 })
+
+// Are there any rounds at all? Drives the "Add a round first" callout when
+// CNs exist but the operator hasn't seeded rounds yet (typical first-load
+// flow after a Carta import — the importer doesn't auto-create rounds).
+const hasRounds = computed(() => (roundSummary.value?.rounds?.length || 0) > 0)
 
 const cnCols = computed<EditableCol[]>(() => {
   const cols: EditableCol[] = [
@@ -293,10 +309,27 @@ async function onDelete(row: CnRow) {
       <div>
         <h2 class="text-base font-semibold text-ink-900">Convertible notes</h2>
         <p class="text-xs text-ink-500 mt-0.5">
-          Attribute each note to a round above. Notes ticked "In summary" roll up into that round's Notes financing / Notes converted cells.
+          Attribute each note to a round on the Financings tab. Notes ticked "In summary" roll up into that round's Notes financing / Notes converted cells.
         </p>
       </div>
       <TableUnitsToggle storage-key="capstack:cn-detail:units" />
+    </div>
+
+    <!-- Add-a-round-first callout. Imported CNs need a round to attribute
+         to, but the importer never seeds rounds (they're user-managed on
+         the Financings tab). Surface this clearly when the state is
+         "CNs exist but no rounds yet" so the operator knows what to do
+         next instead of staring at an empty Destination dropdown. -->
+    <div
+      v-if="rows.length > 0 && !hasRounds"
+      class="mb-3 px-3 py-2 rounded-md border border-warn/30 bg-warn-soft text-warn text-[12px] flex items-center justify-between gap-3 num"
+    >
+      <div class="flex-1">
+        <div class="font-medium">No rounds yet — CNs can't be attributed until you add some.</div>
+        <div class="text-[11px] mt-0.5 opacity-90">
+          Switch to the <span class="font-medium">Financings</span> tab and click <span class="font-medium">Add round</span> for each round on your cap-stack history. The Destination dropdown below will populate as you go.
+        </div>
+      </div>
     </div>
 
     <!-- Bulk-reassign toolbar: filter by current destination state, then

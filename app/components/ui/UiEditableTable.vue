@@ -220,7 +220,14 @@ function isEditingRow(row: T): boolean {
               @click.stop="!isEditingRow(row) && startEdit(row)"
             >
               <template v-if="isEditingRow(row) && col.editable">
-                <label class="cell-edit block">
+                <label v-if="col.type === 'date'" class="cell-edit block">
+                  <DateInput
+                    variant="bare"
+                    :model-value="(draft[col.key] as string | null) ?? null"
+                    @update:model-value="(v) => draft[col.key] = v"
+                  />
+                </label>
+                <label v-else class="cell-edit block">
                   <input
                     v-if="col.type === 'text' || !col.type"
                     v-model="draft[col.key]"
@@ -254,13 +261,6 @@ function isEditingRow(row: T): boolean {
                     type="number"
                     :step="col.step ?? '0.01'"
                     class="text-right"
-                    @keydown.enter="saveEdit(row)"
-                    @keydown.esc="cancelEdit"
-                  />
-                  <input
-                    v-else-if="col.type === 'date'"
-                    v-model="draft[col.key]"
-                    type="date"
                     @keydown.enter="saveEdit(row)"
                     @keydown.esc="cancelEdit"
                   />
@@ -302,7 +302,14 @@ function isEditingRow(row: T): boolean {
               :class="col.align === 'right' ? 'text-right' : (col.align === 'center' ? 'text-center' : 'text-left')"
             >
               <template v-if="col.editable">
-                <label class="cell-edit block">
+                <label v-if="col.type === 'date'" class="cell-edit block">
+                  <DateInput
+                    variant="bare"
+                    :model-value="(draft[col.key] as string | null) ?? null"
+                    @update:model-value="(v) => draft[col.key] = v"
+                  />
+                </label>
+                <label v-else class="cell-edit block">
                   <input
                     v-if="col.type === 'text' || !col.type"
                     v-model="draft[col.key]"
@@ -335,13 +342,6 @@ function isEditingRow(row: T): boolean {
                     type="number"
                     :step="col.step ?? '0.01'"
                     class="text-right"
-                    @keydown.enter="commitAdd"
-                    @keydown.esc="cancelEdit"
-                  />
-                  <input
-                    v-else-if="col.type === 'date'"
-                    v-model="draft[col.key]"
-                    type="date"
                     @keydown.enter="commitAdd"
                     @keydown.esc="cancelEdit"
                   />

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { normalizeDate } from '~/utils/format'
 import NumberInput from './NumberInput.vue'
+import DateInput from './DateInput.vue'
 
 interface Props {
   modelValue?: string | number | null
@@ -27,15 +27,8 @@ function onInput(e: Event) {
   emit('update:modelValue', t.value)
 }
 
-// Fix Chrome's "type a 2-digit year" gotcha — committing "0026-09-09" gets
-// promoted to "2026-09-09" so the user sees what they meant.
 function onChange(e: Event) {
-  const raw = (e.target as HTMLInputElement).value
-  if (props.type === 'date') {
-    const normalized = normalizeDate(raw)
-    if (normalized !== raw) emit('update:modelValue', normalized)
-  }
-  emit('change', raw)
+  emit('change', (e.target as HTMLInputElement).value)
 }
 </script>
 
@@ -43,8 +36,9 @@ function onChange(e: Event) {
   <label class="block">
     <span v-if="label" class="block text-xs font-medium text-ink-700 mb-1">{{ label }}</span>
     <!-- Numeric fields delegate to NumberInput so they pick up the global
-         friendly-format standard ($, commas, focus/blur swap). Other types
-         (text, date, …) stay with the native input. -->
+         friendly-format standard ($, commas, focus/blur swap). Date fields
+         delegate to DateInput for robust parse-on-blur. Other types stay
+         with the native input. -->
     <NumberInput
       v-if="type === 'number'"
       :model-value="modelValue == null || modelValue === '' ? null : Number(modelValue)"
@@ -55,6 +49,15 @@ function onChange(e: Event) {
       :digits="digits"
       :step="step"
       @update:model-value="(v) => emit('update:modelValue', v)"
+    />
+    <DateInput
+      v-else-if="type === 'date'"
+      variant="boxed"
+      :model-value="(modelValue as string | null) ?? null"
+      :placeholder="placeholder || 'MM/DD/YYYY'"
+      :disabled="disabled"
+      @update:model-value="(v) => emit('update:modelValue', v)"
+      @change="(v) => emit('change', v)"
     />
     <div v-else class="relative">
       <span v-if="prefix" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-500 text-sm pointer-events-none">{{ prefix }}</span>
@@ -72,6 +75,6 @@ function onChange(e: Event) {
       />
       <span v-if="suffix" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-500 text-xs pointer-events-none">{{ suffix }}</span>
     </div>
-    <p v-if="hint" class="mt-1 text-xs text-ink-500">{{ hint }}</p>
+    <p v-if="hint && type !== 'date'" class="mt-1 text-xs text-ink-500">{{ hint }}</p>
   </label>
 </template>
