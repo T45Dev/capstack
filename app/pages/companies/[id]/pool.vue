@@ -399,21 +399,18 @@ const totals = computed(() => {
   // Idea exercises shrink Authorized (per the mental model table).
   const ideaExercises = events.value.filter(e => isIdea(e.source) && e.type === 'exercise').reduce((a, e) => a + e.shares, 0)
   const floorShares = events.value.filter(e => isIdea(e.source) && e.type === 'floor').reduce((a, e) => Math.max(a, e.shares), 0)
-  // Authorized stays CONSTANT. Available = Authorized minus everything
-  // that's been "carved out" — Outstanding options + Exercised options
-  // (which became Common stock and ARE NOT coming back) + Proposed +
-  // hypothetical consuming Ideas. Forfeited/Expired return to the pool
-  // (they're already excluded from Outstanding); Exercised does NOT.
-  // Equation:
-  //   Authorized = Outstanding + Exercised + Proposed + Ideas + Available
+  // Authorized stays CONSTANT. The headline tells a simple story:
+  //   Authorized − Outstanding = Available − Proposed − Ideas = Future Available
+  // "Outstanding" in the headline lumps active grants + exercised options
+  // (both have permanently left the pool — Exercised converted to Common
+  // and DOESN'T return). The Lifetime row below splits them out for audit.
+  // Forfeited/Expired DO return; they're already excluded from
+  // outstandingShares (the per-grant counts net them out).
   const poolAuthorized = poolAuthorizedOriginal
-  const available = poolAuthorized - outstandingShares - totalExercised - proposedShares - ideaGrants
-  // Projected = Available plus idea events that ADD to it (top-ups,
-  // forfeits). Idea exercises don't grow Available — same logic as
-  // historical exercises. projectedEnd shows what Available would be
-  // if every queued idea lands.
-  const projectedEnd = available + ideaTopups + ideaForfeits
-  return { poolAuthorized, outstandingShares, proposedShares, ideaGrants, ideaTopups, ideaForfeits, ideaExercises, floorShares, available, projectedEnd, totalExercised, totalForfeited, totalExpired, totalForfeitedOrExpired, totalIssued }
+  const outOfPool = outstandingShares + totalExercised
+  const availableShares = poolAuthorized - outOfPool
+  const futureAvailable = availableShares - proposedShares - ideaGrants
+  return { poolAuthorized, outstandingShares, outOfPool, proposedShares, ideaGrants, ideaTopups, ideaForfeits, ideaExercises, floorShares, availableShares, futureAvailable, totalExercised, totalForfeited, totalExpired, totalForfeitedOrExpired, totalIssued }
 })
 
 // ---- Idea modal ----
@@ -682,42 +679,46 @@ const chart = computed(() => {
     <!-- Overall heading: pool math as equation + lifetime row + pie/line
          charts side-by-side. Stays put while the timeline below scrolls. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-4 p-4 shrink-0">
-      <!-- Pool math equation:
-             Authorized = Outstanding + Exercised + Proposed + Ideas + Available
-           Exercised shares converted to Common stock — they were carved
-           out of the pool the moment they were granted and DON'T return
-           on exercise. Forfeit/Expire DO return (they're already excluded
-           from Outstanding, which flows into Available via the
-           subtraction). Lifetime row below shows the breakdown. -->
+      <!-- Pool math (simplified):
+             Authorized − Outstanding = Available − Proposed − Ideas = Future Available
+           "Outstanding" lumps active grants + exercised options (both have
+           permanently left the pool). When exercised > 0, the tooltip on
+           Outstanding splits the two; the Lifetime row below always shows
+           the full breakdown for audit. -->
       <div class="flex flex-wrap items-end gap-3 text-ink-900 num">
         <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Pool authorized</span>
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Authorized</span>
           <span class="text-2xl font-semibold">{{ fmtShares(totals.poolAuthorized) }}</span>
+        </div>
+        <span class="text-2xl text-ink-400 pb-1">−</span>
+        <div
+          class="flex flex-col items-start"
+          :title="totals.totalExercised > 0
+            ? `Active grants ${fmtShares(totals.outstandingShares)} + Exercised options ${fmtShares(totals.totalExercised)} — both out of the pool (exercised converted to Common stock).`
+            : ''"
+        >
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Outstanding</span>
+          <span class="text-2xl font-semibold">{{ fmtShares(totals.outOfPool) }}</span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">=</span>
         <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Outstanding</span>
-          <span class="text-2xl font-semibold">{{ fmtShares(totals.outstandingShares) }}</span>
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Available</span>
+          <span class="text-2xl font-semibold" :class="totals.availableShares < 0 ? 'text-red-700' : 'text-ok'">{{ fmtShares(totals.availableShares) }}</span>
         </div>
-        <span v-if="totals.totalExercised > 0" class="text-2xl text-ink-400 pb-1">+</span>
-        <div v-if="totals.totalExercised > 0" class="flex flex-col items-start" title="Exercised options converted to Common stock. Out of the pool permanently — not returning to Available.">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Exercised</span>
-          <span class="text-2xl font-semibold text-ink-500">{{ fmtShares(totals.totalExercised) }}</span>
-        </div>
-        <span class="text-2xl text-ink-400 pb-1">+</span>
+        <span class="text-2xl text-ink-400 pb-1">−</span>
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Proposed</span>
           <span class="text-2xl font-semibold text-warn">{{ fmtShares(totals.proposedShares) }}</span>
         </div>
-        <span v-if="totals.ideaGrants > 0" class="text-2xl text-ink-400 pb-1">+</span>
-        <div v-if="totals.ideaGrants > 0" class="flex flex-col items-start">
+        <span class="text-2xl text-ink-400 pb-1">−</span>
+        <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Ideas</span>
           <span class="text-2xl font-semibold text-amber-500">{{ fmtShares(totals.ideaGrants) }}</span>
         </div>
-        <span class="text-2xl text-ink-400 pb-1">+</span>
+        <span class="text-2xl text-ink-400 pb-1">=</span>
         <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Available</span>
-          <span class="text-2xl font-semibold" :class="totals.available < 0 ? 'text-red-700' : 'text-ok'">{{ fmtShares(totals.available) }}</span>
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Future Available</span>
+          <span class="text-2xl font-semibold" :class="totals.futureAvailable < 0 ? 'text-red-700' : 'text-ok'">{{ fmtShares(totals.futureAvailable) }}</span>
         </div>
       </div>
       <!-- Lifetime equation: Issued = Outstanding + Exercised

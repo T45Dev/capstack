@@ -138,9 +138,18 @@ const poolAuthorized = computed(() => {
   if (fromRounds > 0) return fromRounds
   return data.value!.pools.reduce((a, p) => a + p.authorized, 0)
 })
-const poolAvailable = computed(() =>
-  poolAuthorized.value - totalOutstanding.value - totalExercised.value - totalProposed.value,
-)
+// Simplified pool math:
+//   Authorized − Outstanding = Available − Proposed = Future Available
+// "Outstanding" in the headline lumps active grants + exercised options
+// (both have permanently left the pool; exercised converted to Common
+// and DOES NOT return). availableShares = what's free right now,
+// futureAvailable = what's left after proposed grants land.
+const outOfPool = computed(() => totalOutstanding.value + totalExercised.value)
+const availableShares = computed(() => poolAuthorized.value - outOfPool.value)
+const futureAvailable = computed(() => availableShares.value - totalProposed.value)
+// Kept for the FDS denominator below (its old semantic: Authorized minus
+// everything carved-out, including proposed). Same value as futureAvailable.
+const poolAvailable = futureAvailable
 
 // FDS denominator for the % toggle. Holdings + outstanding options + available pool.
 const fdsAnchor = computed(() => {
@@ -618,44 +627,45 @@ const fieldLabels: Record<string, string> = {
       </div>
     </div>
 
-    <!-- Pool math (Carta's accounting):
-           Authorized = Outstanding + Exercised + Proposed + Available
-         Exercised options converted to Common stock — they're carved out
-         of the pool permanently and do NOT come back. Forfeit/Expire DO
-         return (they're already pulled out of Outstanding which then
-         flows into Available via Authorized − Outstanding subtraction).
-         Lifetime row below shows the full breakdown for audit. -->
+    <!-- Pool math (simplified):
+           Authorized − Outstanding = Available − Proposed = Future Available
+         "Outstanding" lumps active grants + exercised options (both have
+         permanently left the pool — exercised converted to Common). When
+         exercised > 0, the tooltip on Outstanding splits the two; the
+         Lifetime row below always shows the full breakdown for audit. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-6 p-4">
       <div class="flex flex-wrap items-end gap-3 num">
         <div class="flex flex-col items-start">
           <span class="text-[11px] uppercase tracking-wider text-ink-500">Authorized</span>
           <span
             class="text-4xl font-semibold leading-none"
-            :class="poolAvailable >= 0 ? 'text-ok' : 'text-red-700'"
+            :class="futureAvailable >= 0 ? 'text-ok' : 'text-red-700'"
           >{{ fmtShares(poolAuthorized) }}</span>
+        </div>
+        <span class="text-2xl text-ink-400 pb-1">−</span>
+        <div
+          class="flex flex-col items-start"
+          :title="totalExercised > 0
+            ? `Active grants ${fmtShares(totalOutstanding)} + Exercised options ${fmtShares(totalExercised)} — both out of the pool (exercised converted to Common stock).`
+            : ''"
+        >
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Outstanding</span>
+          <span class="text-2xl font-semibold">{{ fmtShares(outOfPool) }}</span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">=</span>
         <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Outstanding</span>
-          <span class="text-lg font-medium text-ink-500">{{ fmtShares(totalOutstanding) }}</span>
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Available</span>
+          <span class="text-2xl font-semibold" :class="availableShares < 0 ? 'text-red-700' : 'text-ok'">{{ fmtShares(availableShares) }}</span>
         </div>
-        <span v-if="totalExercised > 0" class="text-2xl text-ink-400 pb-1">+</span>
-        <div v-if="totalExercised > 0" class="flex flex-col items-start" title="Exercised options converted to Common stock. Out of the pool permanently — not returning to Available.">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Exercised</span>
-          <span class="text-lg font-medium text-ink-500">{{ fmtShares(totalExercised) }}</span>
-        </div>
-        <span class="text-2xl text-ink-400 pb-1">+</span>
+        <span class="text-2xl text-ink-400 pb-1">−</span>
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Proposed</span>
           <span class="text-2xl font-semibold text-warn">{{ fmtShares(totalProposed) }}</span>
         </div>
-        <span class="text-2xl text-ink-400 pb-1">+</span>
+        <span class="text-2xl text-ink-400 pb-1">=</span>
         <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Available</span>
-          <span
-            class="text-2xl font-semibold"
-            :class="poolAvailable >= 0 ? 'text-ok' : 'text-red-700'"
-          >{{ fmtShares(poolAvailable) }}</span>
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Future Available</span>
+          <span class="text-2xl font-semibold" :class="futureAvailable < 0 ? 'text-red-700' : 'text-ok'">{{ fmtShares(futureAvailable) }}</span>
         </div>
       </div>
       <!-- Lifetime decomposition. Where every option ever issued is
