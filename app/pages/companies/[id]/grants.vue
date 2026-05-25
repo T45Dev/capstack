@@ -622,16 +622,17 @@ const fieldLabels: Record<string, string> = {
       </div>
     </div>
 
-    <!-- Pool math (spec-correct):
-           Authorized  =  Outstanding  +  Proposed  +  Available
-         Exercised shares leave the pool entirely (→ Common per spec
-         §2). Forfeited / Expired return to Available. So neither
-         appears in the live balance equation — they live in the
-         Lifetime row below.
+    <!-- Pool math (Carta's accounting):
+           Authorized = Outstanding + Exercised + Proposed + Available
+         Exercised shares stay subtracted from Available — they've
+         moved to Common but remain allocated against the pool.
+         Forfeited/Expired don't appear explicitly because they're
+         already excluded from Outstanding (which is Issued − Ex −
+         Forf − Exp); they flow into Available implicitly.
          Authorized is the 4xl headline, color-coded by Available's sign
          (green = headroom, red = over-allocated). Outstanding is
-         subdued (lifecycle state). Proposed (amber) + Available
-         (emerald/red) are NOT subdued — the live numbers. -->
+         subdued (lifecycle state). Exercised + Proposed + Available
+         are the live numbers. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-6 p-4">
       <div class="flex flex-wrap items-end gap-3 num">
         <div class="flex flex-col items-start">
@@ -646,6 +647,13 @@ const fieldLabels: Record<string, string> = {
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Outstanding</span>
           <span class="text-lg font-medium text-ink-500">{{ fmtShares(totalOutstanding) }}</span>
         </div>
+        <template v-if="totalExercised > 0">
+          <span class="text-2xl text-ink-400 pb-1">+</span>
+          <div class="flex flex-col items-start">
+            <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Exercised options have moved to Common stock but stay allocated against the pool.">Exercised</span>
+            <span class="text-2xl font-semibold text-accent-700">{{ fmtShares(totalExercised) }}</span>
+          </div>
+        </template>
         <span class="text-2xl text-ink-400 pb-1">+</span>
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Proposed</span>
