@@ -55,7 +55,19 @@ export default defineEventHandler(async (event) => {
   // If no round is modelled, post-FDS falls back to pre-FDS so the % columns still resolve.
   const postFDS = round.postRoundFDS > 0 ? round.postRoundFDS : preFDS
 
-  const roundName: string = assumptions?.round_name || company.starting_round || 'Round'
+  // company.starting_round is the canonical round CODE (the pre-baseline
+  // picker stores codes so renames of the display name don't break the
+  // link). Resolve it to a friendly name for the header. Legacy data may
+  // hold a name instead — match by code first, then by name.
+  const baselineRef = company.starting_round as string | null
+  let baselineRoundName: string | null = null
+  if (baselineRef) {
+    const r = db().prepare(
+      'SELECT name, code FROM rounds WHERE company_id = ? AND (code = ? OR name = ?) LIMIT 1',
+    ).get(id, baselineRef, baselineRef) as { name: string | null; code: string } | undefined
+    baselineRoundName = r ? (r.name || r.code) : baselineRef
+  }
+  const roundName: string = assumptions?.round_name || baselineRoundName || 'Round'
   // "Series B" -> "B", "Series A-2" -> "A-2", "Bridge" -> "Bridge"
   const roundSuffix = roundName.replace(/^Series\s+/i, '')
 

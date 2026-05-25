@@ -20,20 +20,38 @@ const { data: company, refresh: refreshCompany } = await useFetch(() =>
 // Rounds list for the pre-baseline picker in the top bar. Only closed /
 // formation rounds qualify as the baseline; the open round is what the
 // operator is modeling, so it can't be its own pre-baseline.
-const { data: roundsForBaseline } = await useFetch<{ rounds: Array<{ code: string; name: string | null; kind: string }> }>(() =>
+const { data: roundsForBaseline, refresh: refreshBaselineRounds } = await useFetch<{ rounds: Array<{ code: string; name: string | null; kind: string }> }>(() =>
   companyId.value ? `/api/companies/${companyId.value}/round-summary` : null,
   { default: () => ({ rounds: [] }), watch: [companyId] },
 )
+// The picker uses `code` as the canonical value (stable across renames;
+// UNIQUE per company in SQL). The label is the friendly name, with code
+// as fallback. This guarantees the selection survives display-name edits.
 const baselineOptions = computed(() =>
   (roundsForBaseline.value?.rounds || [])
     .filter(r => r.kind !== 'open')
-    .map(r => ({ value: r.name || r.code, label: r.name || r.code })),
+    .map(r => ({ value: r.code, label: r.name || r.code })),
 )
+// Resolve company.starting_round (which may legacy-hold a name, or a code)
+// to the canonical code so the <select> finds its option. Match by code
+// first, then by name. Returns '' when nothing matches so the picker
+// degrades to its "—" sentinel instead of silently going blank.
+const resolvedBaselineValue = computed(() => {
+  const sr = (company.value as any)?.starting_round as string | null | undefined
+  if (!sr) return ''
+  const rounds = roundsForBaseline.value?.rounds || []
+  const byCode = rounds.find(r => r.code === sr)
+  if (byCode) return byCode.code
+  const byName = rounds.find(r => r.name === sr)
+  return byName ? byName.code : ''
+})
 
 async function setStartingRound(val: string) {
   if (!companyId.value) return
+  // val is now the round's `code` (or '' for clear). We persist the code
+  // so renames of the round's display name don't break the link.
   await $fetch(`/api/companies/${companyId.value}`, { method: 'PATCH', body: { starting_round: val || null } })
-  await refreshCompany()
+  await Promise.all([refreshCompany(), refreshBaselineRounds()])
 }
 
 // Nav collapse state — persists across reloads so the user's preference
@@ -67,7 +85,7 @@ const importHref = computed(() => companyId.value ? `/companies/${companyId.valu
   <div class="min-h-screen bg-ink-100 text-ink-900">
     <AppTopBar
       :company-name="company?.name"
-      :baseline-value="company?.starting_round"
+      :baseline-value="resolvedBaselineValue"
       :baseline-options="baselineOptions"
       @update:baseline="setStartingRound"
     />
