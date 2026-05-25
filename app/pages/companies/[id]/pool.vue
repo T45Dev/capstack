@@ -60,11 +60,14 @@ function directionFor(type: EventType): -1 | 0 | 1 {
   return 0
 }
 
-function labelFor(type: EventType, kind?: 'ISO' | 'NSO' | null): string {
+function labelFor(type: EventType, kind?: string | null): string {
   if (type === 'pool_topup') return 'Pool top-up'
   if (type === 'grant')      return kind || 'Grant'
   if (type === 'exercise')   return 'Exercise'
-  if (type === 'forfeit')    return 'Forfeit'
+  // Expirations share the forfeit direction (both return shares to
+  // Available) but the operator audits them independently — surface
+  // the kind label when set so the timeline distinguishes them.
+  if (type === 'forfeit')    return kind === 'Expire' ? 'Expire' : 'Forfeit'
   if (type === 'floor')      return 'Floor'
   if (type === 'reserve')    return 'Reserve'
   return type
@@ -75,7 +78,7 @@ interface TimelineEvent {
   date: string                 // ISO yyyy-mm-dd
   name: string
   type: EventType
-  kind: 'ISO' | 'NSO' | null
+  kind: 'ISO' | 'NSO' | 'Expire' | null
   shares: number               // unsigned magnitude
   direction: -1 | 0 | 1        // +1 adds to pool, -1 subtracts, 0 informational
   source: 'pool' | 'grant_outstanding' | 'grant_proposed' | 'idea'
@@ -124,6 +127,13 @@ const events = computed<TimelineEvent[]>(() => {
   for (const g of (grantsData.value?.grants || [])) {
     if (g.status !== 'outstanding' && g.status !== 'proposed') continue
     const dateIsPlaceholder = !g.issue_date && !g.vesting_start
+    // Grant size = original issuance when we have it, current
+    // outstanding otherwise. With lifecycle events (exercise/forfeit/
+    // expire) pushed below, the timeline at the issue date needs to
+    // reflect the FULL original allocation — subsequent events then
+    // model the shrinkage. Falling back to `quantity` keeps grants
+    // imported pre-lifecycle-tracking working.
+    const issued = g.quantity_issued || g.quantity || 0
     out.push({
       id: `grant:${g.id}`,
       date: g.issue_date || g.vesting_start || fallbackDate.value,
@@ -131,13 +141,65 @@ const events = computed<TimelineEvent[]>(() => {
       name: g.recipient_name,
       type: 'grant',
       kind: (g.recipient_type || '').toLowerCase() === 'employee' ? 'ISO' : 'NSO',
-      shares: g.quantity || 0,
+      shares: issued,
       direction: -1,
       source: g.status === 'outstanding' ? 'grant_outstanding' : 'grant_proposed',
       grantId: g.id,
       vestMonths: g.vest_months ?? 48,
       cliffMonths: g.cliff_months ?? 12,
     })
+
+    // Per-grant lifecycle events (imported from Carta). Each non-zero
+    // count + corresponding date produces a dated event on the
+    // timeline. Exercise shrinks the pool (shares move to Common per
+    // spec §2). Forfeitures/expirations RETURN shares to Available.
+    // When a count is set but its date is missing, we fall back to
+    // issue_date + a small offset so the event still lands somewhere
+    // visible on the timeline (and the dateIsPlaceholder flag tells
+    // the UI it's a guess).
+    const grantBaseDate = g.issue_date || g.vesting_start || fallbackDate.value
+    if (g.quantity_exercised && g.quantity_exercised > 0) {
+      out.push({
+        id: `exercise:${g.id}`,
+        date: g.last_exercised_date || grantBaseDate,
+        dateIsPlaceholder: !g.last_exercised_date,
+        name: `${g.recipient_name} — exercise`,
+        type: 'exercise',
+        kind: null,
+        shares: g.quantity_exercised,
+        direction: -1,
+        source: 'grant_outstanding',
+        grantId: g.id,
+      })
+    }
+    if (g.quantity_forfeited && g.quantity_forfeited > 0) {
+      out.push({
+        id: `forfeit:${g.id}`,
+        date: g.forfeited_date || grantBaseDate,
+        dateIsPlaceholder: !g.forfeited_date,
+        name: `${g.recipient_name} — forfeit`,
+        type: 'forfeit',
+        kind: null,
+        shares: g.quantity_forfeited,
+        direction: 1,
+        source: 'grant_outstanding',
+        grantId: g.id,
+      })
+    }
+    if (g.quantity_expired && g.quantity_expired > 0) {
+      out.push({
+        id: `expire:${g.id}`,
+        date: g.expired_date || grantBaseDate,
+        dateIsPlaceholder: !g.expired_date,
+        name: `${g.recipient_name} — expire`,
+        type: 'forfeit',  // same pool direction as forfeit (returns to Available)
+        kind: 'Expire',
+        shares: g.quantity_expired,
+        direction: 1,
+        source: 'grant_outstanding',
+        grantId: g.id,
+      })
+    }
   }
 
   // Ideas
@@ -239,7 +301,15 @@ const grantsMissingDate = computed(() => events.value.filter(e => e.source !== '
 const totals = computed(() => {
   const isIdea = (s: string) => s === 'idea'
   const poolAuthorized = events.value.filter(e => e.type === 'pool_topup' && !isIdea(e.source)).reduce((a, e) => a + e.shares, 0)
-  const outstandingShares = events.value.filter(e => e.source === 'grant_outstanding').reduce((a, e) => a + e.shares, 0)
+  // Outstanding = sum of CURRENTLY-HELD grant quantities, pulled from
+  // the grants table directly (not from the timeline events). The grant
+  // event on the timeline uses the ORIGINAL issued size at the issue
+  // date so the chart reflects the full historical allocation —
+  // subsequent exercise/forfeit/expire events model the shrinkage to
+  // current outstanding. The headline stat shows the current balance.
+  const outstandingShares = (grantsData.value?.grants || [])
+    .filter((g: any) => g.status === 'outstanding')
+    .reduce((a: number, g: any) => a + (g.quantity || 0), 0)
   const proposedShares = events.value.filter(e => e.source === 'grant_proposed').reduce((a, e) => a + e.shares, 0)
   const ideaGrants = events.value.filter(e => isIdea(e.source) && (e.type === 'grant' || e.type === 'reserve')).reduce((a, e) => a + e.shares, 0)
   const ideaTopups = events.value.filter(e => isIdea(e.source) && e.type === 'pool_topup').reduce((a, e) => a + e.shares, 0)

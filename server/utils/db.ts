@@ -258,6 +258,15 @@ function migrate(d: Database.Database): void {
   ensureColumn('grants', 'quantity_expired', 'INTEGER')
   ensureColumn('grants', 'award_type', 'TEXT')
   ensureColumn('grants', 'acceleration', 'TEXT')
+  // Per-event dates on the grant row. Carta's plan sheet aggregates
+  // exercises/forfeits/expirations into per-grant counts but also
+  // records a single date for each (the last exercise, the termination
+  // date, etc.). We anchor pool-impact events on these dates: when a
+  // grant has quantity_exercised > 0 + last_exercised_date set, the
+  // Option Pool Impact timeline gets a dated "exercise" event.
+  ensureColumn('grants', 'last_exercised_date', 'TEXT')
+  ensureColumn('grants', 'forfeited_date', 'TEXT')
+  ensureColumn('grants', 'expired_date', 'TEXT')
   ensureColumn('rounds', 'option_pool_issued', 'REAL NOT NULL DEFAULT 0')
   ensureColumn('rounds', 'parent_round_code', 'TEXT')
   ensureColumn('rounds', 'pre_money', 'REAL')
