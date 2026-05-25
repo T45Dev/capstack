@@ -109,28 +109,29 @@ const totalExercised = computed(() => outstanding.value.reduce((a, g) => a + (g.
 const totalForfeited = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_forfeited || 0), 0))
 const totalExpired = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_expired || 0), 0))
 const totalIssued = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_issued || g.quantity), 0))
-// Authorized = sum of rounds.option_pool_issued (operator-typed on
-// the Financings page). Falls back to option_pools (Carta import) when
-// no per-round values are set. Pool Impact uses the same source.
+// Original Authorized = sum of rounds.option_pool_issued (operator-
+// typed on the Financings page). Falls back to option_pools (Carta
+// import) when no per-round values are set. Pool Impact uses the
+// same source.
 const poolAuthorizedOriginal = computed(() => {
   const fromRounds = (roundSummary.value?.rounds || [])
     .reduce((a: number, r: any) => a + (r.option_pool_issued || 0), 0)
   if (fromRounds > 0) return fromRounds
   return data.value!.pools.reduce((a, p) => a + p.authorized, 0)
 })
-// Pool math identity (spec-correct):
-//   Authorized = Outstanding + Proposed + Available
-// Per spec §2 Options "deck of cards" rule:
-//   - Exercised shares leave the pool ENTIRELY (Outstanding → Common).
-//     The live pool size shrinks by Exercised amount.
-//   - Forfeited / Expired shares RETURN to Available (Outstanding
-//     decreases, Available increases). Because grant `quantity` is
-//     current outstanding (Carta's Quantity Outstanding column, which
-//     already excludes forfeit/expire), forfeit/expire are implicitly
-//     back in Available — no double-counting.
-// Live Authorized = Original - Exercised. Holding the identity:
-//   Available = Live Authorized − Outstanding − Proposed
-//             = Original − Exercised − Outstanding − Proposed
+// Pool math (per user spec):
+// Two buckets only — Outstanding and Available — with
+//   Authorized = Outstanding + Available.
+// Movements between buckets:
+//   - Forfeit / Expire: Outstanding → Available (Authorized unchanged).
+//   - Exercise:         Outstanding → Common (LEAVES the system).
+//     Both Outstanding AND Authorized shrink by N. Available unchanged.
+// So the displayed Authorized is Original − Exercised (live pool size),
+// and:
+//   Available = Authorized − Outstanding − Proposed
+//             = (Original − Exercised) − Outstanding − Proposed
+// Outstanding from the grants table is already current_held (Carta's
+// Quantity Outstanding), so forfeit/expire are implicitly in Available.
 const poolAuthorized = computed(() => poolAuthorizedOriginal.value - totalExercised.value)
 const poolAvailable = computed(() =>
   poolAuthorized.value - totalOutstanding.value - totalProposed.value,
