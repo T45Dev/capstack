@@ -12,6 +12,7 @@ export default defineEventHandler(async (event) => {
     'code', 'name', 'kind', 'close_date', 'share_class_code',
     'share_price', 'new_money', 'debt_canceled', 'option_pool_issued',
     'pre_money', 'preferred_issued', 'preferred_issued_override', 'common',
+    'notes_converted_override', 'total_shares_fds_override',
     'parent_round_code', 'seniority', 'notes',
     // liq pref terms — drive exit waterfall
     'liq_pref_multiple', 'participation', 'participation_cap', 'pref_tier',

@@ -36,8 +36,10 @@ interface RoundColumn {
   preferred_issued: number
   preferred_issued_override: number | null
   notes_converted: number
+  notes_converted_override: number | null
   option_pool_issued: number
   total_shares_fds: number
+  total_shares_fds_override: number | null
   cumulated_financing: number
   liq_pref_multiple: number
   participation: 'none' | 'full' | 'capped'

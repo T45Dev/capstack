@@ -34,8 +34,10 @@ interface RoundColumn {
   preferred_issued: number
   preferred_issued_override: number | null
   notes_converted: number
+  notes_converted_override: number | null
   option_pool_issued: number
   total_shares_fds: number
+  total_shares_fds_override: number | null
   cumulated_financing: number
   liq_pref_multiple: number
   participation: 'none' | 'full' | 'capped'
@@ -87,6 +89,8 @@ interface RoundDraft {
   common?: number
   preferred_issued?: number
   preferred_issued_override?: number | null
+  notes_converted_override?: number | null
+  total_shares_fds_override?: number | null
   option_pool_issued?: number
   parent_round_code?: string | null
 }
@@ -283,6 +287,25 @@ function isParent(r: RoundColumn): boolean {
 }
 
 function tooltip(key: string, r: RoundColumn): string {
+  const kindForTooltip = effectiveKind(r)
+  if (kindForTooltip === 'formation') {
+    // Formation is a foundational snapshot — all shares-side cells are
+    // user input. Tooltips reflect "you own this number" rather than
+    // formula derivations.
+    if (key === 'common')             return 'Common shares at formation — user input.'
+    if (key === 'preferred_issued')   return 'Preferred shares at formation — user input (founders preferred or any pre-existing preferred class).'
+    if (key === 'notes_converted') {
+      const ov = r.notes_converted_override
+      if (ov != null) return `Notes-converted shares at formation — user override: ${fmtShares(ov)}\nClear the override to revert to 0 (no CNs convert at formation in the normal flow).`
+      return 'Notes-converted shares at formation — typed override. Defaults to 0; click "override" to type a snapshot count of pre-existing converted-note shares.'
+    }
+    if (key === 'option_pool_issued') return 'Option pool reserved at formation — user input.'
+    if (key === 'total_shares_fds') {
+      const ov = r.total_shares_fds_override
+      if (ov != null) return `Total FDS at formation — user override: ${fmtShares(ov)}\nReplaces the breakdown sum (${fmtShares((r.common || 0) + (r.preferred_issued || 0) + (r.notes_converted || 0) + (r.option_pool_issued || 0))}). Subsequent rounds build cumulatively from this number.`
+      return `Total FDS at formation — derived from Common + Preferred + Notes conv. + Pool.\n${fmtShares(r.common || 0)} + ${fmtShares(r.preferred_issued || 0)} + ${fmtShares(r.notes_converted || 0)} + ${fmtShares(r.option_pool_issued || 0)} = ${fmtShares(r.total_shares_fds)}\nClick "override" to pin the snapshot total directly.`
+    }
+  }
   switch (key) {
     case 'pre_money':           return 'Pre-money valuation — user input.'
     case 'new_money':           return 'New money raised this round — user input. Combined with Share price to derive Preferred issued.'
@@ -549,15 +572,19 @@ const displayRows = computed<Row[]>(() => {
                   @update="(v) => setDraft(row.round.round_id, c.key as any, v ?? (c.cellKind === 'shares' ? 0 : null))"
                   @commit="commitRound(row.round.round_id)"
                 />
-                <!-- Override (preferred): Formation rounds issue Common,
-                     not Preferred, so the cell is N/A there. Otherwise
-                     it's derived-with-override as elsewhere. -->
-                <MatrixDerivedCell
+                <!-- Override (preferred): on Formation, render as a plain
+                     typed cell backed by preferred_issued (founders
+                     preferred / formation snapshot). Off-formation it's
+                     the usual derived-with-override pattern. -->
+                <MatrixTypedCell
                   v-else-if="c.kind === 'override' && effectiveKind(row.round) === 'formation'"
-                  :value="null"
+                  :value="valueOf(row.round, 'preferred_issued')"
+                  :editable="true"
                   :kind="c.cellKind"
                   align="right"
-                  :title="'Formation rounds issue Common, not Preferred — Preferred doesn\'t apply.'"
+                  :title="tooltip(c.key, row.round)"
+                  @update="(v) => setDraft(row.round.round_id, 'preferred_issued', v ?? 0)"
+                  @commit="commitRound(row.round.round_id)"
                 />
                 <MatrixOverrideCell
                   v-else-if="c.kind === 'override'"
@@ -568,17 +595,39 @@ const displayRows = computed<Row[]>(() => {
                   @update="(v) => setDraft(row.round.round_id, 'preferred_issued_override', v)"
                   @commit="commitRound(row.round.round_id)"
                 />
-                <!-- Derived columns: on Formation rounds the notes columns
-                     are N/A (no convertibles in a snapshot). The money
-                     totals (post-money / cumulative financing / total FDS)
-                     still compute correctly from the typed inputs the
-                     operator enters so they stay visible. -->
+                <!-- Notes financing (money side) stays N/A on Formation —
+                     no convertibles are attributed to a snapshot row. -->
                 <MatrixDerivedCell
-                  v-else-if="effectiveKind(row.round) === 'formation' && (c.key === 'notes_financing' || c.key === 'notes_converted')"
+                  v-else-if="effectiveKind(row.round) === 'formation' && c.key === 'notes_financing'"
                   :value="null"
                   :kind="c.cellKind"
                   align="right"
                   :title="'Formation rounds don\'t have convertibles attributed.'"
+                />
+                <!-- Notes converted (shares side) on Formation: typed
+                     override so the operator can supply a snapshot count
+                     of pre-existing converted-note shares. Null = 0. -->
+                <MatrixOverrideCell
+                  v-else-if="effectiveKind(row.round) === 'formation' && c.key === 'notes_converted'"
+                  :derived-value="0"
+                  :override-value="effective(row.round, 'notes_converted_override') ?? row.round.notes_converted_override"
+                  :editable="true"
+                  :title="tooltip(c.key, row.round)"
+                  @update="(v) => setDraft(row.round.round_id, 'notes_converted_override', v)"
+                  @commit="commitRound(row.round.round_id)"
+                />
+                <!-- Total FDS on Formation: derived sum of the breakdown,
+                     with a typed override so the operator can pin the
+                     snapshot total directly. Cumulative FDS for later
+                     rounds builds on whichever value wins. -->
+                <MatrixOverrideCell
+                  v-else-if="effectiveKind(row.round) === 'formation' && c.key === 'total_shares_fds'"
+                  :derived-value="row.round.total_shares_fds || null"
+                  :override-value="effective(row.round, 'total_shares_fds_override') ?? row.round.total_shares_fds_override"
+                  :editable="true"
+                  :title="tooltip(c.key, row.round)"
+                  @update="(v) => setDraft(row.round.round_id, 'total_shares_fds_override', v)"
+                  @commit="commitRound(row.round.round_id)"
                 />
                 <MatrixDerivedCell
                   v-else

@@ -28,10 +28,12 @@ interface RoundColumn {
   common: number                  // currently always 0 in the response — user types into preferred_issued
   preferred_issued: number        // effective value (override ?? new_money / share_price)
   preferred_issued_override: number | null  // null = formula in effect; number = manual override
-  notes_converted: number         // informational: notes_financing / share_price
+  notes_converted: number         // effective value: override if set, else Σ CN-attributed shares
+  notes_converted_override: number | null   // Formation-snapshot override; null = derived from CN attributions
   option_pool_issued: number
   // Cumulative totals through and including this round:
   total_shares_fds: number
+  total_shares_fds_override: number | null  // Formation-snapshot override; null = derive cumulatively
   cumulated_financing: number
   // Liquidation preference terms (drive the exit waterfall on §5.7).
   liq_pref_multiple: number
@@ -70,7 +72,9 @@ export default defineEventHandler((event) => {
   const rounds = db().prepare(`
     SELECT id, code, name, kind, close_date, share_class_code, share_price,
            new_money, debt_canceled, option_pool_issued, pre_money,
-           preferred_issued, preferred_issued_override, common, seniority,
+           preferred_issued, preferred_issued_override,
+           notes_converted_override, total_shares_fds_override,
+           common, seniority,
            liq_pref_multiple, participation, participation_cap, pref_tier,
            parent_round_code
     FROM rounds WHERE company_id = ?
@@ -80,6 +84,8 @@ export default defineEventHandler((event) => {
     share_price: number | null; new_money: number; debt_canceled: number;
     option_pool_issued: number; pre_money: number | null;
     preferred_issued: number; preferred_issued_override: number | null;
+    notes_converted_override: number | null;
+    total_shares_fds_override: number | null;
     common: number; seniority: number;
     liq_pref_multiple: number; participation: 'none' | 'full' | 'capped';
     participation_cap: number | null; pref_tier: number;
@@ -321,11 +327,28 @@ export default defineEventHandler((event) => {
     // valuation per the operator's accounting convention.
     const postMoney = (preMoney || 0) + newMoney
 
+    // Notes converted: derive from CN attributions, except on Formation
+    // where the operator can supply a snapshot override (no CNs convert
+    // at formation in the normal flow, but historical cap tables can
+    // include pre-existing converted-note shares).
+    const notesConverted = r.notes_converted_override != null
+      ? Math.floor(Number(r.notes_converted_override))
+      : cnShares
+
     // Cumulative FDS sums the user-typed equity contributions for this
     // round PLUS the CN-converted shares attributed to it. The "Notes
     // converted" row carries that share count so the operator can see
     // it line up with the per-note shares on the CN page.
-    cumulativeFDS += common + preferredIssued + poolIssued + cnShares
+    //
+    // Formation can short-circuit the cumulative path by setting
+    // total_shares_fds_override — the operator's stated snapshot total
+    // becomes the absolute cumulative through that row, and subsequent
+    // rounds continue accumulating from it.
+    if (r.kind === 'formation' && r.total_shares_fds_override != null) {
+      cumulativeFDS = Math.floor(Number(r.total_shares_fds_override))
+    } else {
+      cumulativeFDS += common + preferredIssued + poolIssued + notesConverted
+    }
     cumulativeFinancing += newMoney + cnDollars
 
     cols.push({
@@ -344,9 +367,11 @@ export default defineEventHandler((event) => {
       common,
       preferred_issued: preferredIssued,
       preferred_issued_override: r.preferred_issued_override != null ? Number(r.preferred_issued_override) : null,
-      notes_converted: cnShares,
+      notes_converted: notesConverted,
+      notes_converted_override: r.notes_converted_override != null ? Number(r.notes_converted_override) : null,
       option_pool_issued: poolIssued,
       total_shares_fds: cumulativeFDS,
+      total_shares_fds_override: r.total_shares_fds_override != null ? Number(r.total_shares_fds_override) : null,
       cumulated_financing: cumulativeFinancing,
       liq_pref_multiple: Number(r.liq_pref_multiple ?? 1),
       participation: (r.participation as any) || 'none',
