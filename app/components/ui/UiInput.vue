@@ -65,7 +65,7 @@ function onChange(e: Event) {
         :step="step"
         :min="min"
         :disabled="disabled"
-        class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500 disabled:opacity-50 disabled:bg-ink-100 num shadow-sm"
+        class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:opacity-50 disabled:bg-ink-100 num shadow-sm"
         :class="{ 'pl-7': prefix, 'pr-12': suffix }"
         @input="onInput"
         @change="onChange"

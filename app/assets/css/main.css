@@ -5,12 +5,17 @@
 html,
 body {
   background: #f8fafc;
-  color: #0f172a;
+  color: #101828;
+  font-family: 'Manrope', ui-sans-serif, system-ui, -apple-system, 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
   font-feature-settings: 'cv02', 'cv03', 'cv04';
 }
 
+/* Monospace + tabular for every number on the page. */
 .num {
-  font-variant-numeric: tabular-nums;
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.01em;
 }
 
 button {
@@ -29,8 +34,8 @@ input[type='number'] {
 /* Scrollbars. Slim, visible-enough handle, no track. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 6px; }
-::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+::-webkit-scrollbar-thumb { background: #d0d5dd; border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: #98a2b3; }
 
 /* Hide the scrollbar but keep the element scrollable. Used by the header nav. */
 .scrollbar-none {
@@ -39,9 +44,7 @@ input[type='number'] {
 }
 .scrollbar-none::-webkit-scrollbar { display: none; }
 
-/* Freeze a table column to the left edge during horizontal scroll.
-   Cells using this need to set their own background so other columns
-   don't bleed through. */
+/* Freeze a table column to the left edge during horizontal scroll. */
 .sticky-col {
   position: sticky;
   left: 0;
@@ -51,7 +54,7 @@ thead .sticky-col {
   z-index: 2;
 }
 
-/* Table column resize handle. Always faintly visible, brighter on hover/drag. */
+/* Legacy table column resize handle (used by sortable tables across the app). */
 .resize-handle {
   position: absolute;
   top: 0;
@@ -59,7 +62,7 @@ thead .sticky-col {
   height: 100%;
   width: 6px;
   cursor: col-resize;
-  background: linear-gradient(to right, transparent 0%, transparent 40%, #cbd5e1 40%, #cbd5e1 60%, transparent 60%, transparent 100%);
+  background: linear-gradient(to right, transparent 0%, transparent 40%, #d0d5dd 40%, #d0d5dd 60%, transparent 60%, transparent 100%);
   background-size: 100% 60%;
   background-repeat: no-repeat;
   background-position: center;
@@ -67,5 +70,148 @@ thead .sticky-col {
 }
 .resize-handle:hover,
 .resize-handle.is-active {
-  background: #2563eb;
+  background: #1d4ed8;
+}
+
+/* ── Financings matrix tokens ─────────────────────────────────────────────
+   Reusable bits the Financings-redesign components compose. Defined here so
+   every consumer (header cells, typed cells, derived cells, the row hover)
+   shares the same border / focus / motion. */
+
+/* Derived-value dotted underline — refined, thin, currentColor-driven. */
+.derived {
+  background-image: radial-gradient(circle, currentColor 0.5px, transparent 0.6px);
+  background-position: 0 100%;
+  background-size: 3px 1.5px;
+  background-repeat: repeat-x;
+  padding-bottom: 2px;
+}
+
+/* Editable cell — subtle border, focus ring, and a 3px amber dot in the
+   top-right corner as the only color cue that this is operator input. */
+.cell-edit {
+  position: relative;
+  background: #ffffff;
+  border: 1px solid #e4e7ec;
+  border-radius: 6px;
+  padding: 6px 8px;
+  transition: border-color 120ms, box-shadow 120ms, background 120ms;
+}
+.cell-edit:hover {
+  border-color: #d0d5dd;
+  background: #fcfcfd;
+}
+.cell-edit:focus-within {
+  border-color: #1d4ed8;
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.12);
+  background: #ffffff;
+}
+.cell-edit::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 3px;
+  height: 3px;
+  border-radius: 9999px;
+  background: #a16207;
+  opacity: 0.5;
+}
+.cell-edit input,
+.cell-edit select {
+  width: 100%;
+  background: transparent;
+  outline: none;
+  border: 0;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-size: 13px;
+  color: #101828;
+  padding: 0;
+}
+.cell-edit input::placeholder {
+  color: #98a2b3;
+}
+
+/* Read-only cell padding — same metrics as cell-edit so columns align. */
+.cell-read {
+  padding: 6px 8px;
+  color: #344054;
+}
+
+/* Open-round row tint — soft brand-blue wash, only visible across the row. */
+.row-open {
+  background: linear-gradient(to right, rgba(29, 78, 216, 0.04), rgba(29, 78, 216, 0.02) 30%, transparent);
+}
+.row-open .num {
+  color: #1e293b;
+}
+
+/* Tranche pill — subtle, blue-tinted. */
+.tag-tranche {
+  color: #1e40af;
+  background: #eef2ff;
+}
+
+/* Matrix row drag-handle — invisible until hover. */
+.row-resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 6px;
+  cursor: ns-resize;
+  z-index: 10;
+}
+.row-resize::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 9999px;
+  background: transparent;
+  transition: background 120ms;
+}
+.row-resize:hover::before,
+.row-resize.is-active::before {
+  background: #1d4ed8;
+}
+
+/* Matrix column drag-handle — invisible until hover. Distinct from the
+   legacy .resize-handle above so the matrix can use the new pseudo-element
+   pattern without interfering with existing sortable tables. */
+.col-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 10;
+}
+.col-resize::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  right: 2px;
+  width: 2px;
+  border-radius: 9999px;
+  background: transparent;
+  transition: background 120ms;
+}
+.col-resize:hover::before,
+.col-resize.is-active::before {
+  background: #1d4ed8;
+}
+
+/* Pulsing dot for the open-round status indicator. */
+@keyframes openDot {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(29, 78, 216, 0.55); }
+  50%      { box-shadow: 0 0 0 4px rgba(29, 78, 216, 0); }
+}
+.open-dot {
+  animation: openDot 1.8s ease-in-out infinite;
 }

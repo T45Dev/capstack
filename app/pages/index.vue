@@ -79,10 +79,10 @@ async function remove(id: string, name: string) {
         v-for="c in companies"
         :key="c.id"
         :to="`/companies/${c.id}`"
-        class="group block rounded-lg border border-ink-300 bg-white hover:border-accent-400 hover:shadow-card-hover p-4 transition-all"
+        class="group block rounded-lg border border-ink-300 bg-white hover:border-brand-400 hover:shadow-card-hover p-4 transition-all"
       >
         <div class="flex items-start gap-3">
-          <div class="grid place-items-center w-10 h-10 rounded-md bg-accent-50 text-accent-600 shrink-0">
+          <div class="grid place-items-center w-10 h-10 rounded-md bg-brand-50 text-brand-600 shrink-0">
             <Building2 :size="18" />
           </div>
           <div class="flex-1 min-w-0">
@@ -91,7 +91,7 @@ async function remove(id: string, name: string) {
               <span v-if="c.ticker" class="text-[10px] uppercase tracking-wide text-ink-600 bg-ink-200 px-1.5 py-0.5 rounded">{{ c.ticker }}</span>
             </div>
             <p class="text-xs text-ink-500 mt-1">
-              <span v-if="c.starting_round" class="text-accent-700 font-medium">{{ c.starting_round }}</span>
+              <span v-if="c.starting_round" class="text-brand-700 font-medium">{{ c.starting_round }}</span>
               <span v-if="c.starting_round_date" class="ml-1">· {{ fmtDate(c.starting_round_date) }}</span>
               <span v-if="!c.starting_round">Added {{ fmtDate(c.created_at) }}</span>
             </p>
@@ -118,7 +118,7 @@ async function remove(id: string, name: string) {
           >
             <Trash2 :size="12" /> delete
           </button>
-          <span class="text-xs text-accent-600 inline-flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <span class="text-xs text-brand-600 inline-flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             open <ArrowRight :size="12" />
           </span>
         </div>

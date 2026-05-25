@@ -180,17 +180,17 @@ function sumDeltaClass(delta: number, newMoney: number): string {
               v-for="r in data.rounds"
               :key="r.id"
               class="px-3 py-2 border-b border-ink-300 text-right text-[11px] font-semibold"
-              :class="r.kind === 'open' ? 'bg-accent-50 text-accent-700' : 'text-ink-700'"
+              :class="r.kind === 'open' ? 'bg-brand-50 text-brand-700' : 'text-ink-700'"
             >
               <div class="font-semibold">{{ r.name || r.code }}</div>
-              <div class="text-[9px] font-normal text-ink-500">{{ r.close_date || '—' }}<span v-if="r.kind === 'open'" class="ml-1 uppercase tracking-wider text-accent-600">Open</span></div>
+              <div class="text-[9px] font-normal text-ink-500">{{ r.close_date || '—' }}<span v-if="r.kind === 'open'" class="ml-1 uppercase tracking-wider text-brand-600">Open</span></div>
             </th>
             <th class="px-3 py-2 border-b border-ink-300 text-right text-[11px] font-semibold text-ink-700">Total invested</th>
             <th class="px-3 py-2 border-b border-ink-300"></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="inv in sortedInvestors" :key="inv.id" class="hover:bg-accent-50/30 transition-colors">
+          <tr v-for="inv in sortedInvestors" :key="inv.id" class="hover:bg-brand-50/30 transition-colors">
             <td class="px-3 py-1.5 border-b border-ink-200 text-ink-900 font-medium sticky left-0 z-10 bg-white" :title="inv.type || ''">
               {{ inv.name }}
               <span v-if="inv.type && inv.type !== 'Investor'" class="ml-1.5 text-[9px] uppercase tracking-wide text-ink-500">{{ inv.type }}</span>
@@ -199,14 +199,14 @@ function sumDeltaClass(delta: number, newMoney: number): string {
               v-for="r in data.rounds"
               :key="r.id"
               class="px-3 py-1.5 border-b border-ink-200 text-right text-ink-700"
-              :class="r.kind === 'open' ? 'bg-accent-50/40' : ''"
+              :class="r.kind === 'open' ? 'bg-brand-50/40' : ''"
             >
               <NumberInput
                 variant="bare"
                 prefix="$"
                 :model-value="cellAmount(r.id, inv.id)"
                 placeholder="—"
-                input-class="w-full bg-amber-50 border border-amber-300 hover:border-amber-500 focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-accent-500 rounded px-1 py-0.5 text-right text-[12px] text-ink-900 num"
+                input-class="w-full bg-amber-50 border border-amber-300 hover:border-amber-500 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-500 rounded px-1 py-0.5 text-right text-[12px] text-ink-900 num"
                 @update:model-value="(v) => setDraft(r.id, inv.id, v)"
                 @blur="() => commitCell(r.id, inv.id)"
                 @keydown.enter="(e: KeyboardEvent) => (e.target as HTMLInputElement).blur()"
@@ -232,18 +232,18 @@ function sumDeltaClass(delta: number, newMoney: number): string {
                 v-model="newName"
                 type="text"
                 placeholder="+ Add investor"
-                class="w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-accent-500 rounded px-1 py-0.5 text-[12px] text-ink-900"
+                class="w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-500 rounded px-1 py-0.5 text-[12px] text-ink-900"
                 @keydown.enter="addInvestor"
               />
             </td>
-            <td v-for="r in data.rounds" :key="r.id" class="px-3 py-1.5 border-b border-ink-200 text-right" :class="r.kind === 'open' ? 'bg-accent-50/30' : ''">
+            <td v-for="r in data.rounds" :key="r.id" class="px-3 py-1.5 border-b border-ink-200 text-right" :class="r.kind === 'open' ? 'bg-brand-50/30' : ''">
               <NumberInput
                 v-if="newName.trim()"
                 variant="bare"
                 prefix="$"
                 :model-value="newAmounts[r.id] || null"
                 placeholder="—"
-                input-class="w-full bg-amber-50 border border-amber-300 hover:border-amber-500 focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-accent-500 rounded px-1 py-0.5 text-right text-[12px] text-ink-900 num"
+                input-class="w-full bg-amber-50 border border-amber-300 hover:border-amber-500 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-500 rounded px-1 py-0.5 text-right text-[12px] text-ink-900 num"
                 @update:model-value="(v) => (newAmounts[r.id] = v || 0)"
               />
             </td>
@@ -251,7 +251,7 @@ function sumDeltaClass(delta: number, newMoney: number): string {
               <button
                 v-if="newName.trim()"
                 type="button"
-                class="inline-flex items-center gap-1 text-[11px] text-accent-700 hover:text-accent-800 font-medium px-2 py-0.5 rounded border border-accent-300 hover:bg-accent-50"
+                class="inline-flex items-center gap-1 text-[11px] text-brand-700 hover:text-brand-800 font-medium px-2 py-0.5 rounded border border-brand-300 hover:bg-brand-50"
                 @click="addInvestor"
               ><Plus :size="11" /> Add</button>
             </td>
@@ -265,7 +265,7 @@ function sumDeltaClass(delta: number, newMoney: number): string {
               v-for="r in data.rounds"
               :key="r.id"
               class="px-3 py-2 border-t-2 border-ink-300 text-right"
-              :class="[r.kind === 'open' ? 'bg-accent-50/40' : '', sumDeltaClass(data.sums[r.id]?.delta ?? 0, r.new_money)]"
+              :class="[r.kind === 'open' ? 'bg-brand-50/40' : '', sumDeltaClass(data.sums[r.id]?.delta ?? 0, r.new_money)]"
             >
               {{ fmtUSD(data.sums[r.id]?.allocated ?? 0) }}
             </td>
@@ -273,7 +273,7 @@ function sumDeltaClass(delta: number, newMoney: number): string {
           </tr>
           <tr class="text-[11px] text-ink-600">
             <td class="px-3 py-1 text-right pr-6 sticky left-0 z-10 bg-white">New money on round</td>
-            <td v-for="r in data.rounds" :key="r.id" class="px-3 py-1 text-right num" :class="r.kind === 'open' ? 'bg-accent-50/40' : ''">{{ fmtUSD(r.new_money) }}</td>
+            <td v-for="r in data.rounds" :key="r.id" class="px-3 py-1 text-right num" :class="r.kind === 'open' ? 'bg-brand-50/40' : ''">{{ fmtUSD(r.new_money) }}</td>
             <td colspan="2"></td>
           </tr>
           <tr class="text-[11px]">
@@ -282,7 +282,7 @@ function sumDeltaClass(delta: number, newMoney: number): string {
               v-for="r in data.rounds"
               :key="r.id"
               class="px-3 py-1 text-right num"
-              :class="[r.kind === 'open' ? 'bg-accent-50/40' : '', sumDeltaClass(data.sums[r.id]?.delta ?? 0, r.new_money)]"
+              :class="[r.kind === 'open' ? 'bg-brand-50/40' : '', sumDeltaClass(data.sums[r.id]?.delta ?? 0, r.new_money)]"
             >
               <span v-if="Math.abs(data.sums[r.id]?.delta ?? 0) < 1">✓</span>
               <span v-else class="inline-flex items-center gap-1">

@@ -153,7 +153,7 @@ function keepFinancingsSafe() {
     <UiCard class="mt-6">
       <div
         class="rounded-md border-2 border-dashed transition-colors p-8 text-center"
-        :class="dragging ? 'border-accent-500 bg-accent-50' : 'border-ink-300 bg-ink-100/50'"
+        :class="dragging ? 'border-brand-500 bg-brand-50' : 'border-ink-300 bg-ink-100/50'"
         @dragover.prevent="dragging = true"
         @dragleave.prevent="dragging = false"
         @drop.prevent="onDrop"
@@ -161,7 +161,7 @@ function keepFinancingsSafe() {
         <UploadCloud :size="32" class="mx-auto text-ink-500" />
         <p class="mt-3 text-sm text-ink-800">
           <span class="font-medium">Drop .xlsx here</span> or
-          <label class="text-accent-600 hover:text-accent-700 cursor-pointer underline font-medium">
+          <label class="text-brand-600 hover:text-brand-700 cursor-pointer underline font-medium">
             browse
             <input type="file" accept=".xlsx,.xlsm" class="hidden" @change="onPick" />
           </label>
@@ -191,7 +191,7 @@ function keepFinancingsSafe() {
             <label class="block text-[11px] font-medium text-ink-700">{{ meta.label }}</label>
             <select
               v-model="sheetRoles[role]"
-              class="mt-0.5 w-full text-[12px] border border-ink-300 hover:border-ink-400 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500 rounded px-1.5 py-1 bg-white"
+              class="mt-0.5 w-full text-[12px] border border-ink-300 hover:border-ink-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 rounded px-1.5 py-1 bg-white"
             >
               <option value="">— auto-detect —</option>
               <option v-for="s in sheets" :key="s.name" :value="s.name">{{ s.name }} ({{ s.rowCount }} rows)</option>
@@ -208,16 +208,16 @@ function keepFinancingsSafe() {
         <div class="flex items-center justify-between mb-2">
           <h3 class="text-xs font-semibold uppercase tracking-wide text-ink-500">What to (re-)import</h3>
           <div class="flex items-center gap-2 text-[11px]">
-            <button class="text-accent-600 hover:text-accent-700 underline" @click="selectAll(true)">All</button>
+            <button class="text-brand-600 hover:text-brand-700 underline" @click="selectAll(true)">All</button>
             <span class="text-ink-400">·</span>
-            <button class="text-accent-600 hover:text-accent-700 underline" @click="selectAll(false)">None</button>
+            <button class="text-brand-600 hover:text-brand-700 underline" @click="selectAll(false)">None</button>
             <span class="text-ink-400">·</span>
-            <button class="text-accent-600 hover:text-accent-700 underline" title="Keep Share classes (and the round attribution they drive) intact; re-import everything else." @click="keepFinancingsSafe">Skip share classes</button>
+            <button class="text-brand-600 hover:text-brand-700 underline" title="Keep Share classes (and the round attribution they drive) intact; re-import everything else." @click="keepFinancingsSafe">Skip share classes</button>
           </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
           <label v-for="(meta, k) in catLabels" :key="k" class="flex items-start gap-2 cursor-pointer">
-            <input type="checkbox" v-model="include[k]" class="mt-0.5 rounded border-ink-400 text-accent-500 focus:ring-accent-500" />
+            <input type="checkbox" v-model="include[k]" class="mt-0.5 rounded border-ink-400 text-brand-500 focus:ring-brand-500" />
             <div>
               <div class="text-ink-900 font-medium">{{ meta.label }}</div>
               <div class="text-[11px] text-ink-500">{{ meta.hint }}</div>
@@ -241,7 +241,7 @@ function keepFinancingsSafe() {
 
       <div class="mt-4 flex items-center justify-between gap-3">
         <label class="text-xs text-ink-600 inline-flex items-center gap-2">
-          <input type="checkbox" v-model="replace" class="rounded border-ink-400 text-accent-500 focus:ring-accent-500" />
+          <input type="checkbox" v-model="replace" class="rounded border-ink-400 text-brand-500 focus:ring-brand-500" />
           Replace existing rows in checked categories (recommended for a fresh export)
         </label>
         <UiButton variant="primary" :disabled="!file || uploading" @click="upload">

@@ -310,7 +310,7 @@ async function onDelete(row: CnRow) {
         type="button"
         class="text-[11px] font-medium px-2 py-0.5 rounded border transition-colors"
         :class="destFilter === 'all'
-          ? 'bg-accent-500 text-white border-accent-500'
+          ? 'bg-brand-500 text-white border-brand-500'
           : 'bg-white text-ink-600 border-ink-300 hover:border-ink-400'"
         @click="destFilter = 'all'"
       >All <span class="opacity-70">{{ rows.length }}</span></button>
@@ -340,7 +340,7 @@ async function onDelete(row: CnRow) {
         type="button"
         class="text-[11px] font-medium px-2 py-0.5 rounded border transition-colors"
         :class="destFilter === r.code
-          ? 'bg-accent-500 text-white border-accent-500'
+          ? 'bg-brand-500 text-white border-brand-500'
           : 'bg-white text-ink-600 border-ink-300 hover:border-ink-400'"
         @click="destFilter = r.code"
       >{{ r.name || r.code }} <span class="opacity-70">{{ destCounts.get(r.code) }}</span></button>
@@ -349,7 +349,7 @@ async function onDelete(row: CnRow) {
         <span class="text-[10px] uppercase tracking-wider text-ink-500 font-semibold">Reassign visible to</span>
         <select
           v-model="bulkTarget"
-          class="rounded border border-ink-300 bg-white text-[11px] px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-accent-500"
+          class="rounded border border-ink-300 bg-white text-[11px] px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
         >
           <option value="">— Unassigned</option>
           <option v-for="r in (roundSummary?.rounds || [])" :key="r.code" :value="r.code">{{ roundLabel(r) }}</option>
@@ -389,7 +389,7 @@ async function onDelete(row: CnRow) {
           <button
             type="button"
             class="inline-flex items-center justify-center w-6 h-6 rounded hover:bg-ink-100 transition-colors"
-            :class="row.includeInSummary ? 'text-accent-600' : 'text-ink-400'"
+            :class="row.includeInSummary ? 'text-brand-600' : 'text-ink-400'"
             :title="row.includeInSummary ? 'Excluded notes don\'t roll up into the cap table — click to include' : 'Click to include in the cap table'"
             @click.stop="toggleInclude(row)"
           >
@@ -403,7 +403,7 @@ async function onDelete(row: CnRow) {
             <span
               class="text-xs font-medium px-1.5 py-0.5 rounded border"
               :class="roundsByCode.get(value)!.kind === 'open'
-                ? 'text-accent-700 bg-accent-50 border-accent-200'
+                ? 'text-brand-700 bg-brand-50 border-brand-200'
                 : 'text-ink-800 bg-ink-100 border-ink-200'"
             >{{ roundLabel(roundsByCode.get(value)!) }}</span>
           </template>

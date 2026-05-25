@@ -582,7 +582,7 @@ const pieSlices = computed<PieSlice[]>(() => {
   const available = Math.max(0, totalPie - t.outstandingShares - t.proposedShares - t.ideaGrants)
   const segs = [
     { key: 'outstanding', label: 'Outstanding', value: t.outstandingShares, color: '#475569' },  // ink-500
-    { key: 'proposed',    label: 'Proposed',    value: t.proposedShares,    color: '#2563eb' },  // accent-500
+    { key: 'proposed',    label: 'Proposed',    value: t.proposedShares,    color: '#2563eb' },  // brand-500
     { key: 'ideas',       label: 'Ideas',       value: t.ideaGrants,        color: '#fbbf24' },  // amber-400
     { key: 'available',   label: 'Available',   value: available,           color: '#a7f3d0' },  // emerald-200
   ]
@@ -652,10 +652,10 @@ const chart = computed(() => {
              below) so it sits next to the ideas list it manages. -->
         <div class="inline-flex items-center rounded-md border border-ink-300 bg-white p-0.5 text-xs">
           <button type="button" class="px-2.5 py-1 rounded-[5px] font-medium transition-colors"
-            :class="mode === 'single' ? 'bg-accent-500 text-white' : 'text-ink-600 hover:text-ink-900'"
+            :class="mode === 'single' ? 'bg-brand-500 text-white' : 'text-ink-600 hover:text-ink-900'"
             @click="mode = 'single'">Single event</button>
           <button type="button" class="px-2.5 py-1 rounded-[5px] font-medium transition-colors"
-            :class="mode === 'vest' ? 'bg-accent-500 text-white' : 'text-ink-600 hover:text-ink-900'"
+            :class="mode === 'vest' ? 'bg-brand-500 text-white' : 'text-ink-600 hover:text-ink-900'"
             @click="mode = 'vest'">Vest schedule</button>
         </div>
       </div>
@@ -725,7 +725,7 @@ const chart = computed(() => {
         </div>
         <div class="flex items-end gap-1.5">
           <span class="text-ink-500" title="Exercised → Common Stock (left the pool entirely)">Exercised</span>
-          <span class="font-medium" :class="totals.totalExercised > 0 ? 'text-accent-700' : 'text-ink-400'">{{ fmtShares(totals.totalExercised) }}</span>
+          <span class="font-medium" :class="totals.totalExercised > 0 ? 'text-brand-700' : 'text-ink-400'">{{ fmtShares(totals.totalExercised) }}</span>
         </div>
         <div class="flex items-end gap-1.5" :title="`Forfeited (unvested at termination) ${fmtShares(totals.totalForfeited)} + Expired (vested but unexercised) ${fmtShares(totals.totalExpired)} — both returned to Available`">
           <span class="text-ink-500">Forfeited/Expired</span>
@@ -817,14 +817,14 @@ const chart = computed(() => {
               type="button"
               class="text-[11px] px-2 py-0.5 rounded-full border transition-colors inline-flex items-center gap-1"
               :class="eventFilter === opt.value
-                ? 'bg-accent-600 text-white border-accent-600'
+                ? 'bg-brand-600 text-white border-brand-600'
                 : 'bg-white text-ink-600 border-ink-300 hover:border-ink-400 hover:text-ink-800'"
               @click="eventFilter = opt.value"
             >
               <span>{{ opt.label }}</span>
               <span
                 class="text-[10px] num"
-                :class="eventFilter === opt.value ? 'text-accent-100' : 'text-ink-400'"
+                :class="eventFilter === opt.value ? 'text-brand-100' : 'text-ink-400'"
               >{{ filterCounts[opt.value] }}</span>
             </button>
           </div>
@@ -834,7 +834,7 @@ const chart = computed(() => {
         </div>
         <div v-else-if="!filteredEvents.length" class="px-4 py-8 text-sm text-ink-500 text-center">
           No events match the current filter.
-          <button type="button" class="ml-2 text-accent-600 hover:text-accent-700 underline" @click="eventFilter = 'all'">Show all</button>
+          <button type="button" class="ml-2 text-brand-600 hover:text-brand-700 underline" @click="eventFilter = 'all'">Show all</button>
         </div>
         <div v-else class="overflow-y-auto min-h-0 flex-1">
           <table class="w-full text-[13px] num">
@@ -848,13 +848,13 @@ const chart = computed(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="e in filteredEvents" :key="e.id" class="hover:bg-accent-50/40 border-b border-ink-200">
+              <tr v-for="e in filteredEvents" :key="e.id" class="hover:bg-brand-50/40 border-b border-ink-200">
                 <td class="px-2.5 py-1.5" :class="e.dateIsPlaceholder ? 'text-amber-700' : 'text-ink-600'">
                   <template v-if="e.grantId">
                     <input
                       type="date"
                       :value="e.dateIsPlaceholder ? '' : e.date"
-                      :class="['bg-transparent border rounded px-1 py-0.5 text-[12px] focus:outline-none focus:ring-1 focus:ring-accent-500 focus:border-accent-500 num',
+                      :class="['bg-transparent border rounded px-1 py-0.5 text-[12px] focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500 num',
                                e.dateIsPlaceholder ? 'border-amber-300 text-amber-700 hover:border-amber-500' : 'border-transparent text-ink-700 hover:border-ink-300']"
                       :title="e.dateIsPlaceholder ? `Placeholder — no issue date on the source grant. Pick one to set it.` : 'Grant issue date — edit to update.'"
                       @change="commitGrantDate(e.grantId!, ($event.target as HTMLInputElement).value)"
@@ -870,7 +870,7 @@ const chart = computed(() => {
                   <span class="text-ink-900 font-medium">{{ e.name }}</span>
                   <span
                     v-if="e.source === 'grant_proposed'"
-                    class="ml-2 text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border border-accent-300 bg-accent-50 text-accent-700 align-middle"
+                    class="ml-2 text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border border-brand-300 bg-brand-50 text-brand-700 align-middle"
                   >proposed</span>
                 </td>
                 <td class="px-2.5 py-1.5 text-ink-700">
@@ -938,7 +938,7 @@ const chart = computed(() => {
                   <template v-else>{{ e.direction > 0 ? '+' : '−' }}{{ fmtShares(e.shares) }}</template>
                 </td>
                 <td class="px-2.5 py-1.5 text-right whitespace-nowrap">
-                  <button class="text-ink-500 hover:text-accent-600 px-1 py-0.5 rounded" @click="openModal(ideas.find(i => i.id === e.ideaId))" title="Edit"><Edit3 :size="13" /></button>
+                  <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded" @click="openModal(ideas.find(i => i.id === e.ideaId))" title="Edit"><Edit3 :size="13" /></button>
                   <button class="text-ink-500 hover:text-red-600 px-1 py-0.5 rounded" @click="deleteIdea(ideas.find(i => i.id === e.ideaId))" title="Delete"><Trash2 :size="13" /></button>
                 </td>
               </tr>
@@ -965,7 +965,7 @@ const chart = computed(() => {
                 :key="opt.value"
                 type="button"
                 class="text-xs px-2 py-1.5 rounded-md border transition-colors font-medium"
-                :class="form.type === opt.value ? 'border-accent-500 bg-accent-50 text-accent-700' : 'border-ink-300 bg-white text-ink-700 hover:border-accent-300'"
+                :class="form.type === opt.value ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-ink-300 bg-white text-ink-700 hover:border-brand-300'"
                 :title="opt.hint"
                 @click="form.type = opt.value"
               >{{ opt.label }}</button>
@@ -982,7 +982,7 @@ const chart = computed(() => {
           <UiInput v-model="form.event_date" type="date" label="Target date" />
           <label v-if="form.type === 'grant'" class="block">
             <span class="block text-xs font-medium text-ink-700 mb-1">ISO / NSO</span>
-            <select v-model="form.kind" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500">
+            <select v-model="form.kind" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
               <option value="ISO">ISO</option>
               <option value="NSO">NSO</option>
             </select>
@@ -992,9 +992,9 @@ const chart = computed(() => {
             <div class="flex items-center justify-between gap-2 mb-2">
               <span class="text-xs font-medium text-ink-700">Size — enter as</span>
               <div class="inline-flex rounded-md border border-ink-300 bg-white p-0.5 text-xs">
-                <button type="button" class="px-3 py-1 rounded-[3px] font-medium" :class="inputMode === 'shares' ? 'bg-accent-500 text-white shadow-sm' : 'text-ink-600 hover:text-ink-900'" @click="inputMode = 'shares'">Shares</button>
-                <button type="button" class="px-3 py-1 rounded-[3px] font-medium" :class="inputMode === 'pct' ? 'bg-accent-500 text-white shadow-sm' : 'text-ink-600 hover:text-ink-900'" @click="inputMode = 'pct'">%</button>
-                <button type="button" class="px-3 py-1 rounded-[3px] font-medium" :class="inputMode === 'value' ? 'bg-accent-500 text-white shadow-sm' : 'text-ink-600 hover:text-ink-900'" @click="inputMode = 'value'">$</button>
+                <button type="button" class="px-3 py-1 rounded-[3px] font-medium" :class="inputMode === 'shares' ? 'bg-brand-500 text-white shadow-sm' : 'text-ink-600 hover:text-ink-900'" @click="inputMode = 'shares'">Shares</button>
+                <button type="button" class="px-3 py-1 rounded-[3px] font-medium" :class="inputMode === 'pct' ? 'bg-brand-500 text-white shadow-sm' : 'text-ink-600 hover:text-ink-900'" @click="inputMode = 'pct'">%</button>
+                <button type="button" class="px-3 py-1 rounded-[3px] font-medium" :class="inputMode === 'value' ? 'bg-brand-500 text-white shadow-sm' : 'text-ink-600 hover:text-ink-900'" @click="inputMode = 'value'">$</button>
               </div>
             </div>
             <div class="grid grid-cols-3 gap-2.5">
@@ -1021,7 +1021,7 @@ const chart = computed(() => {
 
           <label class="block col-span-2">
             <span class="block text-xs font-medium text-ink-700 mb-1">Notes (optional)</span>
-            <textarea v-model="form.notes" rows="2" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-accent-500" />
+            <textarea v-model="form.notes" rows="2" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
           </label>
         </div>
 

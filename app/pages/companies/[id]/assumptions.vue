@@ -13,6 +13,6 @@ onMounted(() => {
 
 <template>
   <div class="max-w-xl mx-auto py-16 text-center text-ink-600 text-sm">
-    Redirecting to <NuxtLink :to="`/companies/${id}/cap-table`" class="text-accent-600 hover:text-accent-700 font-medium">Financings</NuxtLink>…
+    Redirecting to <NuxtLink :to="`/companies/${id}/cap-table`" class="text-brand-600 hover:text-brand-700 font-medium">Financings</NuxtLink>…
   </div>
 </template>

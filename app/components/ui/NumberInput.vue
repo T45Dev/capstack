@@ -98,10 +98,10 @@ function onInput(e: Event) {
   />
   <div
     v-else
-    class="flex items-center rounded-md border focus-within:ring-2 focus-within:ring-accent-500"
+    class="flex items-center rounded-md border focus-within:ring-2 focus-within:ring-brand-500"
     :class="disabled
       ? 'border-ink-200 bg-ink-100 cursor-not-allowed'
-      : 'border-ink-300 bg-white focus-within:border-accent-500'"
+      : 'border-ink-300 bg-white focus-within:border-brand-500'"
   >
     <span v-if="prefix" class="pl-1.5 text-ink-500 text-sm pointer-events-none">{{ prefix }}</span>
     <input
