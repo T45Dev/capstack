@@ -55,8 +55,15 @@ interface Props {
   rounds: RoundColumn[]
   showFormulas?: boolean
   density?: 'compact' | 'regular' | 'comfy'
+  // Layout mode for the row stack:
+  //   flat    — chronological (whatever order the parent passes)
+  //   tranche — children with parent_round_code cluster under their parent;
+  //             everyone keeps relative chronological order otherwise
+  //   year    — insert a thin year-divider row between rounds in different
+  //             close_date years
+  groupBy?: 'flat' | 'tranche' | 'year'
 }
-const props = withDefaults(defineProps<Props>(), { showFormulas: true, density: 'regular' })
+const props = withDefaults(defineProps<Props>(), { showFormulas: true, density: 'regular', groupBy: 'flat' })
 
 const emit = defineEmits<{
   (e: 'refresh'): void
@@ -342,6 +349,63 @@ function friendlyLabel(r: RoundColumn): string {
   const name = (draftName ?? r.name ?? '')
   return name.trim() || r.code
 }
+
+// ── Grouped row list ───────────────────────────────────────────────────
+// displayRows is the projection of `rounds` through groupBy. Each item is
+// either a real round (rendered as a data row) or a divider (rendered as
+// a year-band row spanning all columns). Tranche grouping doesn't insert
+// dividers — it just reorders children to follow their parents.
+interface DataRow { kind: 'data'; round: RoundColumn }
+interface DividerRow { kind: 'divider'; label: string }
+type Row = DataRow | DividerRow
+
+const displayRows = computed<Row[]>(() => {
+  if (props.groupBy === 'tranche') {
+    // Walk rounds in their incoming order. For each round, after emitting
+    // it, also emit any other round whose parent_round_code matches it (and
+    // hasn't been emitted yet). Children stay in their relative order.
+    const seen = new Set<string>()
+    const out: Row[] = []
+    for (const r of props.rounds) {
+      if (seen.has(r.round_id)) continue
+      out.push({ kind: 'data', round: r })
+      seen.add(r.round_id)
+      for (const child of props.rounds) {
+        if (seen.has(child.round_id)) continue
+        if (child.parent_round_code === r.code) {
+          out.push({ kind: 'data', round: child })
+          seen.add(child.round_id)
+        }
+      }
+    }
+    // Any orphans left (children pointing at non-existent parents) get
+    // appended in their original order so they don't vanish.
+    for (const r of props.rounds) {
+      if (!seen.has(r.round_id)) {
+        out.push({ kind: 'data', round: r })
+        seen.add(r.round_id)
+      }
+    }
+    return out
+  }
+
+  if (props.groupBy === 'year') {
+    const out: Row[] = []
+    let prevYear: string | null = null
+    for (const r of props.rounds) {
+      const year = r.close_date ? r.close_date.slice(0, 4) : 'undated'
+      if (year !== prevYear) {
+        out.push({ kind: 'divider', label: year === 'undated' ? 'Undated' : year })
+        prevYear = year
+      }
+      out.push({ kind: 'data', round: r })
+    }
+    return out
+  }
+
+  // flat
+  return props.rounds.map(r => ({ kind: 'data' as const, round: r }))
+})
 </script>
 
 <template>
@@ -396,81 +460,93 @@ function friendlyLabel(r: RoundColumn): string {
         </thead>
 
         <tbody>
-          <tr
-            v-for="r in rounds"
-            :key="r.round_id"
-            class="border-b border-ink-100 last:border-b-0"
-            :class="effectiveKind(r) === 'open' ? 'row-open' : 'hover:bg-ink-50/40'"
-            :style="rowHeights[r.round_id] ? { height: rowHeights[r.round_id] + 'px' } : undefined"
-          >
-            <!-- Sticky round-name cell. -->
-            <td
-              class="relative sticky left-0 z-10 border-r border-ink-200 align-top"
-              :class="[
-                effectiveKind(r) === 'open' ? 'bg-brand-soft/30' : 'bg-white',
-                cellPadCls,
-              ]"
-            >
-              <MatrixRoundNameCell
-                :round-id="r.round_id"
-                :name="effective(r, 'name') ?? r.name"
-                :code="r.code"
-                :close-date="effective(r, 'close_date') ?? r.close_date"
-                :status="effectiveKind(r)"
-                :parent-code="effective(r, 'parent_round_code') ?? r.parent_round_code"
-                :is-parent="isParent(r)"
-                :other-rounds="otherRoundsFor(r)"
-                :row-editable="effectiveKind(r) === 'open'"
-                @update-name="(v) => setDraft(r.round_id, 'name', v)"
-                @update-date="(v) => setDraft(r.round_id, 'close_date', v)"
-                @update-parent="(v) => setDraft(r.round_id, 'parent_round_code', v)"
-                @set-kind="(v) => setKind(r.round_id, v)"
-                @commit="commitRound(r.round_id)"
-                @delete="deleteRound(r.round_id, friendlyLabel(r))"
-              />
-              <div class="row-resize" @mousedown="(e) => startRowResize(e, r.round_id)" />
-            </td>
+          <template v-for="(row, rowIdx) in displayRows" :key="row.kind === 'data' ? row.round.round_id : `div-${rowIdx}`">
+            <!-- Year-divider row (only present when groupBy === 'year'). -->
+            <tr v-if="row.kind === 'divider'" class="border-b border-ink-100">
+              <td
+                :colspan="colDefs.length + 1"
+                class="px-4 py-1.5 text-[10.5px] uppercase tracking-[0.08em] text-ink-500 font-semibold bg-ink-50 border-l border-ink-200 sticky left-0 z-[5]"
+              >
+                {{ row.label }}
+              </td>
+            </tr>
 
-            <!-- Field cells. -->
-            <td
-              v-for="(c, idx) in colDefs"
-              :key="c.key"
-              class="align-middle"
-              :class="[
-                cellPadCls,
-                isFirstInGroup(idx) ? 'border-l border-ink-200' : '',
-                groupAccent(idx),
-              ]"
+            <!-- Data row. -->
+            <tr
+              v-else
+              class="border-b border-ink-100 last:border-b-0"
+              :class="effectiveKind(row.round) === 'open' ? 'row-open' : 'hover:bg-ink-50/40'"
+              :style="rowHeights[row.round.round_id] ? { height: rowHeights[row.round.round_id] + 'px' } : undefined"
             >
-              <MatrixTypedCell
-                v-if="c.kind === 'typed'"
-                :value="valueOf(r, c.key)"
-                :editable="effectiveKind(r) === 'open'"
-                :kind="c.cellKind"
-                align="right"
-                :title="tooltip(c.key, r)"
-                @update="(v) => setDraft(r.round_id, c.key as any, v ?? (c.cellKind === 'shares' ? 0 : null))"
-                @commit="commitRound(r.round_id)"
-              />
-              <MatrixOverrideCell
-                v-else-if="c.kind === 'override'"
-                :derived-value="r.preferred_issued || null"
-                :override-value="effective(r, 'preferred_issued_override') ?? r.preferred_issued_override"
-                :editable="effectiveKind(r) === 'open'"
-                :title="tooltip(c.key, r)"
-                @update="(v) => setDraft(r.round_id, 'preferred_issued_override', v)"
-                @commit="commitRound(r.round_id)"
-              />
-              <MatrixDerivedCell
-                v-else
-                :value="valueOf(r, c.key)"
-                :kind="c.cellKind"
-                align="right"
-                :emphasis="c.emphasis === true"
-                :title="tooltip(c.key, r)"
-              />
-            </td>
-          </tr>
+              <!-- Sticky round-name cell. -->
+              <td
+                class="relative sticky left-0 z-10 border-r border-ink-200 align-top"
+                :class="[
+                  effectiveKind(row.round) === 'open' ? 'bg-brand-soft/30' : 'bg-white',
+                  cellPadCls,
+                ]"
+              >
+                <MatrixRoundNameCell
+                  :round-id="row.round.round_id"
+                  :name="effective(row.round, 'name') ?? row.round.name"
+                  :code="row.round.code"
+                  :close-date="effective(row.round, 'close_date') ?? row.round.close_date"
+                  :status="effectiveKind(row.round)"
+                  :parent-code="effective(row.round, 'parent_round_code') ?? row.round.parent_round_code"
+                  :is-parent="isParent(row.round)"
+                  :other-rounds="otherRoundsFor(row.round)"
+                  :row-editable="effectiveKind(row.round) === 'open'"
+                  @update-name="(v) => setDraft(row.round.round_id, 'name', v)"
+                  @update-date="(v) => setDraft(row.round.round_id, 'close_date', v)"
+                  @update-parent="(v) => setDraft(row.round.round_id, 'parent_round_code', v)"
+                  @set-kind="(v) => setKind(row.round.round_id, v)"
+                  @commit="commitRound(row.round.round_id)"
+                  @delete="deleteRound(row.round.round_id, friendlyLabel(row.round))"
+                />
+                <div class="row-resize" @mousedown="(e) => startRowResize(e, row.round.round_id)" />
+              </td>
+
+              <!-- Field cells. -->
+              <td
+                v-for="(c, idx) in colDefs"
+                :key="c.key"
+                class="align-middle"
+                :class="[
+                  cellPadCls,
+                  isFirstInGroup(idx) ? 'border-l border-ink-200' : '',
+                  groupAccent(idx),
+                ]"
+              >
+                <MatrixTypedCell
+                  v-if="c.kind === 'typed'"
+                  :value="valueOf(row.round, c.key)"
+                  :editable="effectiveKind(row.round) === 'open'"
+                  :kind="c.cellKind"
+                  align="right"
+                  :title="tooltip(c.key, row.round)"
+                  @update="(v) => setDraft(row.round.round_id, c.key as any, v ?? (c.cellKind === 'shares' ? 0 : null))"
+                  @commit="commitRound(row.round.round_id)"
+                />
+                <MatrixOverrideCell
+                  v-else-if="c.kind === 'override'"
+                  :derived-value="row.round.preferred_issued || null"
+                  :override-value="effective(row.round, 'preferred_issued_override') ?? row.round.preferred_issued_override"
+                  :editable="effectiveKind(row.round) === 'open'"
+                  :title="tooltip(c.key, row.round)"
+                  @update="(v) => setDraft(row.round.round_id, 'preferred_issued_override', v)"
+                  @commit="commitRound(row.round.round_id)"
+                />
+                <MatrixDerivedCell
+                  v-else
+                  :value="valueOf(row.round, c.key)"
+                  :kind="c.cellKind"
+                  align="right"
+                  :emphasis="c.emphasis === true"
+                  :title="tooltip(c.key, row.round)"
+                />
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
     </div>
