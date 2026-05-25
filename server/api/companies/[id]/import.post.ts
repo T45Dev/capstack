@@ -94,7 +94,14 @@ export default defineEventHandler(async (event) => {
       // page and Option Pool Impact page.
     }
 
-    // Share classes
+    // Share classes — always populate the lookup map (downstream sections
+    // need to link holdings to share classes by code), but only INSERT new
+    // rows when the operator opted to include them. Mirrors the
+    // stakeholders pattern below.
+    const codeToId = new Map<string, string>()
+    const existingSC = db().prepare('SELECT id, code FROM share_classes WHERE company_id = ?').all(id) as any[]
+    for (const row of existingSC) codeToId.set(row.code, row.id)
+
     if (include.shareClasses) {
     const insSC = db().prepare(`
       INSERT INTO share_classes (id, company_id, code, name, kind, seniority, authorized, issue_price)
@@ -106,9 +113,6 @@ export default defineEventHandler(async (event) => {
         authorized = excluded.authorized,
         issue_price = excluded.issue_price
     `)
-    const codeToId = new Map<string, string>()
-    const existingSC = db().prepare('SELECT id, code FROM share_classes WHERE company_id = ?').all(id) as any[]
-    for (const row of existingSC) codeToId.set(row.code, row.id)
 
     let seniority = 0
     for (const sc of parsed.shareClasses) {
