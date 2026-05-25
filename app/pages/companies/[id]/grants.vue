@@ -100,15 +100,25 @@ const postPPS = computed(() => (compute.value?.round?.pricePerShare as number) |
 const outstanding = computed(() => data.value!.grants.filter(g => g.status === 'outstanding'))
 const proposed = computed(() => data.value!.grants.filter(g => g.status === 'proposed'))
 
-const totalOutstanding = computed(() => outstanding.value.reduce((a, g) => a + g.quantity, 0))
-const totalProposed = computed(() => proposed.value.reduce((a, g) => a + g.quantity, 0))
-// Sum of historical exercises / forfeitures across all outstanding grants.
-// Comes from Carta's option-plan sheet; grants without per-grant detail
-// contribute 0 here.
+// Per the pool mental model:
+//   Issued = Outstanding + Exercised + Forfeited + Expired
+//   Outstanding = Issued − Exercised − Forfeited − Expired
+// Derived from per-event counts on each grant (Carta's per-grant
+// detail). This way Outstanding correctly decreases when any
+// lifecycle event lands, regardless of whether Carta's Quantity
+// Outstanding column is present / up-to-date. Forfeited and Expired
+// are lumped together for display (same effect on the pool — shares
+// return to Available).
+const totalIssued = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_issued || g.quantity), 0))
 const totalExercised = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_exercised || 0), 0))
+const totalForfeitedOrExpired = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_forfeited || 0) + (g.quantity_expired || 0), 0))
+// Keep the split available for the lifecycle breakdown / audit views.
 const totalForfeited = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_forfeited || 0), 0))
 const totalExpired = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_expired || 0), 0))
-const totalIssued = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_issued || g.quantity), 0))
+const totalOutstanding = computed(() =>
+  totalIssued.value - totalExercised.value - totalForfeitedOrExpired.value,
+)
+const totalProposed = computed(() => proposed.value.reduce((a, g) => a + g.quantity, 0))
 // Original Authorized = sum of rounds.option_pool_issued (operator-
 // typed on the Financings page). Falls back to option_pools (Carta
 // import) when no per-round values are set. Pool Impact uses the
@@ -651,11 +661,12 @@ const fieldLabels: Record<string, string> = {
           >{{ fmtShares(poolAvailable) }}</span>
         </div>
       </div>
-      <!-- Lifetime row: Issued = Outstanding + Exercised + Forfeited
-           + Expired. Decomposes every option ever granted into where
-           those shares are now (live, gone to common, returned to pool
-           via forfeit, returned via expiry). The lifecycle audit;
-           doesn't drive Available. -->
+      <!-- Lifetime row: Issued = Outstanding + Exercised + Forfeited/
+           Expired. Decomposes every option ever granted into where
+           those shares are now (live, gone to common, or returned to
+           Available). Forfeit and Expire are combined — they have
+           identical pool effect; Carta tracks them separately for
+           audit and the split is visible on tooltip. -->
       <div class="mt-3 pt-3 border-t border-ink-200 flex flex-wrap items-end gap-3 text-ink-700 num text-sm">
         <span class="text-[10px] uppercase tracking-wider text-ink-500">Lifetime issued</span>
         <div class="flex items-end gap-1.5">
@@ -672,14 +683,9 @@ const fieldLabels: Record<string, string> = {
           <span class="font-medium" :class="totalExercised > 0 ? 'text-accent-700' : 'text-ink-400'">{{ fmtShares(totalExercised) }}</span>
         </div>
         <span class="text-ink-400">+</span>
-        <div class="flex items-end gap-1.5">
-          <span class="text-ink-500" title="Forfeited (unvested at termination) — shares returned to Available">Forfeited</span>
-          <span class="font-medium" :class="totalForfeited > 0 ? 'text-red-700' : 'text-ink-400'">{{ fmtShares(totalForfeited) }}</span>
-        </div>
-        <span class="text-ink-400">+</span>
-        <div class="flex items-end gap-1.5">
-          <span class="text-ink-500" title="Expired (vested but unexercised within the window) — shares returned to Available">Expired</span>
-          <span class="font-medium" :class="totalExpired > 0 ? 'text-red-700' : 'text-ink-400'">{{ fmtShares(totalExpired) }}</span>
+        <div class="flex items-end gap-1.5" :title="`Forfeited (unvested at termination) ${fmtShares(totalForfeited)} + Expired (vested but unexercised) ${fmtShares(totalExpired)} — both return shares to Available`">
+          <span class="text-ink-500">Forfeited/Expired</span>
+          <span class="font-medium" :class="totalForfeitedOrExpired > 0 ? 'text-red-700' : 'text-ink-400'">{{ fmtShares(totalForfeitedOrExpired) }}</span>
         </div>
       </div>
     </div>

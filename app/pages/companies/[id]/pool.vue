@@ -318,29 +318,30 @@ const totals = computed(() => {
   // top-ups or Carta fallback). Same computation as grants.vue so
   // the two pages MUST agree.
   const poolAuthorizedOriginal = events.value.filter(e => e.type === 'pool_topup' && !isIdea(e.source)).reduce((a, e) => a + e.shares, 0)
-  // Outstanding = sum of CURRENTLY-HELD grant quantities, pulled from
-  // the grants table directly (not from the timeline events). The grant
-  // event on the timeline uses the ORIGINAL issued size at the issue
-  // date so the chart reflects the full historical allocation — and
-  // subsequent exercise/forfeit/expire events grow Available back as
-  // the shares leave Outstanding. The headline stat shows the current
-  // balance: Outstanding = currently-held only.
-  const outstandingShares = (grantsData.value?.grants || [])
-    .filter((g: any) => g.status === 'outstanding')
-    .reduce((a: number, g: any) => a + (g.quantity || 0), 0)
+  // Lifetime grant accounting: lifecycle counts from the Carta option-
+  // plan sheet via per-grant detail.
+  const ogrants = (grantsData.value?.grants || []).filter((g: any) => g.status === 'outstanding')
+  const totalIssued = ogrants.reduce((a: number, g: any) => a + (g.quantity_issued || g.quantity), 0)
+  const totalExercised = ogrants.reduce((a: number, g: any) => a + (g.quantity_exercised || 0), 0)
+  const totalForfeited = ogrants.reduce((a: number, g: any) => a + (g.quantity_forfeited || 0), 0)
+  const totalExpired = ogrants.reduce((a: number, g: any) => a + (g.quantity_expired || 0), 0)
+  // Forfeit + Expire have identical pool effect (Outstanding → Available
+  // with Authorized unchanged), so they're lumped in the headline math.
+  // Carta still tracks them separately for audit; the breakdown stat
+  // below shows the split.
+  const totalForfeitedOrExpired = totalForfeited + totalExpired
+  // Outstanding = Issued − Exercised − Forfeited − Expired. Derived
+  // from per-event counts so it correctly decreases on every lifecycle
+  // event (rather than relying on Carta's Quantity Outstanding column
+  // being up-to-date).
+  const outstandingShares = totalIssued - totalExercised - totalForfeitedOrExpired
   const proposedShares = events.value.filter(e => e.source === 'grant_proposed').reduce((a, e) => a + e.shares, 0)
   const ideaGrants = events.value.filter(e => isIdea(e.source) && (e.type === 'grant' || e.type === 'reserve')).reduce((a, e) => a + e.shares, 0)
   const ideaTopups = events.value.filter(e => isIdea(e.source) && e.type === 'pool_topup').reduce((a, e) => a + e.shares, 0)
   const ideaForfeits = events.value.filter(e => isIdea(e.source) && e.type === 'forfeit').reduce((a, e) => a + e.shares, 0)
-  // Idea exercises grow Available too (shares leave Outstanding).
+  // Idea exercises shrink Authorized (per the mental model table).
   const ideaExercises = events.value.filter(e => isIdea(e.source) && e.type === 'exercise').reduce((a, e) => a + e.shares, 0)
   const floorShares = events.value.filter(e => isIdea(e.source) && e.type === 'floor').reduce((a, e) => Math.max(a, e.shares), 0)
-  // Lifetime grant accounting: lifecycle counts from the Carta option-
-  // plan sheet via per-grant detail.
-  const ogrants = (grantsData.value?.grants || []).filter((g: any) => g.status === 'outstanding')
-  const totalExercised = ogrants.reduce((a: number, g: any) => a + (g.quantity_exercised || 0), 0)
-  const totalForfeited = ogrants.reduce((a: number, g: any) => a + (g.quantity_forfeited || 0), 0)
-  const totalIssued = ogrants.reduce((a: number, g: any) => a + (g.quantity_issued || g.quantity), 0)
   // Displayed Authorized = Original − Exercised. Exercised shares
   // leave the system (Outstanding → Common; both shrink by N;
   // Available unchanged). Identity then holds:
@@ -354,7 +355,7 @@ const totals = computed(() => {
   // and reserves subtract from Available; topups and forfeits add to
   // it; idea exercises shrink Authorized (so they reduce Available too).
   const projectedEnd = poolAuthorized + ideaTopups + ideaForfeits - outstandingShares - proposedShares - ideaGrants - ideaExercises
-  return { poolAuthorized, outstandingShares, proposedShares, ideaGrants, ideaTopups, ideaForfeits, ideaExercises, floorShares, available, projectedEnd, totalExercised, totalForfeited, totalIssued }
+  return { poolAuthorized, outstandingShares, proposedShares, ideaGrants, ideaTopups, ideaForfeits, ideaExercises, floorShares, available, projectedEnd, totalExercised, totalForfeited, totalExpired, totalForfeitedOrExpired, totalIssued }
 })
 
 // ---- Idea modal ----
@@ -643,9 +644,10 @@ const chart = computed(() => {
           <span class="text-2xl font-semibold" :class="totals.projectedEnd < 0 ? 'text-red-700' : 'text-emerald-700'">{{ fmtShares(totals.available) }}</span>
         </div>
       </div>
-      <!-- Lifetime equation (always shown — exercises shrink the pool,
-           forfeits return shares to Available, so the operator needs to
-           see these numbers even when they're zero today). -->
+      <!-- Lifetime equation: Issued = Outstanding + Exercised
+           + (Forfeited+Expired). Forfeit and Expire have identical
+           pool effect (Outstanding → Available with Authorized
+           unchanged), so they're combined here. -->
       <div class="mt-3 pt-3 border-t border-ink-200 flex flex-wrap items-end gap-3 text-ink-700 num text-sm">
         <span class="text-[10px] uppercase tracking-wider text-ink-500">Lifetime</span>
         <div class="flex items-end gap-1.5">
@@ -663,9 +665,9 @@ const chart = computed(() => {
           <span class="font-medium" :class="totals.totalExercised > 0 ? 'text-accent-700' : 'text-ink-400'">{{ fmtShares(totals.totalExercised) }}</span>
         </div>
         <span class="text-ink-400">+</span>
-        <div class="flex items-end gap-1.5">
-          <span class="text-ink-500">Forfeited</span>
-          <span class="font-medium" :class="totals.totalForfeited > 0 ? 'text-red-700' : 'text-ink-400'">{{ fmtShares(totals.totalForfeited) }}</span>
+        <div class="flex items-end gap-1.5" :title="`Forfeited ${fmtShares(totals.totalForfeited)} + Expired ${fmtShares(totals.totalExpired)}`">
+          <span class="text-ink-500">Forfeited/Expired</span>
+          <span class="font-medium" :class="totals.totalForfeitedOrExpired > 0 ? 'text-red-700' : 'text-ink-400'">{{ fmtShares(totals.totalForfeitedOrExpired) }}</span>
         </div>
       </div>
 
