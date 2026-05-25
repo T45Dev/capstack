@@ -62,16 +62,19 @@ const fdsIncludingPool = computed(() => {
 type EventType = 'pool_topup' | 'grant' | 'exercise' | 'forfeit' | 'floor' | 'reserve'
 
 function directionFor(type: EventType): -1 | 0 | 1 {
-  // Running balance tracks AVAILABLE over time. Authorized stays
-  // constant; every lifecycle event that drops Outstanding grows
-  // Available by the same amount (Available = Authorized − Outstanding).
+  // Running balance tracks AVAILABLE over time.
   //   - pool_topup: Authorized grows; Available grows by topup amount
   //   - grant:      Available → Outstanding (Available shrinks)
-  //   - forfeit / expire / exercise: Outstanding decreases →
-  //                 Available grows by the same amount.
+  //   - forfeit (covers expire too): unvested/unexercised options return
+  //                 to the pool → Available grows by the same amount
+  //   - exercise:   option converts to Common stock. Authorized stays
+  //                 the same but those shares were CARVED OUT of the
+  //                 pool the moment they were granted; exercising
+  //                 doesn't return them. Direction = 0. The Outstanding
+  //                 count drops, but Available stays put.
   //   - reserve:    pre-commit shares for a future grant → Available shrinks
   //   - floor:      a constraint, not a balance change
-  if (type === 'pool_topup' || type === 'forfeit' || type === 'exercise') return 1
+  if (type === 'pool_topup' || type === 'forfeit') return 1
   if (type === 'grant' || type === 'reserve') return -1
   return 0
 }
@@ -396,21 +399,20 @@ const totals = computed(() => {
   // Idea exercises shrink Authorized (per the mental model table).
   const ideaExercises = events.value.filter(e => isIdea(e.source) && e.type === 'exercise').reduce((a, e) => a + e.shares, 0)
   const floorShares = events.value.filter(e => isIdea(e.source) && e.type === 'floor').reduce((a, e) => Math.max(a, e.shares), 0)
-  // Authorized stays CONSTANT. Available subtracts everything that's
-  // claimed against the pool — Outstanding, Proposed, and Ideas
-  // (hypothetical consuming events: grants + reserves). Equation:
-  //   Authorized = Outstanding + Proposed + Ideas + Available
-  // Outstanding already excludes Exercised/Forfeited/Expired (it's
-  // Issued − all three), so those shares flow into Available
-  // implicitly. The lifetime decomposition row shows the breakdown
-  // for audit.
+  // Authorized stays CONSTANT. Available = Authorized minus everything
+  // that's been "carved out" — Outstanding options + Exercised options
+  // (which became Common stock and ARE NOT coming back) + Proposed +
+  // hypothetical consuming Ideas. Forfeited/Expired return to the pool
+  // (they're already excluded from Outstanding); Exercised does NOT.
+  // Equation:
+  //   Authorized = Outstanding + Exercised + Proposed + Ideas + Available
   const poolAuthorized = poolAuthorizedOriginal
-  const available = poolAuthorized - outstandingShares - proposedShares - ideaGrants
+  const available = poolAuthorized - outstandingShares - totalExercised - proposedShares - ideaGrants
   // Projected = Available plus idea events that ADD to it (top-ups,
-  // forfeits, exercises). Available itself only nets consuming ideas;
-  // projectedEnd shows what Available would be if every idea
-  // including the positive ones lands.
-  const projectedEnd = available + ideaTopups + ideaForfeits + ideaExercises
+  // forfeits). Idea exercises don't grow Available — same logic as
+  // historical exercises. projectedEnd shows what Available would be
+  // if every queued idea lands.
+  const projectedEnd = available + ideaTopups + ideaForfeits
   return { poolAuthorized, outstandingShares, proposedShares, ideaGrants, ideaTopups, ideaForfeits, ideaExercises, floorShares, available, projectedEnd, totalExercised, totalForfeited, totalExpired, totalForfeitedOrExpired, totalIssued }
 })
 
@@ -576,12 +578,17 @@ function arcPath(cx: number, cy: number, r: number, startA: number, endA: number
 
 const pieSlices = computed<PieSlice[]>(() => {
   const t = totals.value
-  // Available = pool authorized + idea topups + idea forfeits - already-allocated.
-  // Clamp negative (over-allocated) to zero in the chart so a slice never inverts.
+  // The pie shows where every share of the Authorized pool has gone.
+  // Exercised options are carved out of the pool permanently (they
+  // converted to Common stock), so they appear as their own slice
+  // alongside Outstanding/Proposed/Ideas/Available. Available is the
+  // remainder — clamped at zero so a slice never inverts when the pool
+  // is over-allocated.
   const totalPie = t.poolAuthorized + t.ideaTopups + t.ideaForfeits
-  const available = Math.max(0, totalPie - t.outstandingShares - t.proposedShares - t.ideaGrants)
+  const available = Math.max(0, totalPie - t.outstandingShares - t.totalExercised - t.proposedShares - t.ideaGrants)
   const segs = [
     { key: 'outstanding', label: 'Outstanding', value: t.outstandingShares, color: '#475569' },  // ink-500
+    { key: 'exercised',   label: 'Exercised',   value: t.totalExercised,    color: '#94a3b8' },  // ink-400 — gone (lighter)
     { key: 'proposed',    label: 'Proposed',    value: t.proposedShares,    color: '#2563eb' },  // brand-500
     { key: 'ideas',       label: 'Ideas',       value: t.ideaGrants,        color: '#fbbf24' },  // amber-400
     { key: 'available',   label: 'Available',   value: available,           color: '#a7f3d0' },  // emerald-200
@@ -676,11 +683,12 @@ const chart = computed(() => {
          charts side-by-side. Stays put while the timeline below scrolls. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-4 p-4 shrink-0">
       <!-- Pool math equation:
-             Authorized = Outstanding + Proposed + Available
-           Exercised / Forfeited / Expired are already pulled out of
-           Outstanding (= Issued − all three), so they flow into
-           Available implicitly. Lifetime row below shows the breakdown
-           for audit. -->
+             Authorized = Outstanding + Exercised + Proposed + Ideas + Available
+           Exercised shares converted to Common stock — they were carved
+           out of the pool the moment they were granted and DON'T return
+           on exercise. Forfeit/Expire DO return (they're already excluded
+           from Outstanding, which flows into Available via the
+           subtraction). Lifetime row below shows the breakdown. -->
       <div class="flex flex-wrap items-end gap-3 text-ink-900 num">
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Pool authorized</span>
@@ -691,10 +699,15 @@ const chart = computed(() => {
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Outstanding</span>
           <span class="text-2xl font-semibold">{{ fmtShares(totals.outstandingShares) }}</span>
         </div>
+        <span v-if="totals.totalExercised > 0" class="text-2xl text-ink-400 pb-1">+</span>
+        <div v-if="totals.totalExercised > 0" class="flex flex-col items-start" title="Exercised options converted to Common stock. Out of the pool permanently — not returning to Available.">
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Exercised</span>
+          <span class="text-2xl font-semibold text-ink-500">{{ fmtShares(totals.totalExercised) }}</span>
+        </div>
         <span class="text-2xl text-ink-400 pb-1">+</span>
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Proposed</span>
-          <span class="text-2xl font-semibold text-amber-700">{{ fmtShares(totals.proposedShares) }}</span>
+          <span class="text-2xl font-semibold text-warn">{{ fmtShares(totals.proposedShares) }}</span>
         </div>
         <span v-if="totals.ideaGrants > 0" class="text-2xl text-ink-400 pb-1">+</span>
         <div v-if="totals.ideaGrants > 0" class="flex flex-col items-start">
@@ -704,7 +717,7 @@ const chart = computed(() => {
         <span class="text-2xl text-ink-400 pb-1">+</span>
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Available</span>
-          <span class="text-2xl font-semibold" :class="totals.available < 0 ? 'text-red-700' : 'text-emerald-700'">{{ fmtShares(totals.available) }}</span>
+          <span class="text-2xl font-semibold" :class="totals.available < 0 ? 'text-red-700' : 'text-ok'">{{ fmtShares(totals.available) }}</span>
         </div>
       </div>
       <!-- Lifetime equation: Issued = Outstanding + Exercised
@@ -849,17 +862,21 @@ const chart = computed(() => {
             </thead>
             <tbody>
               <tr v-for="e in filteredEvents" :key="e.id" class="hover:bg-brand-50/40 border-b border-ink-200">
-                <td class="px-2.5 py-1.5" :class="e.dateIsPlaceholder ? 'text-amber-700' : 'text-ink-600'">
+                <td class="px-2.5 py-1.5 relative" :class="e.dateIsPlaceholder ? 'text-warn' : 'text-ink-600'">
                   <template v-if="e.grantId">
-                    <input
-                      type="date"
-                      :value="e.dateIsPlaceholder ? '' : e.date"
-                      :class="['bg-transparent border rounded px-1 py-0.5 text-[12px] focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500 num',
-                               e.dateIsPlaceholder ? 'border-amber-300 text-amber-700 hover:border-amber-500' : 'border-transparent text-ink-700 hover:border-ink-300']"
-                      :title="e.dateIsPlaceholder ? `Placeholder — no issue date on the source grant. Pick one to set it.` : 'Grant issue date — edit to update.'"
-                      @change="commitGrantDate(e.grantId!, ($event.target as HTMLInputElement).value)"
-                    />
-                    <span v-if="e.dateIsPlaceholder" class="ml-0.5 text-[9px] uppercase tracking-wide text-amber-700/80">est</span>
+                    <label
+                      class="block min-w-[110px]"
+                      :class="e.dateIsPlaceholder ? 'cell-edit border-warn/30' : ''"
+                      :title="e.dateIsPlaceholder ? 'Placeholder — no issue date on the source grant. Type one to set it.' : 'Grant issue date — edit to update.'"
+                    >
+                      <DateInput
+                        variant="bare"
+                        :model-value="e.dateIsPlaceholder ? null : e.date"
+                        placeholder="MM/DD/YYYY"
+                        @update:model-value="(v) => commitGrantDate(e.grantId!, v || '')"
+                      />
+                    </label>
+                    <span v-if="e.dateIsPlaceholder" class="ml-0.5 text-[9px] uppercase tracking-wide text-warn/80">est</span>
                   </template>
                   <template v-else>
                     {{ fmtDate(e.date) }}

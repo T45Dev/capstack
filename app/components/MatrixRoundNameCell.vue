@@ -11,8 +11,8 @@
 //
 // Right-edge of the row gets the row-resize handle (lives outside this cell,
 // in the parent <td>, so it spans the full row height).
-import { Calendar, Link2, Trash2 } from 'lucide-vue-next'
-import { fmtDate, normalizeDate } from '~/utils/format'
+import { Link2, Trash2 } from 'lucide-vue-next'
+import { fmtDate } from '~/utils/format'
 
 interface Props {
   roundId: string
@@ -44,11 +44,6 @@ const displayName = computed(() => (props.name ?? '').trim() || props.code)
 const isOpen = computed(() => props.status === 'open')
 const isChild = computed(() => !!props.parentCode)
 const parentRound = computed(() => props.otherRounds.find(r => r.code === props.parentCode))
-
-function onDateChange(e: Event) {
-  const v = (e.target as HTMLInputElement).value || null
-  emit('update-date', v ? normalizeDate(v) : null)
-}
 </script>
 
 <template>
@@ -75,15 +70,14 @@ function onDateChange(e: Event) {
         <span v-if="isOpen" class="text-[9px] uppercase tracking-wider text-brand-edge font-semibold">Open</span>
       </div>
 
-      <!-- Date + open/closed toggle. Date is editable; the kind toggle is
-           a two-button segment that flips the round between open/closed. -->
-      <div class="mt-1 flex items-center gap-1.5">
-        <Calendar :size="11" class="text-ink-400 shrink-0" />
-        <input
-          type="date"
-          :value="closeDate || ''"
-          class="bg-transparent text-[11px] text-ink-500 num border border-transparent hover:border-ink-200 focus:border-brand focus:bg-white focus:outline-none rounded px-1 py-0.5"
-          @change="onDateChange"
+      <!-- Date row. Editable inline; the parser accepts "9/9/24", "Sep 9
+           2024", "today" etc. — the bound model is always ISO. -->
+      <div class="mt-1 relative">
+        <DateInput
+          variant="bare"
+          :model-value="closeDate"
+          placeholder="MM/DD/YYYY"
+          @update:model-value="(v) => emit('update-date', v)"
           @blur="emit('commit')"
           :title="fmtDate(closeDate)"
         />

@@ -958,7 +958,7 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
         ].join(', '),
       )
       if (ledgerCertDates.size > 0) {
-        warnings.push(`Cross-reference lookup ready: ${ledgerCertDates.size} certificate IDs found in ledger sheets (used to resolve exercise dates when an option's destination column points to a CS-#).`)
+        warnings.push(`Cross-reference lookup ready: ${ledgerCertDates.size} certificate IDs → Issue Date pairs found in ledger sheets (the cert's Issue Date is read as the option's exercise date when the plan-sheet "destination" column points to a CS-#).`)
       }
 
       let parsed = 0
