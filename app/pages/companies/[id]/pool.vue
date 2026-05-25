@@ -51,16 +51,20 @@ const fdsIncludingPool = computed(() => {
 type EventType = 'pool_topup' | 'grant' | 'exercise' | 'forfeit' | 'floor' | 'reserve'
 
 function directionFor(type: EventType): -1 | 0 | 1 {
-  // Running balance tracks AVAILABLE over time (not Authorized).
-  //   - pool_topup: Available grows by topup amount
-  //   - grant: Available shrinks (shares move to Outstanding)
-  //   - forfeit: Available grows (shares return from Outstanding)
-  //   - exercise: Available UNCHANGED. Shares move from Outstanding
-  //     to Common — neither comes from nor adds to Available.
-  //     (Live Authorized shrinks; that's reflected in the headline
-  //     stat, not in the chart line.)
-  //   - reserve: pre-commit shares for a future grant → reduces Available
-  //   - floor: a constraint, not a balance change
+  // Running balance tracks AVAILABLE over time.
+  // Two buckets: Outstanding and Available, with Authorized =
+  // Outstanding + Available. Movements:
+  //   - pool_topup: Authorized grows; Available grows by topup amount
+  //   - grant:      Available → Outstanding (Available shrinks)
+  //   - forfeit:    Outstanding → Available (Available grows)
+  //   - expire:     Outstanding → Available (Available grows) — uses
+  //                 'forfeit' type with kind='Expire'
+  //   - exercise:   Outstanding → Common (shares leave the system).
+  //                 BOTH Outstanding and Authorized shrink by N.
+  //                 Available is UNCHANGED — shares didn't return to
+  //                 Available, they went to Common. Direction = 0.
+  //   - reserve:    pre-commit shares for a future grant → Available shrinks
+  //   - floor:      a constraint, not a balance change
   if (type === 'pool_topup' || type === 'forfeit') return 1
   if (type === 'grant' || type === 'reserve') return -1
   return 0
@@ -165,11 +169,10 @@ const events = computed<TimelineEvent[]>(() => {
     // the UI it's a guess).
     const grantBaseDate = g.issue_date || g.vesting_start || fallbackDate.value
     if (g.quantity_exercised && g.quantity_exercised > 0) {
-      // Exercise direction = 0: Available unchanged when shares move
-      // from Outstanding to Common. The "pool shrinks on exercise"
-      // effect lives in the Authorized headline (which subtracts
-      // Exercised), not in the chart line. The event still appears
-      // on the timeline as an informational marker.
+      // Exercise: Outstanding → Common. Authorized and Outstanding
+      // both shrink by N; Available unchanged. Direction = 0 — event
+      // is visible on the timeline but doesn't move the chart line
+      // (Available didn't change).
       out.push({
         id: `exercise:${g.id}`,
         date: g.last_exercised_date || grantBaseDate,
@@ -311,16 +314,17 @@ const grantsMissingDate = computed(() => events.value.filter(e => e.source !== '
 // ---- Top stat values ----
 const totals = computed(() => {
   const isIdea = (s: string) => s === 'idea'
-  // Original = sum of pool top-up events (Financings page top-ups or
-  // Carta fallback). Identical computation to grants.vue's
-  // poolAuthorizedOriginal so the two pages MUST agree.
+  // Original Authorized = sum of pool top-up events (Financings page
+  // top-ups or Carta fallback). Same computation as grants.vue so
+  // the two pages MUST agree.
   const poolAuthorizedOriginal = events.value.filter(e => e.type === 'pool_topup' && !isIdea(e.source)).reduce((a, e) => a + e.shares, 0)
   // Outstanding = sum of CURRENTLY-HELD grant quantities, pulled from
   // the grants table directly (not from the timeline events). The grant
   // event on the timeline uses the ORIGINAL issued size at the issue
-  // date so the chart reflects the full historical allocation —
-  // subsequent exercise/forfeit/expire events model the shrinkage to
-  // current outstanding. The headline stat shows the current balance.
+  // date so the chart reflects the full historical allocation — and
+  // subsequent exercise/forfeit/expire events grow Available back as
+  // the shares leave Outstanding. The headline stat shows the current
+  // balance: Outstanding = currently-held only.
   const outstandingShares = (grantsData.value?.grants || [])
     .filter((g: any) => g.status === 'outstanding')
     .reduce((a: number, g: any) => a + (g.quantity || 0), 0)
@@ -328,27 +332,27 @@ const totals = computed(() => {
   const ideaGrants = events.value.filter(e => isIdea(e.source) && (e.type === 'grant' || e.type === 'reserve')).reduce((a, e) => a + e.shares, 0)
   const ideaTopups = events.value.filter(e => isIdea(e.source) && e.type === 'pool_topup').reduce((a, e) => a + e.shares, 0)
   const ideaForfeits = events.value.filter(e => isIdea(e.source) && e.type === 'forfeit').reduce((a, e) => a + e.shares, 0)
-  // Idea exercises shrink the pool (shares move to Common). See spec §2 Options.
+  // Idea exercises grow Available too (shares leave Outstanding).
   const ideaExercises = events.value.filter(e => isIdea(e.source) && e.type === 'exercise').reduce((a, e) => a + e.shares, 0)
   const floorShares = events.value.filter(e => isIdea(e.source) && e.type === 'floor').reduce((a, e) => Math.max(a, e.shares), 0)
   // Lifetime grant accounting: lifecycle counts from the Carta option-
-  // plan sheet via per-grant detail. Used both for the lifecycle
-  // breakdown stats and for the live-pool calculation.
+  // plan sheet via per-grant detail.
   const ogrants = (grantsData.value?.grants || []).filter((g: any) => g.status === 'outstanding')
   const totalExercised = ogrants.reduce((a: number, g: any) => a + (g.quantity_exercised || 0), 0)
   const totalForfeited = ogrants.reduce((a: number, g: any) => a + (g.quantity_forfeited || 0), 0)
   const totalIssued = ogrants.reduce((a: number, g: any) => a + (g.quantity_issued || g.quantity), 0)
-  // Live Authorized = Original - Exercised. Exercised shares left the
-  // pool entirely (Outstanding → Common), so the live pool size is
-  // smaller than the original board authorization. Forfeit/Expire stay
-  // in the pool — they're already netted into Available via Outstanding
-  // (Outstanding = current_held, excludes forfeit/expire).
-  //
-  // Holding the identity Authorized = Outstanding + Proposed + Available:
-  //   Available = Live Authorized − Outstanding − Proposed
-  //             = Original − Exercised − Outstanding − Proposed
+  // Displayed Authorized = Original − Exercised. Exercised shares
+  // leave the system (Outstanding → Common; both shrink by N;
+  // Available unchanged). Identity then holds:
+  //   Authorized = Outstanding + Available
+  //   Available  = Authorized − Outstanding − Proposed
+  // Forfeit/Expire stay within the pool (Outstanding → Available);
+  // they're already netted into Outstanding from the grants table.
   const poolAuthorized = poolAuthorizedOriginal - totalExercised
   const available = poolAuthorized - outstandingShares - proposedShares
+  // Projected end-state Available after applying all ideas: grants
+  // and reserves subtract from Available; topups and forfeits add to
+  // it; idea exercises shrink Authorized (so they reduce Available too).
   const projectedEnd = poolAuthorized + ideaTopups + ideaForfeits - outstandingShares - proposedShares - ideaGrants - ideaExercises
   return { poolAuthorized, outstandingShares, proposedShares, ideaGrants, ideaTopups, ideaForfeits, ideaExercises, floorShares, available, projectedEnd, totalExercised, totalForfeited, totalIssued }
 })
