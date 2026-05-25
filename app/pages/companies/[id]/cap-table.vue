@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Upload, Filter, ChevronUp, ChevronDown, Plus, Trash2 } from 'lucide-vue-next'
-import { fmtShares, fmtPct, fmtPricePerShare, fmtUSD, normalizeDate } from '~/utils/format'
+import { Upload } from 'lucide-vue-next'
+import { fmtUSD } from '~/utils/format'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -86,217 +86,9 @@ const cnReconcileTitle = computed(() => {
   return lines.join('  •  ')
 })
 
-// Display label for a round. The user names it; if blank, fall back to the
-// code. Draft override wins when there's an in-flight edit.
-function friendlyRoundLabel(r: RoundColumn): string {
-  const d = drafts.value[r.round_id]
-  const draftName = d && 'name' in d ? d.name : undefined
-  const name = (draftName ?? r.name ?? '')
-  return name.trim() || r.code
-}
-
-// Effective kind for a round (draft override wins).
-// Hover tooltip for the Notes-converted cell — lists each CN attributed
-// to this round with its destination code + resulting shares so the
-// operator can audit which CNs are rolling in (e.g. find a misattributed
-// one that's inflating the total).
-function notesAttributedTooltip(r: RoundColumn): string {
-  if (!r.notes_attributed?.length) return ''
-  const header = `${r.notes_attributed.length} CN${r.notes_attributed.length === 1 ? '' : 's'} attributed:`
-  const lines = r.notes_attributed.map(n =>
-    `${n.stakeholderName} [${n.destinationCode || '—'}]: ${fmtUSD(n.dollars)} → ${fmtShares(n.shares)} sh`,
-  )
-  return [header, ...lines].join('\n')
-}
-
-// ---- Per-cell diagnostic tooltips ----
-// Same style as the Notes-converted breakdown: explain where each value
-// came from. For inputs, hint at what they drive. For calculated cells,
-// show the formula AND the operand values so the operator can verify the
-// math at a glance.
-function tooltipClosingDate(_r: RoundColumn): string {
-  return 'Round close date — user input. Drives chronological sort + preFDS for CN cap math at subsequent rounds.'
-}
-function tooltipTrancheOf(r: RoundColumn): string {
-  if (!r.parent_round_code) {
-    return 'When this round is a tranche of an earlier Qualified Financing, set the parent here. The CN cap formula then uses the parent\'s preFDS (state immediately before the QF\'s initial closing).'
-  }
-  return `Tranche of: ${r.parent_round_code}. CN cap math uses ${r.parent_round_code}'s preFDS instead of this round's.`
-}
-function tooltipPreMoney(_r: RoundColumn): string {
-  return 'Pre-money valuation — user input.'
-}
-function tooltipNewMoney(_r: RoundColumn): string {
-  return 'New money raised this round — user input. Combined with Share price to derive Preferred issued.'
-}
-function tooltipNotesFinancing(r: RoundColumn): string {
-  if (!r.notes_attributed?.length) return 'No CNs attributed to this round.'
-  const header = `${fmtUSD(r.notes_financing)} = sum of ${r.notes_attributed.length} CN${r.notes_attributed.length === 1 ? '' : 's'} (principal + accrued interest):`
-  const lines = r.notes_attributed.map(n => `  ${n.stakeholderName} [${n.destinationCode || '—'}]: ${fmtUSD(n.dollars)}`)
-  return [header, ...lines].join('\n')
-}
-function tooltipPostMoney(r: RoundColumn): string {
-  const pre = r.pre_money || 0
-  return `Post-money = Pre-money + New money\n${fmtUSD(pre)} + ${fmtUSD(r.new_money)} = ${fmtUSD(r.post_money)}\n(Notes financing is reported separately below.)`
-}
-function tooltipSharePrice(_r: RoundColumn): string {
-  return 'Share price ($) — user input. Drives Preferred issued (new_money ÷ share_price) when no override is set.'
-}
-function tooltipCumulatedFinancing(r: RoundColumn): string {
-  const idx = roundCols.value.findIndex(x => x.round_id === r.round_id)
-  const parts = roundCols.value.slice(0, idx + 1).map(x => `  ${x.name || x.code}: ${fmtUSD((x.new_money || 0) + (x.notes_financing || 0))}`)
-  return [`Sum of (New money + Notes financing) through ${r.name || r.code}:`, ...parts, `= ${fmtUSD(r.cumulated_financing)}`].join('\n')
-}
-function tooltipTotalFDS(r: RoundColumn): string {
-  const idx = roundCols.value.findIndex(x => x.round_id === r.round_id)
-  const parts = roundCols.value.slice(0, idx + 1).map(x =>
-    `  ${x.name || x.code}: ${fmtShares((x.common || 0) + (x.preferred_issued || 0) + (x.notes_converted || 0) + (x.option_pool_issued || 0))}`
-    + ` (common ${fmtShares(x.common || 0)} + pref ${fmtShares(x.preferred_issued || 0)} + notes ${fmtShares(x.notes_converted || 0)} + pool ${fmtShares(x.option_pool_issued || 0)})`,
-  )
-  return [`Cumulative FDS through ${r.name || r.code}:`, ...parts, `= ${fmtShares(r.total_shares_fds)}`].join('\n')
-}
-function tooltipCommon(_r: RoundColumn): string {
-  return 'Common shares issued this round — user input. Counts toward Total FDS.'
-}
-function tooltipPreferredIssued(r: RoundColumn): string {
-  if (r.preferred_issued_override != null) {
-    const formula = (r.share_price || 0) > 0 ? r.new_money / (r.share_price || 1) : 0
-    return `Manual override: ${fmtShares(r.preferred_issued_override)}\nFormula would give: ${fmtUSD(r.new_money)} ÷ ${fmtPricePerShare(r.share_price || 0)} = ${fmtShares(formula)}\nClear the override to revert to formula.`
-  }
-  if ((r.share_price || 0) > 0 && r.new_money > 0) {
-    return `Formula: New money ÷ Share price\n${fmtUSD(r.new_money)} ÷ ${fmtPricePerShare(r.share_price || 0)} = ${fmtShares(r.preferred_issued)}\nType a value to override.`
-  }
-  return 'No formula yet — needs both New money and Share price. Type a value to set manually.'
-}
-function tooltipOptionPoolIssued(_r: RoundColumn): string {
-  return 'Option pool issued this round — user input. Counts toward Total FDS. Drives the Pool Impact timeline\'s top-up event at this round\'s close date.'
-}
-
-function effectiveKind(r: RoundColumn): 'formation' | 'closed' | 'open' {
-  const d = drafts.value[r.round_id]
-  if (d && 'kind' in d && d.kind) return d.kind
-  return r.kind
-}
-
-// Toggle a round between open / closed. Single-open invariant: setting one
-// open drafts every other currently-open round (server-side or draft-side)
-// back to 'closed' in the same buffer so the swap commits atomically. With
-// auto-save we flush every affected row immediately so the user sees the
-// switch land without a Save click.
-async function setKind(roundId: string, newKind: 'closed' | 'open'): Promise<void> {
-  const affected: string[] = [roundId]
-  if (newKind === 'open') {
-    for (const r of roundCols.value) {
-      if (r.round_id === roundId) continue
-      if (effectiveKind(r) === 'open') {
-        setDraft(r.round_id, 'kind', 'closed')
-        affected.push(r.round_id)
-      }
-    }
-  }
-  setDraft(roundId, 'kind', newKind)
-  for (const id of affected) await commitRound(id)
-}
-
-// ---- Edit/save state ----
-// Drafts are now short-lived: they capture an in-flight edit between keystrokes
-// and the blur that commits it. On blur, commitRound() PATCHes whatever's in
-// the draft for that row and clears it; the round-summary refresh propagates
-// derived rows (FDS, Cumulated financing, post-money). Kind toggles
-// (Closed/Open) and Add/Delete round still hit the server immediately.
-interface RoundDraft {
-  name?: string | null
-  kind?: 'formation' | 'closed' | 'open'
-  close_date?: string | null
-  pre_money?: number | null
-  new_money?: number
-  share_price?: number | null
-  common?: number
-  preferred_issued?: number
-  preferred_issued_override?: number | null
-  option_pool_issued?: number
-  liq_pref_multiple?: number
-  participation?: 'none' | 'full' | 'capped'
-  participation_cap?: number | null
-  pref_tier?: number
-  parent_round_code?: string | null
-}
-const drafts = ref<Record<string, RoundDraft>>({})
-// In-flight PATCH counter — drives the small "Saving…" indicator in the card
-// header. Bumped at the start of every commitRound and decremented on
-// success/failure so concurrent blurs aggregate naturally.
-const savingCount = ref(0)
-
-function setDraft<K extends keyof RoundDraft>(roundId: string, field: K, value: RoundDraft[K]): void {
-  const cur = drafts.value[roundId] || {}
-  drafts.value = { ...drafts.value, [roundId]: { ...cur, [field]: value } }
-}
-
-// Effective value to display in a cell — draft override wins, otherwise
-// the server value. Used by every input's :model-value / :value binding.
-function effective<K extends keyof RoundDraft>(r: RoundColumn, field: K): RoundDraft[K] {
-  const d = drafts.value[r.round_id]
-  if (d && field in d) return d[field]
-  return (r as any)[field]
-}
-
-// Commit one row's pending drafts to the server. Called from @blur on every
-// editable cell — by the time blur fires, the cell's onBlur has already
-// flushed its value into the drafts buffer, so we PATCH whatever's in there.
-// Idempotent: returning early when there's nothing to save keeps blur churn
-// (tabbing across read-only cells) cheap.
-async function commitRound(roundId: string): Promise<void> {
-  const body = drafts.value[roundId]
-  if (!body || Object.keys(body).length === 0) return
-  const payload: any = { ...body }
-  if ('close_date' in payload) payload.close_date = normalizeDate(payload.close_date || '') || null
-  // Drop the draft eagerly so a fast follow-on blur doesn't double-save the
-  // same fields. If the PATCH fails we restore them so the user can retry.
-  const restore = { ...body }
-  const next = { ...drafts.value }
-  delete next[roundId]
-  drafts.value = next
-  savingCount.value++
-  try {
-    await $fetch(`/api/rounds/${roundId}`, { method: 'PATCH', body: payload })
-    await refreshRoundSummary()
-  } catch (e) {
-    console.error('Auto-save failed; restoring draft', e)
-    drafts.value = { ...drafts.value, [roundId]: { ...(drafts.value[roundId] || {}), ...restore } }
-  } finally {
-    savingCount.value--
-  }
-}
-
-// Soft amber tint marks every cell that's a user-input field, so the operator
-// can tell at a glance which numbers they own vs which are derived from the
-// ledger import. Focus state clears the tint and switches to the brand ring.
-const inputCellClass = 'w-full bg-amber-50 border border-amber-300 hover:border-amber-500 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-500 rounded px-1 py-0.5 text-left text-[12px] text-ink-900 num'
-// Cells that show a computed value but allow override (Preferred issued).
-// When the formula's in effect we render in a muted style so the user can
-// see at a glance which cells are derived vs manually set.
-const formulaCellClass = 'w-full bg-transparent border border-transparent hover:border-ink-300 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-500 rounded px-1 py-0.5 text-left text-[12px] text-ink-500 italic num'
-
-// Preferred issued: when the user has overridden the formula, show the
-// override value with the standard amber input chrome. Otherwise display
-// the computed value (or nothing) with the muted formula chrome.
-function isPreferredOverridden(r: RoundColumn): boolean {
-  const d = drafts.value[r.round_id]
-  if (d && 'preferred_issued_override' in d) return d.preferred_issued_override != null
-  return r.preferred_issued_override != null
-}
-function preferredIssuedDisplay(r: RoundColumn): number | null {
-  const d = drafts.value[r.round_id]
-  if (d && 'preferred_issued_override' in d) return d.preferred_issued_override ?? null
-  if (r.preferred_issued_override != null) return r.preferred_issued_override
-  return r.preferred_issued ? r.preferred_issued : null
-}
-function preferredIssuedInputClass(r: RoundColumn): string {
-  return isPreferredOverridden(r) ? inputCellClass : formulaCellClass
-}
-
 // Add a new round. The server picks a unique code (R1, R2, …); the user can
-// rename inline. Close date defaults to today so the row sorts predictably.
+// rename inline inside the matrix. Close date defaults to today so the row
+// sorts predictably.
 async function addRound() {
   try {
     await $fetch(`/api/companies/${id.value}/rounds`, {
@@ -307,42 +99,33 @@ async function addRound() {
   } catch (e) { console.error('Failed to add round', e) }
 }
 
-// Delete a round. Confirms first. Any CN whose destination matched this
-// round's code keeps the value but will read as unmatched until reassigned.
-// Also clears any in-flight draft for that round so the dirty count stays
-// accurate. Defensive: clear the draft BEFORE the network call so a
-// transient render between the DELETE returning and the refresh fetching
-// can't reach into a stale draft for a no-longer-existing round.
-async function deleteRound(roundId: string, label: string) {
-  if (!roundId) return
-  if (!confirm(`Delete round "${label}"? Any CNs attributed here will become unassigned.`)) return
-  // Optimistically clear the draft first.
-  if (drafts.value[roundId]) {
-    const next = { ...drafts.value }
-    delete next[roundId]
-    drafts.value = next
-  }
+// In-flight PATCH counter — bubbled out of FinancingsMatrix to the page
+// header so the saving indicator stays consistent with where it was.
+const savingCount = ref(0)
+
+// Name of the round currently flagged "open" (used by the page header's
+// status pill). Reads off the server data — kind toggles inside the matrix
+// commit immediately so this stays fresh.
+const openRoundName = computed<string | null>(() => {
+  const open = roundCols.value.find(r => r.kind === 'open')
+  return open ? (open.name || open.code) : null
+})
+
+// Master toggle for the matrix's formula chips + per-column hint sublines.
+// Persisted in localStorage so the operator's preference sticks. Default on.
+const showFormulas = ref(true)
+if (typeof window !== 'undefined') {
   try {
-    await $fetch(`/api/rounds/${roundId}`, { method: 'DELETE' })
-    await refreshRoundSummary()
-  } catch (e) {
-    console.error('Failed to delete round', e)
-    // If the delete fails, the round comes back on the next refresh. Try to
-    // resync so the UI doesn't lie about what's actually in the DB.
-    try { await refreshRoundSummary() } catch {}
-  }
+    const v = localStorage.getItem('capstack:financings:show-formulas')
+    if (v !== null) showFormulas.value = v === '1'
+  } catch { /* ignore */ }
+  watch(showFormulas, (v) => {
+    try { localStorage.setItem('capstack:financings:show-formulas', v ? '1' : '0') } catch { /* ignore */ }
+  })
 }
 
 const query = ref('')
 const currentPPS = computed(() => data.value?.current_pps || 0)
-
-// Name of the round currently flagged "open" (used by the page header's
-// status pill). Drafts win when an in-flight kind toggle hasn't committed
-// yet so the pill flips instantly on click.
-const openRoundName = computed<string | null>(() => {
-  const open = roundCols.value.find(r => effectiveKind(r) === 'open')
-  return open ? (open.name || open.code) : null
-})
 
 // Per-table unit visibility.
 const holdUnits = useTableUnits('capstack:cap-table:holdings:units')
@@ -626,28 +409,6 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
   return table.sort.dir
 }
 
-// ----- Round columns: per-column resizable widths -----
-// Each Financings round-card is a column whose right edge can be dragged
-// to resize. We piggyback on useSortableTable for its persistence + drag
-// state (sort is irrelevant here). Keys are round_id; widths persist in
-// localStorage so the operator's layout sticks across sessions.
-const roundTable = useSortableTable({
-  key: 'capstack:cap-table:financings',
-  columns: (roundCols.value || []).map(r => ({ key: r.round_id, label: r.code, width: 220, sortable: false, align: 'left' as const })),
-})
-
-// Keep roundTable.cols in sync with roundCols on add/delete, preserving
-// any widths the operator dragged into place.
-watch(roundCols, (cols) => {
-  const widthMap: Record<string, number> = {}
-  for (const c of roundTable.cols) widthMap[c.key] = c.width
-  const next = cols.map(r => ({ key: r.round_id, label: r.code, width: widthMap[r.round_id] ?? 220, sortable: false, align: 'left' as const }))
-  roundTable.cols.splice(0, roundTable.cols.length, ...(next as any))
-}, { immediate: true })
-
-function colWidthFor(roundId: string): number {
-  return roundTable.cols.find(c => c.key === roundId)?.width || 220
-}
 </script>
 
 <template>
@@ -668,295 +429,49 @@ function colWidthFor(roundId: string): number {
     </UiEmpty>
 
     <div class="space-y-6">
-      <!-- Per-round Financings table — one column per user-entered round.
-           Rows are the line items the user expects to see at a glance: close
-           date, money / share-price math at the top, then the per-round
-           share contributions, with cumulative FDS + financing at the
-           bottom. The Open round column is highlighted; closed rounds are
-           plain. Single-open invariant: only one round can be flagged Open
-           at a time. -->
-      <UiCard
-        title="Financings table"
-        subtitle="One column per round — type the values; each cell auto-saves when you tab off."
-        :padded="false"
-      >
-        <div v-if="!roundCols.length" class="px-4 py-8 text-center text-sm text-ink-500">
-          No rounds yet. Click <span class="font-medium text-ink-700">Add round</span> to start typing your funding history.
-        </div>
-        <!-- Round cards. Each round is a vertical card with all fields
-             stacked label-above-value, so the operator can read any cell
-             without sweeping their eyes left to find the row name. Cards
-             flex horizontally; the outer div scrolls X+Y. Each card's
-             width is individually resizable via the right-edge drag
-             handle — persisted in localStorage by useSortableTable. -->
-        <div v-else>
-          <div class="flex gap-3 overflow-auto px-4 pt-4 pb-2" style="max-height: calc(100vh - 16rem);">
-            <div
-              v-for="r in roundCols"
-              :key="r.round_id"
-              class="shrink-0 relative rounded border flex flex-col"
-              :class="effectiveKind(r) === 'open' ? 'border-brand-300 bg-brand-50/30 ring-1 ring-brand-200' : 'border-ink-200 bg-white'"
-              :style="{ width: colWidthFor(r.round_id) + 'px' }"
-            >
-              <!-- Card header: round name + Closed/Open toggle + delete.
-                   Sticky-top so it stays visible if the card body scrolls. -->
-              <div
-                class="sticky top-0 z-10 px-2 py-2 border-b rounded-t"
-                :class="effectiveKind(r) === 'open' ? 'border-brand-200 bg-brand-50' : 'border-ink-200 bg-ink-100'"
-              >
-                <div class="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    class="shrink-0 text-ink-400 hover:text-red-600 transition-colors p-0.5 rounded hover:bg-red-50"
-                    @click="deleteRound(r.round_id, friendlyRoundLabel(r))"
-                    title="Delete round"
-                    aria-label="Delete round"
-                  >
-                    <Trash2 :size="13" />
-                  </button>
-                  <input
-                    type="text"
-                    :value="effective(r, 'name') ?? r.code"
-                    class="flex-1 min-w-0 bg-transparent font-semibold text-[12px] border border-transparent hover:border-ink-300 focus:border-brand-500 focus:bg-white focus:outline-none rounded px-1 py-0.5"
-                    :class="effectiveKind(r) === 'open' ? 'text-brand-700' : 'text-ink-800'"
-                    @input="setDraft(r.round_id, 'name', ($event.target as HTMLInputElement).value)"
-                    @blur="commitRound(r.round_id)"
-                    @keydown.enter="($event.target as HTMLInputElement).blur()"
-                  />
-                </div>
-                <div class="mt-1.5 flex items-center gap-1">
-                  <button
-                    type="button"
-                    class="text-[9px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors"
-                    :class="effectiveKind(r) === 'closed'
-                      ? 'bg-ink-200 text-ink-800 border-ink-300'
-                      : 'bg-white text-ink-500 border-ink-200 hover:border-ink-300'"
-                    @click="setKind(r.round_id, 'closed')"
-                  >Closed</button>
-                  <button
-                    type="button"
-                    class="text-[9px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors"
-                    :class="effectiveKind(r) === 'open'
-                      ? 'bg-brand-600 text-white border-brand-600'
-                      : 'bg-white text-ink-500 border-ink-200 hover:border-ink-300'"
-                    @click="setKind(r.round_id, 'open')"
-                  >Open</button>
-                </div>
-                <!-- Right-edge drag handle. Spans full card height so the
-                     user can grab it from anywhere along the right side. -->
-                <span
-                  class="resize-handle"
-                  style="height: 100%;"
-                  @mousedown.prevent.stop="roundTable.startResize($event, r.round_id)"
-                  @click.stop
-                />
-              </div>
+      <!-- Financings matrix — one row per round, columns grouped into
+           Money / Shares. Open round is editable; closed rounds are
+           read-only. Tooltip diagnostics live on each cell. -->
+      <div v-if="!roundCols.length" class="px-4 py-10 text-center text-sm text-ink-500 border border-dashed border-ink-300 rounded-lg bg-white">
+        No rounds yet. Click <span class="font-medium text-ink-700">Add round</span> above to start typing your funding history.
+      </div>
+      <div v-else>
+        <FinancingsMatrix
+          :rounds="roundCols"
+          :show-formulas="showFormulas"
+          @refresh="refreshRoundSummary"
+          @update:saving-count="(n) => savingCount = n"
+        />
 
-              <!-- Field stack. Each field-row carries its own label + the
-                   tooltip diagnostic (hover anywhere on the row to see
-                   the formula / breakdown). -->
-              <div class="p-2 space-y-2 num">
-                <!-- Closing date -->
-                <div :title="tooltipClosingDate(r)">
-                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Closing date</div>
-                  <input
-                    type="date"
-                    :value="(effective(r, 'close_date') ?? r.close_date) || ''"
-                    :class="inputCellClass + ' cursor-pointer'"
-                    @change="setDraft(r.round_id, 'close_date', ($event.target as HTMLInputElement).value || null)"
-                    @blur="commitRound(r.round_id)"
-                  />
-                </div>
-
-                <!-- Tranche of: when this round is a later tranche of an
-                     earlier round's Qualified Financing, pick the parent
-                     here so CN cap math uses the QF's initial-closing
-                     preFDS. -->
-                <div :title="tooltipTrancheOf(r)">
-                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Tranche of</div>
-                  <select
-                    :value="(effective(r, 'parent_round_code') ?? r.parent_round_code) || ''"
-                    :class="inputCellClass"
-                    @change="setDraft(r.round_id, 'parent_round_code', ($event.target as HTMLSelectElement).value || null); commitRound(r.round_id)"
-                  >
-                    <option value="">— standalone</option>
-                    <option v-for="other in roundCols.filter(x => x.round_id !== r.round_id)" :key="other.round_id" :value="other.code">
-                      {{ other.name || other.code }}
-                    </option>
-                  </select>
-                </div>
-
-                <!-- Pre-money valuation -->
-                <div :title="tooltipPreMoney(r)">
-                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Pre-money ($)</div>
-                  <NumberInput
-                    variant="bare"
-                    prefix="$"
-                    :model-value="effective(r, 'pre_money') ?? r.pre_money"
-                    placeholder="—"
-                    :input-class="inputCellClass"
-                    @update:model-value="(v) => setDraft(r.round_id, 'pre_money', v)"
-                    @blur="commitRound(r.round_id)"
-                  />
-                </div>
-
-                <!-- New money -->
-                <div :title="tooltipNewMoney(r)">
-                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">New money ($)</div>
-                  <NumberInput
-                    variant="bare"
-                    prefix="$"
-                    :model-value="effective(r, 'new_money') ?? (r.new_money || null)"
-                    placeholder="—"
-                    :input-class="inputCellClass"
-                    @update:model-value="(v) => setDraft(r.round_id, 'new_money', v ?? 0)"
-                    @blur="commitRound(r.round_id)"
-                  />
-                </div>
-
-                <!-- Post-money (computed). Pre-money + New money;
-                     Notes financing is reported below as its own line. -->
-                <div :title="tooltipPostMoney(r)">
-                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Post-money ($)</div>
-                  <div class="px-1 py-0.5 text-left text-[13px] font-medium" :class="effectiveKind(r) === 'open' ? 'text-brand-700' : 'text-ink-900'">
-                    <span v-if="r.post_money" class="cursor-help underline decoration-dotted decoration-ink-400">{{ fmtUSD(r.post_money) }}</span>
-                    <template v-else><span class="text-ink-400 font-normal">—</span></template>
-                  </div>
-                </div>
-
-                <!-- Notes financing (computed). Reported below Post-money
-                     so the operator can see what's flowing through the round
-                     in conjunction with — but not folded into — the
-                     post-money valuation. -->
-                <div :title="tooltipNotesFinancing(r)">
-                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Notes financing ($)</div>
-                  <div class="px-1 py-0.5 text-left text-[12px] text-ink-700">
-                    <span v-if="r.notes_financing" class="cursor-help underline decoration-dotted decoration-ink-400">{{ fmtUSD(r.notes_financing) }}</span>
-                    <template v-else><span class="text-ink-400">—</span></template>
-                  </div>
-                </div>
-
-                <!-- Share price -->
-                <div :title="tooltipSharePrice(r)">
-                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Share price ($)</div>
-                  <NumberInput
-                    variant="bare"
-                    prefix="$"
-                    :digits="5"
-                    :model-value="effective(r, 'share_price') ?? r.share_price"
-                    placeholder="—"
-                    :input-class="inputCellClass"
-                    @update:model-value="(v) => setDraft(r.round_id, 'share_price', v)"
-                    @blur="commitRound(r.round_id)"
-                  />
-                </div>
-
-                <!-- Cumulated financing (computed) -->
-                <div :title="tooltipCumulatedFinancing(r)">
-                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Cumulated financing</div>
-                  <div class="px-1 py-0.5 text-left text-[12px] text-ink-700">
-                    <span class="cursor-help underline decoration-dotted decoration-ink-400">{{ fmtUSD(r.cumulated_financing) }}</span>
-                  </div>
-                </div>
-
-                <!-- Divider between the money group and the shares group -->
-                <div class="border-t border-ink-300 -mx-2 my-2" />
-
-                <!-- Total fully diluted (cumulative through this round) -->
-                <div :title="tooltipTotalFDS(r)">
-                  <div class="text-[9px] uppercase tracking-wider text-ink-700 font-semibold mb-0.5">Total FDS</div>
-                  <div class="px-1 py-0.5 text-left text-[14px] font-semibold" :class="effectiveKind(r) === 'open' ? 'text-brand-700' : 'text-ink-900'">
-                    {{ r.total_shares_fds ? fmtShares(r.total_shares_fds) : '—' }}
-                  </div>
-                </div>
-
-                <!-- Common -->
-                <div :title="tooltipCommon(r)">
-                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Common</div>
-                  <NumberInput
-                    variant="bare"
-                    :model-value="effective(r, 'common') ?? (r.common || null)"
-                    placeholder="—"
-                    :input-class="inputCellClass"
-                    @update:model-value="(v) => setDraft(r.round_id, 'common', v ?? 0)"
-                    @blur="commitRound(r.round_id)"
-                  />
-                </div>
-
-                <!-- Preferred issued (formula w/ override) -->
-                <div :title="tooltipPreferredIssued(r)">
-                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">
-                    Preferred issued
-                    <span v-if="isPreferredOverridden(r)" class="ml-1 text-[8px] text-brand-600 normal-case font-medium">override</span>
-                  </div>
-                  <NumberInput
-                    variant="bare"
-                    :model-value="preferredIssuedDisplay(r)"
-                    :placeholder="r.preferred_issued ? fmtShares(r.preferred_issued) : '—'"
-                    :input-class="preferredIssuedInputClass(r)"
-                    @update:model-value="(v) => setDraft(r.round_id, 'preferred_issued_override', v ?? null)"
-                    @blur="commitRound(r.round_id)"
-                  />
-                </div>
-
-                <!-- Notes converted (computed) -->
-                <div :title="notesAttributedTooltip(r) || 'No CNs attributed to this round.'">
-                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Notes converted</div>
-                  <div class="px-1 py-0.5 text-left text-[12px] text-ink-700">
-                    <span v-if="r.notes_converted" class="cursor-help underline decoration-dotted decoration-ink-400">{{ fmtShares(r.notes_converted) }}</span>
-                    <template v-else><span class="text-ink-400">—</span></template>
-                  </div>
-                </div>
-
-                <!-- Option pool issued -->
-                <div :title="tooltipOptionPoolIssued(r)">
-                  <div class="text-[9px] uppercase tracking-wider text-ink-500 font-medium mb-0.5">Option pool issued</div>
-                  <NumberInput
-                    variant="bare"
-                    :model-value="effective(r, 'option_pool_issued') ?? (r.option_pool_issued || null)"
-                    placeholder="—"
-                    :input-class="inputCellClass"
-                    @update:model-value="(v) => setDraft(r.round_id, 'option_pool_issued', v ?? 0)"
-                    @blur="commitRound(r.round_id)"
-                  />
-                </div>
-              </div>
-            </div>
+        <!-- CN reconciliation banner. When the CN ledger total doesn't
+             equal Cumulated financing, surface the gap below the matrix.
+             Same content + tooltip as before; just relocated. -->
+        <div
+          v-if="cnReconciliation.unattributed_dollars > 0"
+          class="mt-2 px-3 py-2 rounded-md border border-amber-200 bg-amber-50/60 text-amber-900 text-[12px] flex items-center justify-between gap-3 num"
+          :title="cnReconcileTitle"
+        >
+          <div class="flex items-center gap-2">
+            <span class="font-medium">CNs not rolled up</span>
+            <span class="text-[10px] uppercase tracking-wide text-amber-700 font-semibold">{{ cnReconciliation.unreconciled.length }}</span>
           </div>
-
-          <!-- CN reconciliation banner. When the CN ledger total doesn't
-               equal Cumulated financing, surface the gap here (used to be
-               an in-table footer row with colspan). -->
-          <div
-            v-if="cnReconciliation.unattributed_dollars > 0"
-            class="mx-4 mb-2 px-3 py-2 rounded border border-amber-200 bg-amber-50/60 text-amber-900 text-[12px] flex items-center justify-between gap-3 num"
-            :title="cnReconcileTitle"
-          >
-            <div class="flex items-center gap-2">
-              <span class="font-medium">CNs not rolled up</span>
-              <span class="text-[10px] uppercase tracking-wide text-amber-700 font-semibold">{{ cnReconciliation.unreconciled.length }}</span>
-            </div>
-            <div class="text-right">
-              <span class="font-semibold">{{ fmtUSD(cnReconciliation.unattributed_dollars) }}</span>
-              <span class="ml-2 text-[10px] text-amber-700">
-                <span v-if="cnReconciliation.by_reason.stale_destination > 0">{{ fmtUSD(cnReconciliation.by_reason.stale_destination) }} bad destination</span>
-                <span v-if="cnReconciliation.by_reason.deferred > 0" class="ml-2">{{ fmtUSD(cnReconciliation.by_reason.deferred) }} unassigned</span>
-                <span v-if="cnReconciliation.by_reason.excluded > 0" class="ml-2">{{ fmtUSD(cnReconciliation.by_reason.excluded) }} excluded</span>
-              </span>
-            </div>
-          </div>
-          <div
-            v-if="cnReconciliation.total_dollars > 0"
-            class="mx-4 mb-3 px-3 py-1.5 text-[11px] text-ink-500 italic flex items-center justify-between gap-3 num"
-          >
-            <span>All financings incl. unrolled-up CNs</span>
-            <span>{{ fmtUSD((roundCols[roundCols.length - 1]?.cumulated_financing || 0) + cnReconciliation.unattributed_dollars) }}</span>
+          <div class="text-right">
+            <span class="font-semibold">{{ fmtUSD(cnReconciliation.unattributed_dollars) }}</span>
+            <span class="ml-2 text-[10px] text-amber-700">
+              <span v-if="cnReconciliation.by_reason.stale_destination > 0">{{ fmtUSD(cnReconciliation.by_reason.stale_destination) }} bad destination</span>
+              <span v-if="cnReconciliation.by_reason.deferred > 0" class="ml-2">{{ fmtUSD(cnReconciliation.by_reason.deferred) }} unassigned</span>
+              <span v-if="cnReconciliation.by_reason.excluded > 0" class="ml-2">{{ fmtUSD(cnReconciliation.by_reason.excluded) }} excluded</span>
+            </span>
           </div>
         </div>
-        <p class="px-4 py-2 text-[11px] text-ink-500 bg-ink-50/60 border-t border-ink-200">
-          Values are user-entered. Toggle a column to Open to mark it as the round currently being modeled — only one round can be Open at a time.
-        </p>
-      </UiCard>
+        <div
+          v-if="cnReconciliation.total_dollars > 0"
+          class="mt-1 px-3 py-1.5 text-[11px] text-ink-500 italic flex items-center justify-between gap-3 num"
+        >
+          <span>All financings incl. unrolled-up CNs</span>
+          <span>{{ fmtUSD((roundCols[roundCols.length - 1]?.cumulated_financing || 0) + cnReconciliation.unattributed_dollars) }}</span>
+        </div>
+      </div>
 
       <!-- Investors-by-round matrix hidden by default — backend lives in
            round_investors + /api/companies/:id/investor-matrix when we
