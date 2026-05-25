@@ -6,7 +6,7 @@
 // Pre-baseline picker lives in AppTopBar (serves every per-company page).
 import { Plus, Upload, Download, Camera } from 'lucide-vue-next'
 
-export type TabKey = 'financings' | 'notes'
+export type TabKey = 'financings' | 'notes' | 'investors'
 
 interface Props {
   openRoundName: string | null
@@ -28,6 +28,7 @@ const emit = defineEmits<{
 const tabs: Array<{ key: TabKey; label: string }> = [
   { key: 'financings', label: 'Financings' },
   { key: 'notes',      label: 'Convertible notes' },
+  { key: 'investors',  label: 'Preferred investors' },
 ]
 </script>
 

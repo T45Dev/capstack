@@ -170,11 +170,16 @@ if (typeof window !== 'undefined') {
   })
 }
 
-// Active sub-tab — 'financings' (matrix view) vs 'notes' (CN ledger).
-// Synced to the URL `?tab=` so the operator's choice survives a reload
-// and shares cleanly via copy-paste.
+// Active sub-tab — 'financings' (matrix), 'notes' (CN ledger), or
+// 'investors' (per-investor allocation matrix — the historical canon of
+// who put what into each round). Synced to the URL `?tab=` so the
+// selection survives reload and shares cleanly via copy-paste.
 const activeTab = computed<TabKey>({
-  get: () => (route.query.tab === 'notes' ? 'notes' : 'financings'),
+  get: () => {
+    const t = route.query.tab
+    if (t === 'notes' || t === 'investors') return t
+    return 'financings'
+  },
   set: (v) => {
     void router.replace({ query: { ...route.query, tab: v === 'financings' ? undefined : v } })
   },
@@ -322,6 +327,16 @@ function exportCsv() {
     <!-- Convertible notes tab: just the CN ledger, full width. -->
     <div v-show="activeTab === 'notes'">
       <CnLedger :company-id="id" @refreshed="refreshRoundSummary" />
+    </div>
+
+    <!-- Preferred investors tab: per-investor allocation matrix —
+         stakeholder × round, dollars invested per round. The historical
+         canon of who put what into the company. -->
+    <div v-show="activeTab === 'investors'">
+      <div v-if="!roundCols.length" class="px-4 py-10 text-center text-sm text-ink-500 border border-dashed border-ink-300 rounded-lg bg-white">
+        Add a round first — the investor matrix needs columns to populate.
+      </div>
+      <InvestorMatrix v-else :company-id="id" @refreshed="refreshRoundSummary" />
     </div>
   </div>
 </template>
