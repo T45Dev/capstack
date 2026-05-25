@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { UploadCloud, CheckCircle2, AlertTriangle, ShieldCheck } from 'lucide-vue-next'
+import { UploadCloud, CheckCircle2, AlertTriangle, ShieldCheck, FileSpreadsheet } from 'lucide-vue-next'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -12,6 +12,53 @@ const replace = ref(true)
 const uploading = ref(false)
 const result = ref<{ ok: boolean; counts: Record<string, number>; skipped?: string[]; warnings: string[] } | null>(null)
 const error = ref<string | null>(null)
+
+// Sheet-role mapping. Populated by the /import-inspect endpoint on
+// file selection. Each role's value is the actual sheet name from
+// the workbook (or empty = "auto-detect", which uses the parser's
+// built-in regex fallback). Surfacing this explicitly means the
+// operator can point us at the right sheet when Carta's labelling
+// slips past our patterns — the future-proof fix the user asked for.
+interface SheetInfo { name: string; rowCount: number; columnCount: number }
+const sheets = ref<SheetInfo[]>([])
+const inspecting = ref(false)
+const inspectError = ref<string | null>(null)
+
+type Role = 'detailedCapTableSheet' | 'optionPlanSheet' | 'convertibleNotesSheet' | 'summaryCapTableSheet'
+const roleLabels: Record<Role, { label: string; hint: string }> = {
+  detailedCapTableSheet:  { label: 'Detailed cap table',         hint: 'Per-stakeholder grid (holdings, options summed per person).' },
+  optionPlanSheet:        { label: 'Option grants (per grant)',   hint: 'Per-grant rows: strike, issue date, vesting, exercised. This drives Option Pool Impact.' },
+  convertibleNotesSheet:  { label: 'Convertible notes ledger',    hint: 'Principal, interest, valuation cap, discount, conversion date.' },
+  summaryCapTableSheet:   { label: 'Summary cap table',           hint: 'Authorized totals per class + total option pool size.' },
+}
+const sheetRoles = reactive<Record<Role, string>>({
+  detailedCapTableSheet: '',
+  optionPlanSheet: '',
+  convertibleNotesSheet: '',
+  summaryCapTableSheet: '',
+})
+
+async function inspect(f: File) {
+  inspecting.value = true
+  inspectError.value = null
+  sheets.value = []
+  for (const k of Object.keys(sheetRoles) as Role[]) sheetRoles[k] = ''
+  try {
+    const fd = new FormData()
+    fd.append('file', f)
+    const res = await $fetch<{ sheets: SheetInfo[]; detected: Record<Role, string | null> }>(`/api/companies/${id.value}/import-inspect`, { method: 'POST', body: fd })
+    sheets.value = res.sheets
+    for (const k of Object.keys(sheetRoles) as Role[]) {
+      sheetRoles[k] = res.detected[k] || ''
+    }
+  } catch (e: any) {
+    inspectError.value = e?.data?.message || e?.message || 'Inspect failed'
+  } finally {
+    inspecting.value = false
+  }
+}
+
+watch(file, (f) => { if (f) inspect(f) })
 
 // Per-category opt-in. Default = include everything (matches current
 // behavior). Rounds, assumptions, pool_events (Pool Impact Ideas), and
@@ -59,6 +106,13 @@ async function upload() {
     for (const k of Object.keys(include) as Cat[]) {
       fd.append(`include_${k === 'shareClasses' ? 'share_classes' : k === 'optionPools' ? 'option_pools' : k}`, String(include[k]))
     }
+    // Sheet-role overrides. Empty string = auto-detect (server's regex
+    // fallback runs). Any non-empty value is the exact sheet name to
+    // use.
+    fd.append('sheet_detailed_cap_table',  sheetRoles.detailedCapTableSheet)
+    fd.append('sheet_option_plan',         sheetRoles.optionPlanSheet)
+    fd.append('sheet_convertible_notes',   sheetRoles.convertibleNotesSheet)
+    fd.append('sheet_summary_cap_table',   sheetRoles.summaryCapTableSheet)
     result.value = await $fetch(`/api/companies/${id.value}/import`, { method: 'POST', body: fd })
   } catch (e: any) {
     error.value = e?.data?.message || e?.message || 'Upload failed'
@@ -113,6 +167,38 @@ function keepFinancingsSafe() {
           </label>
         </p>
         <p v-if="file" class="mt-2 text-xs text-ink-700">{{ file.name }} ({{ Math.round(file.size / 1024) }} KB)</p>
+      </div>
+
+      <!-- Sheet-role mapping. After a file is selected we inspect the
+           workbook and surface the sheet list + auto-detected role
+           guesses so the operator can confirm or override. This is the
+           future-proof fix for Carta's varying sheet labels — instead
+           of relying on regex pattern matching alone, we let the
+           operator point us at the right sheet explicitly. -->
+      <div v-if="file" class="mt-5">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-ink-500 flex items-center gap-1.5">
+            <FileSpreadsheet :size="13" /> Sheet roles
+          </h3>
+          <span v-if="inspecting" class="text-[11px] text-ink-500 italic">Reading sheets…</span>
+        </div>
+        <p class="text-[11px] text-ink-500 mb-2">
+          Tell us which sheet contains what. Auto-detected from sheet names; override here when the labelling slips past our patterns.
+        </p>
+        <div v-if="inspectError" class="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5 mb-2">{{ inspectError }}</div>
+        <div v-else-if="sheets.length" class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+          <div v-for="(meta, role) in roleLabels" :key="role">
+            <label class="block text-[11px] font-medium text-ink-700">{{ meta.label }}</label>
+            <select
+              v-model="sheetRoles[role]"
+              class="mt-0.5 w-full text-[12px] border border-ink-300 hover:border-ink-400 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500 rounded px-1.5 py-1 bg-white"
+            >
+              <option value="">— auto-detect —</option>
+              <option v-for="s in sheets" :key="s.name" :value="s.name">{{ s.name }} ({{ s.rowCount }} rows)</option>
+            </select>
+            <div class="text-[10px] text-ink-500 mt-0.5">{{ meta.hint }}</div>
+          </div>
+        </div>
       </div>
 
       <!-- Per-category opt-in selector. Defaults to everything-on so the

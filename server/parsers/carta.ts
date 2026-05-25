@@ -83,6 +83,27 @@ export interface ParsedCartaCapTable {
   warnings: string[]
 }
 
+// Explicit sheet-name overrides. When set, the parser uses these
+// instead of auto-detecting by regex — so the operator can point us
+// at the right sheet when Carta's labelling slips past our patterns
+// (the user's pain: "2019 Stock Option and Incentive Plan" not being
+// recognized as the option-grants source).
+export interface CartaParseOverrides {
+  detailedCapTableSheet?: string | null
+  convertibleNotesSheet?: string | null
+  optionPlanSheet?: string | null
+  summaryCapTableSheet?: string | null
+}
+
+// Auto-detected sheet roles. The inspect endpoint surfaces these so
+// the UI can pre-fill the role dropdowns with sensible defaults.
+export interface CartaSheetRoles {
+  detailedCapTableSheet?: string | null
+  convertibleNotesSheet?: string | null
+  optionPlanSheet?: string | null
+  summaryCapTableSheet?: string | null
+}
+
 function asNumber(v: unknown): number {
   if (v == null) return 0
   if (typeof v === 'number') return v
@@ -282,7 +303,56 @@ export function parseVestingSchedule(text: string): { months: number | null; cli
   return { months, cliff }
 }
 
-export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> {
+// Apply the role-detection regexes against an open workbook. Used by
+// both the inspect endpoint (to surface defaults to the UI) and by
+// parseCartaXlsx (to find sheets when no override is given).
+export function detectCartaSheetRoles(wb: ExcelJS.Workbook): CartaSheetRoles {
+  const detailed = wb.getWorksheet('Detailed Cap Table')
+                || wb.getWorksheet('Intermediate Cap Table')
+                || wb.worksheets[0]
+  const cn = wb.worksheets.find((ws) => {
+    const n = (ws.name || '').toLowerCase()
+    return /convertible|^notes?\b|note\s*ledger|safes?/.test(n)
+  })
+  const plan = wb.worksheets.find(ws => {
+    const n = (ws.name || '').toLowerCase()
+    return /(stock\s*option|equity).+(plan|incentive|ledger)/.test(n)
+      || /option.+ledger/.test(n)
+      || /option.+detail/.test(n)
+      || /^stock\s*options?$/.test(n)
+      || /option\s*(grants?|awards?)/.test(n)
+      || /outstanding\s*options?/.test(n)
+      || /grants?\s*(detail|ledger)/.test(n)
+      || /^awards?$/.test(n)
+  })
+  const summary = wb.getWorksheet('Summary Cap Table')
+  return {
+    detailedCapTableSheet: detailed?.name || null,
+    convertibleNotesSheet: cn?.name || null,
+    optionPlanSheet: plan?.name || null,
+    summaryCapTableSheet: summary?.name || null,
+  }
+}
+
+// Inspect-only entrypoint: load the workbook and report sheet names +
+// auto-detected role mapping. No parsing or DB work — used by the
+// import UI to pre-populate the sheet-role dropdowns before the
+// operator commits to a full import.
+export async function inspectCartaXlsx(buf: Buffer): Promise<{
+  sheets: Array<{ name: string; rowCount: number; columnCount: number }>
+  detected: CartaSheetRoles
+}> {
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.load(buf as any)
+  const sheets = wb.worksheets.map(ws => ({
+    name: ws.name,
+    rowCount: ws.rowCount,
+    columnCount: ws.columnCount,
+  }))
+  return { sheets, detected: detectCartaSheetRoles(wb) }
+}
+
+export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides = {}): Promise<ParsedCartaCapTable> {
   const wb = new ExcelJS.Workbook()
   await wb.xlsx.load(buf as any)
 
@@ -314,12 +384,19 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
   }
 
   // ----- Detailed Cap Table -----
-  const detailed = wb.getWorksheet('Detailed Cap Table')
+  // Override wins over auto-detection. The override is the actual
+  // sheet name from the UI dropdown (which the operator picked from
+  // the inspect-result list), so we look it up directly.
+  const detailed = (overrides.detailedCapTableSheet ? wb.getWorksheet(overrides.detailedCapTableSheet) : null)
+                || wb.getWorksheet('Detailed Cap Table')
                 || wb.getWorksheet('Intermediate Cap Table')
                 || wb.worksheets[0]
   if (!detailed) {
     warnings.push('No detailed cap-table sheet found.')
     return result
+  }
+  if (overrides.detailedCapTableSheet) {
+    warnings.push(`Detailed cap table sheet: "${detailed.name}" (operator selection).`)
   }
 
   // Header is in the row containing 'Stakeholder ID' / 'Name'. Carta puts metadata above.
@@ -470,7 +547,8 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
 
   // ----- Summary Cap Table: pull authorized counts & total pool -----
   // Layout: col 1 = label, col 2 = Shares Authorized, col 3 = Issued, col 4 = FDS
-  const summary = wb.getWorksheet('Summary Cap Table')
+  const summary = (overrides.summaryCapTableSheet ? wb.getWorksheet(overrides.summaryCapTableSheet) : null)
+                || wb.getWorksheet('Summary Cap Table')
   if (summary) {
     for (let i = 1; i <= summary.rowCount; i++) {
       const row = summary.getRow(i)
@@ -497,15 +575,19 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
   // Carta exports vary the sheet name across templates: "Convertible Notes",
   // "Convertible Note Ledger", "Convertibles", "SAFEs", "Promissory Notes", etc.
   // Match any worksheet whose name mentions convertibles, notes, or SAFEs.
-  const cnSheet = wb.worksheets.find((ws) => {
-    const n = (ws.name || '').toLowerCase()
-    return /convertible|^notes?\b|note\s*ledger|safes?/.test(n)
-  })
+  const cnSheet = (overrides.convertibleNotesSheet ? wb.getWorksheet(overrides.convertibleNotesSheet) : null)
+               || wb.worksheets.find((ws) => {
+                 const n = (ws.name || '').toLowerCase()
+                 return /convertible|^notes?\b|note\s*ledger|safes?/.test(n)
+               })
   if (!cnSheet) {
     warnings.push(
       'No convertible-notes sheet found. Looked for a tab named "Convertible Notes", '
       + '"Convertible Note Ledger", "Convertibles", "Notes", "SAFEs", or similar.',
     )
+  }
+  if (cnSheet && overrides.convertibleNotesSheet) {
+    warnings.push(`Convertible notes sheet: "${cnSheet.name}" (operator selection).`)
   }
   if (cnSheet) {
     // Find header row by scanning the first ~25 rows for the "principal" + interest/cap pair.
@@ -618,22 +700,26 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
   // grant with the columns we actually need to display + drive vesting.
   // When present, we overlay the per-grant data onto whatever the cap
   // table already gave us — and add any grant rows the cap table missed.
-  const planSheet = wb.worksheets.find(ws => {
-    const n = (ws.name || '').toLowerCase()
-    // Broad pattern bank so we catch the many ways Carta labels this
-    // sheet across templates and customers. Real-world names seen:
-    //   "2019 Stock Option and Incentive Plan", "Equity Incentive Plan",
-    //   "Option Ledger", "ANT Post A-4 Option Detail", "Stock Options",
-    //   "Option Grants", "Grants Detail", "Awards", "Outstanding Options".
-    return /(stock\s*option|equity).+(plan|incentive|ledger)/.test(n)
-      || /option.+ledger/.test(n)
-      || /option.+detail/.test(n)
-      || /^stock\s*options?$/.test(n)
-      || /option\s*(grants?|awards?)/.test(n)
-      || /outstanding\s*options?/.test(n)
-      || /grants?\s*(detail|ledger)/.test(n)
-      || /^awards?$/.test(n)
-  })
+  const planSheet = (overrides.optionPlanSheet ? wb.getWorksheet(overrides.optionPlanSheet) : null)
+                 || wb.worksheets.find(ws => {
+                   const n = (ws.name || '').toLowerCase()
+                   // Broad pattern bank so we catch the many ways Carta labels this
+                   // sheet across templates and customers. Real-world names seen:
+                   //   "2019 Stock Option and Incentive Plan", "Equity Incentive Plan",
+                   //   "Option Ledger", "ANT Post A-4 Option Detail", "Stock Options",
+                   //   "Option Grants", "Grants Detail", "Awards", "Outstanding Options".
+                   return /(stock\s*option|equity).+(plan|incentive|ledger)/.test(n)
+                     || /option.+ledger/.test(n)
+                     || /option.+detail/.test(n)
+                     || /^stock\s*options?$/.test(n)
+                     || /option\s*(grants?|awards?)/.test(n)
+                     || /outstanding\s*options?/.test(n)
+                     || /grants?\s*(detail|ledger)/.test(n)
+                     || /^awards?$/.test(n)
+                 })
+  if (planSheet && overrides.optionPlanSheet) {
+    warnings.push(`Option grants sheet: "${planSheet.name}" (operator selection).`)
+  }
   // Track which grants came from the Detailed Cap Table so we can drop
   // them wholesale if the Option Plan sheet provides richer per-grant
   // data for the same stakeholders (the Plan sheet wins). With Issue
@@ -695,8 +781,26 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
           warnings.push(`"${planSheet.name}": name column matched by position (column A). Header was "${asString(planSheet.getRow(planHeaderRow).getCell(1).value)}".`)
         }
       }
-      const cQtyIssued = findHeader(/^quantity ?issued$/, /^shares? ?issued$/, /^granted$/)
-      const cQtyOutstanding = findHeader(/^quantity ?outstanding$/, /^outstanding$/)
+      const cQtyIssued = findHeader(
+        /^quantity ?issued$/, /^shares? ?issued$/, /^granted$/,
+        // Wider bank for variant Carta templates that don't include the
+        // word "issued"/"outstanding" on the count column.
+        /^total ?(issued|granted)$/, /^original ?(issued|granted)$/,
+        /^shares? ?granted$/, /^options? ?granted$/, /^number ?granted$/,
+      )
+      const cQtyOutstanding = findHeader(
+        /^quantity ?outstanding$/, /^outstanding$/,
+        /^(vested|unvested|remaining|active|current) ?(options|shares)?$/,
+        /^outstanding ?(shares|options)$/,
+      )
+      // Last-ditch generic quantity column. Some Carta templates use just
+      // "Quantity" or "Shares" or "Options" without an Issued/Outstanding
+      // suffix. Treat that single column as Outstanding (the more useful
+      // number for the live-grant view).
+      let cQtyGeneric = -1
+      if (cQtyIssued < 0 && cQtyOutstanding < 0) {
+        cQtyGeneric = findHeader(/^quantity$/, /^qty$/, /^shares?$/, /^options?$/, /^amount$/)
+      }
       const cQtyExercised = findHeader(/^quantity ?exercised$/, /^exercised$/)
       // Forfeited and Expired are tracked separately in Carta:
       //   Forfeited = unvested at termination (cancelled/forfeited are
@@ -746,16 +850,43 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
       const cAwardType = findHeader(/^(award|grant) ?type$/, /^(iso|nso|rsu)/)
       const cAcceleration = findHeader(/^acceleration$/, /^accel/)
 
+      // Diagnostic: dump exactly which columns we resolved on the Plan
+      // sheet. This is the single most useful warning when the parser
+      // produces 0 grants — the operator can read it and see at a glance
+      // which column went unmatched.
+      const colReport = (n: string, idx: number) => {
+        if (idx <= 0) return `${n}=NOT FOUND`
+        const hdr = (planSheet.getRow(planHeaderRow).values as any[])[idx]
+        return `${n}=col ${String.fromCharCode(64 + Math.min(idx, 26))} ("${asString(hdr)}")`
+      }
+      warnings.push(
+        `"${planSheet.name}" columns: `
+        + [
+          colReport('name', cName),
+          colReport('qty_issued', cQtyIssued),
+          colReport('qty_outstanding', cQtyOutstanding),
+          colReport('qty_generic', cQtyGeneric),
+          colReport('strike', cStrike),
+          colReport('issue_date', cIssueDate),
+          colReport('vest_start', cVestStart),
+        ].join(', '),
+      )
+
       let parsed = 0
+      let skippedNoName = 0
+      let skippedNoQty = 0
       for (let r = planHeaderRow + 1; r <= planSheet.rowCount; r++) {
         try {
           const row = planSheet.getRow(r)
           const name = cName > 0 ? asString(row.getCell(cName).value) : ''
-          if (!name) continue
+          if (!name) { skippedNoName++; continue }
           const qtyIssued = cQtyIssued > 0 ? asNumber(row.getCell(cQtyIssued).value) : 0
           const qtyOutstanding = cQtyOutstanding > 0 ? asNumber(row.getCell(cQtyOutstanding).value) : 0
-          const quantity = qtyOutstanding > 0 ? qtyOutstanding : qtyIssued
-          if (quantity <= 0) continue
+          const qtyGeneric = cQtyGeneric > 0 ? asNumber(row.getCell(cQtyGeneric).value) : 0
+          const quantity = qtyOutstanding > 0 ? qtyOutstanding
+                         : qtyIssued > 0 ? qtyIssued
+                         : qtyGeneric
+          if (quantity <= 0) { skippedNoQty++; continue }
 
           const scheduleText = cVestSchedule > 0 ? asString(row.getCell(cVestSchedule).value) : ''
           const { months, cliff } = parseVestingSchedule(scheduleText)
@@ -784,6 +915,13 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
           warnings.push(`Skipped grant row ${r} on "${planSheet.name}": ${err?.message || err}`)
         }
       }
+      // Per-iteration skip diagnostics. Surfacing exactly why rows didn't
+      // turn into grants is the difference between "it works" and "the
+      // operator stares at zero grants with no idea why."
+      warnings.push(
+        `"${planSheet.name}" row outcome: parsed=${parsed}, skipped_no_name=${skippedNoName}, skipped_no_qty=${skippedNoQty}, total_rows_after_header=${planSheet.rowCount - planHeaderRow}.`,
+      )
+
       if (parsed > 0) {
         // De-dupe: the Plan sheet just produced richer per-grant detail
         // for some stakeholders. Drop EVERY grant the Detailed Cap Table
@@ -805,8 +943,19 @@ export async function parseCartaXlsx(buf: Buffer): Promise<ParsedCartaCapTable> 
           + `(stakeholders not covered by the Plan sheet) = ${result.grants.length} total.`,
         )
       } else {
+        // Zero per-grant rows parsed — fall back to Detailed Cap Table.
+        // Emit a sample of the first data row so the operator can see
+        // what the parser actually read at the cells where it expected
+        // name + quantity.
+        const sampleRow = planSheet.getRow(planHeaderRow + 1)
+        const sampleCells: string[] = []
+        for (let c = 1; c <= Math.min(planSheet.columnCount, 10); c++) {
+          sampleCells.push(`${String.fromCharCode(64 + c)}="${asString(sampleRow.getCell(c).value)}"`)
+        }
         warnings.push(
-          `"${planSheet.name}": found the sheet but parsed 0 grant rows. Falling back to the Detailed Cap Table's aggregated-per-stakeholder grants, so Option Pool Impact will show one event per person (not per grant). Check that the sheet has Quantity Issued / Quantity Outstanding columns with positive values.`,
+          `"${planSheet.name}": parsed 0 per-grant rows — falling back to the Detailed Cap Table's aggregated grants. `
+          + `First data row (row ${planHeaderRow + 1}) looks like: ${sampleCells.join(', ')}. `
+          + `If this looks like real grant data, the column headers in row ${planHeaderRow} aren't matching the parser's patterns — pick "Option grants" from the dropdown on the import page to force this sheet.`,
         )
       }
 
