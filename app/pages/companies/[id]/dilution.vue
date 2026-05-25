@@ -61,15 +61,20 @@ const previousRound = computed(() => {
 const pps = computed(() => openRound.value?.share_price || (compute.value?.round?.pricePerShare as number) || 0)
 
 // Toggle: include proposed + ideas in post-side math. Persists per
-// company across reloads.
+// company across reloads. The localStorage read happens in onMounted
+// (not during setup) — otherwise the value would flip true between SSR
+// (where window is undefined and the toggle renders unchecked) and the
+// client's first render (where localStorage may say "true" and flip the
+// toggle on), producing a Vue hydration mismatch.
 const includeFuture = ref(false)
 const STORAGE_KEY = 'capstack:dilution:includeFuture'
-if (typeof window !== 'undefined') {
+onMounted(() => {
   try { includeFuture.value = localStorage.getItem(STORAGE_KEY) === 'true' } catch { /* ignore */ }
-  watch(includeFuture, v => {
-    try { localStorage.setItem(STORAGE_KEY, String(v)) } catch { /* ignore */ }
-  })
-}
+})
+watch(includeFuture, v => {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem(STORAGE_KEY, String(v)) } catch { /* ignore */ }
+})
 
 // Proposed grants grouped by stakeholder_id (fallback to a synthetic
 // id based on recipient_name when no stakeholder linkage exists).
