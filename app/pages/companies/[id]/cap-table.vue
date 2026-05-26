@@ -149,7 +149,11 @@ const matrixDensity = ref<Density>('regular')
 const matrixGroupBy = ref<GroupBy>('flat')
 const matrixStatusFilter = ref<StatusFilter>('all')
 
-if (typeof window !== 'undefined') {
+// Restore persisted toolbar prefs after the component mounts (not in
+// setup). Reading localStorage during setup would flip these refs
+// between SSR's defaults and the client's first render, producing a
+// Vue hydration mismatch.
+onMounted(() => {
   try {
     const v = localStorage.getItem('capstack:financings:show-formulas')
     if (v !== null) showFormulas.value = v === '1'
@@ -160,19 +164,23 @@ if (typeof window !== 'undefined') {
     const s = localStorage.getItem('capstack:financings:status-filter')
     if (s === 'all' || s === 'open' || s === 'closed') matrixStatusFilter.value = s
   } catch { /* ignore */ }
-  watch(showFormulas, (v) => {
-    try { localStorage.setItem('capstack:financings:show-formulas', v ? '1' : '0') } catch { /* ignore */ }
-  })
-  watch(matrixDensity, (v) => {
-    try { localStorage.setItem('capstack:financings:density', v) } catch { /* ignore */ }
-  })
-  watch(matrixGroupBy, (v) => {
-    try { localStorage.setItem('capstack:financings:group-by', v) } catch { /* ignore */ }
-  })
-  watch(matrixStatusFilter, (v) => {
-    try { localStorage.setItem('capstack:financings:status-filter', v) } catch { /* ignore */ }
-  })
-}
+})
+watch(showFormulas, (v) => {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem('capstack:financings:show-formulas', v ? '1' : '0') } catch { /* ignore */ }
+})
+watch(matrixDensity, (v) => {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem('capstack:financings:density', v) } catch { /* ignore */ }
+})
+watch(matrixGroupBy, (v) => {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem('capstack:financings:group-by', v) } catch { /* ignore */ }
+})
+watch(matrixStatusFilter, (v) => {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem('capstack:financings:status-filter', v) } catch { /* ignore */ }
+})
 
 // Active sub-tab — 'financings' (matrix), 'notes' (CN ledger), or
 // 'investors' (per-investor allocation matrix — the historical canon of

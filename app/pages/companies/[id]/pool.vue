@@ -26,13 +26,17 @@ const { data: roundSummary } = await useFetch<{ rounds: Array<{ round_id: string
 // Visuals (pie + line graph) are collapsible — they eat vertical space
 // on smaller screens so the operator wants the option to fold them
 // away. Persisted to localStorage so the choice sticks across reloads.
+// localStorage read deferred to onMounted so SSR and the client first
+// render agree on "expanded"; the stored value applies post-hydration
+// without a Vue mismatch warning.
 const visualsCollapsed = ref(false)
-if (typeof window !== 'undefined') {
+onMounted(() => {
   try { visualsCollapsed.value = localStorage.getItem('capstack:pool:visuals-collapsed') === 'true' } catch { /* ignore */ }
-  watch(visualsCollapsed, (v) => {
-    try { localStorage.setItem('capstack:pool:visuals-collapsed', String(v)) } catch { /* ignore */ }
-  })
-}
+})
+watch(visualsCollapsed, (v) => {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem('capstack:pool:visuals-collapsed', String(v)) } catch { /* ignore */ }
+})
 
 // Sensible fallback date used when an event has no date in the source data.
 // Prefer the company's starting-round date (the closest "anchor" we have),

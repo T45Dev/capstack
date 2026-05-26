@@ -55,16 +55,20 @@ async function setStartingRound(val: string) {
 }
 
 // Nav collapse state — persists across reloads so the user's preference
-// for "labels visible" vs "icons-only" sticks. Default to expanded.
+// for "labels visible" vs "icons-only" sticks. Default to expanded. The
+// localStorage read happens in onMounted (not during setup) so the SSR
+// render and the client's first paint agree on "expanded"; the stored
+// value applies after hydration without a mismatch warning.
 const navCollapsed = ref(false)
-if (typeof window !== 'undefined') {
+onMounted(() => {
   try {
     navCollapsed.value = localStorage.getItem('capstack:nav:collapsed') === '1'
   } catch { /* ignore */ }
-  watch(navCollapsed, (v) => {
-    try { localStorage.setItem('capstack:nav:collapsed', v ? '1' : '0') } catch { /* ignore */ }
-  })
-}
+})
+watch(navCollapsed, (v) => {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem('capstack:nav:collapsed', v ? '1' : '0') } catch { /* ignore */ }
+})
 function toggleNav() { navCollapsed.value = !navCollapsed.value }
 
 // Spec §4 nav order. Routes use the spec page names where they differ from

@@ -169,16 +169,20 @@ const propUnits = useTableUnits('capstack:grants:proposed:units')
 // toggleable.
 const ALWAYS_VISIBLE = new Set(['recipient_name', 'actions'])
 function useHiddenCols(storageKey: string) {
+  // Defer the localStorage read to onMounted so SSR and the client's
+  // first render agree on "no columns hidden"; the stored set applies
+  // after hydration without producing a Vue mismatch warning.
   const hidden = ref<Set<string>>(new Set())
-  if (typeof window !== 'undefined') {
+  onMounted(() => {
     try {
       const raw = localStorage.getItem(storageKey)
       if (raw) hidden.value = new Set(JSON.parse(raw))
     } catch { /* ignore */ }
-    watch(hidden, (v) => {
-      try { localStorage.setItem(storageKey, JSON.stringify([...v])) } catch { /* ignore */ }
-    }, { deep: true })
-  }
+  })
+  watch(hidden, (v) => {
+    if (typeof window === 'undefined') return
+    try { localStorage.setItem(storageKey, JSON.stringify([...v])) } catch { /* ignore */ }
+  }, { deep: true })
   function toggle(key: string) {
     if (ALWAYS_VISIBLE.has(key)) return
     const next = new Set(hidden.value)

@@ -203,14 +203,17 @@ const STORAGE_PREFIX = 'capstack:financings-matrix'
 const colWidths = ref<Record<string, number>>({})
 const rowHeights = ref<Record<string, number>>({})
 
-if (typeof window !== 'undefined') {
+// Restore persisted widths/heights after mount — reading during setup
+// would diverge from the SSR render (which used the {} defaults),
+// triggering a Vue hydration mismatch on the matrix's <td>/<col> sizes.
+onMounted(() => {
   try {
     const cw = JSON.parse(localStorage.getItem(`${STORAGE_PREFIX}:col-widths`) || 'null')
     if (cw && typeof cw === 'object') colWidths.value = cw
     const rh = JSON.parse(localStorage.getItem(`${STORAGE_PREFIX}:row-heights`) || 'null')
     if (rh && typeof rh === 'object') rowHeights.value = rh
   } catch { /* ignore */ }
-}
+})
 
 function persistColWidths() {
   if (typeof window === 'undefined') return

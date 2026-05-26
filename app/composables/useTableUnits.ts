@@ -41,25 +41,32 @@ export function useTableUnits(storageKey: string, defaults: Partial<UnitVisibili
   let state = _registry.get(storageKey)
   if (!state) {
     const initial: UnitVisibility = { shares: true, pct: false, value: false, ...defaults }
-    if (typeof window !== 'undefined') {
-      try {
-        const raw = localStorage.getItem(storageKey)
-        if (raw) {
-          const parsed = JSON.parse(raw) as Partial<UnitVisibility>
-          if (typeof parsed.shares === 'boolean') initial.shares = parsed.shares
-          if (typeof parsed.pct === 'boolean') initial.pct = parsed.pct
-          if (typeof parsed.value === 'boolean') initial.value = parsed.value
-        }
-      } catch { /* ignore */ }
-    }
     state = ref(initial)
-    if (typeof window !== 'undefined') {
-      watch(state, (v) => {
-        try { localStorage.setItem(storageKey, JSON.stringify(v)) } catch { /* ignore */ }
-      }, { deep: true })
-    }
     _registry.set(storageKey, state)
+    watch(state, (v) => {
+      if (typeof window === 'undefined') return
+      try { localStorage.setItem(storageKey, JSON.stringify(v)) } catch { /* ignore */ }
+    }, { deep: true })
   }
+  // Hydrate from localStorage after the host component mounts (not in
+  // setup) so the SSR'd HTML and the client's first render agree on
+  // `initial`; the stored toggles apply after hydration with no Vue
+  // mismatch. Safe to run on every caller — the registry's state ref
+  // is shared, so subsequent reads see equal values and are no-ops.
+  onMounted(() => {
+    try {
+      const raw = localStorage.getItem(storageKey)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as Partial<UnitVisibility>
+      const next = { ...state!.value }
+      if (typeof parsed.shares === 'boolean') next.shares = parsed.shares
+      if (typeof parsed.pct === 'boolean') next.pct = parsed.pct
+      if (typeof parsed.value === 'boolean') next.value = parsed.value
+      if (next.shares !== state!.value.shares || next.pct !== state!.value.pct || next.value !== state!.value.value) {
+        state!.value = next
+      }
+    } catch { /* ignore */ }
+  })
 
   // At least one unit must remain visible — if the user tries to turn off the
   // last visible one, keep it on instead.
