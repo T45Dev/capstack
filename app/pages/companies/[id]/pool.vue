@@ -539,7 +539,14 @@ async function saveIdea() {
 }
 
 async function deleteIdea(idea: any) {
-  if (!confirm(`Delete idea "${idea.name}"?`)) return
+  if (!idea?.id) {
+    // Table row references an idea that's no longer in the ideas list —
+    // most likely the user double-clicked delete or the list refreshed
+    // between render and click. Silent no-op, the next refresh will
+    // settle the row.
+    return
+  }
+  if (!confirm(`Delete idea "${idea.name || 'untitled'}"?`)) return
   await $fetch(`/api/pool-events/${idea.id}`, { method: 'DELETE' })
   await refreshIdeas()
 }
