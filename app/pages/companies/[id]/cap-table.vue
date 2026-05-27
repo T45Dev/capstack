@@ -148,6 +148,9 @@ const showFormulas = ref(true)
 const matrixDensity = ref<Density>('regular')
 const matrixGroupBy = ref<GroupBy>('flat')
 const matrixStatusFilter = ref<StatusFilter>('all')
+// Read-only finance-model view (rounds as columns, tranches combined) vs the
+// editable per-round grid. Default to the model — it's the familiar layout.
+const financingsView = ref<'model' | 'edit'>('model')
 
 // Restore persisted toolbar prefs after the component mounts (not in
 // setup). Reading localStorage during setup would flip these refs
@@ -279,8 +282,15 @@ function exportCsv() {
     <div v-show="activeTab === 'financings'" class="space-y-4">
       <FinancingsSummaryBar v-if="roundCols.length" :rounds="roundCols" />
 
+      <!-- Read-only finance model (rounds as columns, tranches combined) vs
+           the editable per-round grid. Model is the default — familiar layout. -->
+      <div v-if="roundCols.length" class="inline-flex rounded-md border border-ink-200 overflow-hidden text-xs">
+        <button type="button" class="px-3 py-1.5" :class="financingsView === 'model' ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-100'" @click="financingsView = 'model'">Model</button>
+        <button type="button" class="px-3 py-1.5 border-l border-ink-200" :class="financingsView === 'edit' ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-100'" @click="financingsView = 'edit'">Edit grid</button>
+      </div>
+
       <FinancingsToolbar
-        v-if="roundCols.length"
+        v-if="roundCols.length && financingsView === 'edit'"
         v-model="matrixQuery"
         :density="matrixDensity"
         :group-by="matrixGroupBy"
@@ -296,6 +306,7 @@ function exportCsv() {
       <div v-if="!roundCols.length" class="px-4 py-10 text-center text-sm text-ink-500 border border-dashed border-ink-300 rounded-lg bg-white">
         No rounds yet. Click <span class="font-medium text-ink-700">Add round</span> above to start typing your funding history.
       </div>
+      <FinancingsModel v-else-if="financingsView === 'model'" :rounds="roundCols" />
       <div v-else>
         <FinancingsMatrix
           :rounds="filteredRoundCols"
