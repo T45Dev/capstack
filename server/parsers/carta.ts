@@ -57,7 +57,12 @@ export interface ParsedRound {
   sharePrice: number | null          // Original Issue Price (constant per ledger)
   newMoney: number                   // Sum of "Cash Contributed to Company"
   debtCanceled: number               // Sum of "Debt Canceled" (== CN-driven conversions; informational)
-  sharesIssued: number               // Sum of "Quantity Issued"
+  sharesIssued: number               // Sum of "Quantity Issued" (cash-bought + note-converted)
+  cashShares: number                 // Quantity Issued for rows with Cash Contributed > 0 only.
+                                     // The note-converted remainder (sharesIssued − cashShares) is
+                                     // supplied separately by CN attribution (destination = this code),
+                                     // so a round stores cashShares as preferred_issued to avoid
+                                     // double-counting the converted portion.
 }
 
 export interface ParsedConvertible {
@@ -213,6 +218,7 @@ function parseLedgerSheet(sheet: import('exceljs').Worksheet, code: string, warn
   let newMoney = 0
   let debtCanceled = 0
   let sharesIssued = 0
+  let cashShares = 0
   let maxBoard: string | null = null
   let maxIssue: string | null = null
   let minIssue: string | null = null
@@ -230,7 +236,11 @@ function parseLedgerSheet(sheet: import('exceljs').Worksheet, code: string, warn
       const p = asNumber(row.getCell(cIssue).value)
       if (p > 0) sharePrice = p
     }
-    if (cCash > 0)  newMoney     += asNumber(row.getCell(cCash).value)
+    if (cCash > 0) {
+      const cash = asNumber(row.getCell(cCash).value)
+      newMoney += cash
+      if (cash > 0) cashShares += qty   // new-money shares (vs note-converted)
+    }
     if (cDebt > 0)  debtCanceled += asNumber(row.getCell(cDebt).value)
     if (cBoard > 0)     maxBoard = trackMax(maxBoard, asDate(row.getCell(cBoard).value))
     if (cIssueDate > 0) {
@@ -264,6 +274,7 @@ function parseLedgerSheet(sheet: import('exceljs').Worksheet, code: string, warn
     newMoney,
     debtCanceled,
     sharesIssued,
+    cashShares,
   }
 }
 
