@@ -252,6 +252,11 @@ function migrate(d: Database.Database): void {
   ensureColumn('convertibles', 'converts_at_round', 'INTEGER NOT NULL DEFAULT 1')
   ensureColumn('convertibles', 'conversion_price', 'REAL')
   ensureColumn('convertibles', 'include_in_summary', 'INTEGER NOT NULL DEFAULT 1')
+  // Per-note attribution of the note's PRINCIPAL to the "Notes financing" row:
+  // NULL = auto (the round-era it was issued in), a round code = that stage,
+  // 'EQUITY' = fold into the round's equity raise (principal drops out of the
+  // notes line; the note still converts to shares normally).
+  ensureColumn('convertibles', 'financing_stage_code', 'TEXT')
   ensureColumn('companies', 'starting_round', 'TEXT')
   ensureColumn('companies', 'starting_round_date', 'TEXT')
   // NULL = the setup wizard hasn't been completed; the route gate redirects

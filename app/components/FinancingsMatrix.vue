@@ -316,14 +316,16 @@ function tooltip(key: string, r: RoundColumn): string {
     case 'new_money':           return 'New money raised this round — user input. Combined with Share price to derive Preferred issued.'
     case 'post_money':          return `Post-money = Pre-money + New money\n${fmtUSD(r.pre_money || 0)} + ${fmtUSD(r.new_money)} = ${fmtUSD(r.post_money)}\n(Notes financing is reported separately.)`
     case 'notes_financing': {
-      if (!r.notes_attributed?.length) return 'No CNs attributed to this round.'
-      const totalPrincipal = r.notes_attributed.reduce((a, n) => a + (n.principal || 0), 0)
-      const totalAccrued = r.notes_attributed.reduce((a, n) => a + (n.accrued || 0), 0)
-      const header = `${fmtUSD(r.notes_financing)} = ${r.notes_attributed.length} CN${r.notes_attributed.length === 1 ? '' : 's'} converting at this round:\n  ${fmtUSD(totalPrincipal)} principal + ${fmtUSD(totalAccrued)} accrued interest = ${fmtUSD(r.notes_financing)}`
-      const lines = r.notes_attributed.map(n =>
-        `  • ${n.stakeholderName} [${n.destinationCode || '—'}]: ${fmtUSD(n.principal)} + ${fmtUSD(n.accrued)} = ${fmtUSD(n.dollars)}`,
-      )
-      return [header, '', 'Per-note breakdown:', ...lines].join('\n')
+      // Issue-era: principal of the notes RAISED in this round's era (by their
+      // financing stage), not the notes converting here. The conversion list is
+      // shown separately below since it drives shares, not this dollar line.
+      if (!r.notes_financing) return 'No convertible notes raised in this round’s era. (Notes financing is issue-era — set each note’s financing stage on the Notes page.)'
+      const lines = [`${fmtUSD(r.notes_financing)} — principal of convertible notes raised in this round’s era (by issue date / financing stage on the Notes page).`]
+      if (r.notes_attributed?.length) {
+        lines.push('', 'Converting at this round (→ shares; financing era may differ):')
+        for (const n of r.notes_attributed) lines.push(`  • ${n.stakeholderName} [${n.destinationCode || '—'}]: ${fmtUSD(n.dollars)}`)
+      }
+      return lines.join('\n')
     }
     case 'share_price':         return 'Share price ($) — user input, 5-dp precision. Drives Preferred issued (new_money ÷ share_price).'
     case 'cumulated_financing': {

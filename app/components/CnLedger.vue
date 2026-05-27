@@ -36,7 +36,14 @@ interface CnRow {
   shares: number
   basisApplied: string
   includeInSummary: boolean
+  issueDate: string | null
+  financingStageCode: string | null
 }
+
+// Sentinel financing_stage_code that folds a note into a round's equity raise
+// (its principal drops out of the Notes-financing line; its share conversion is
+// untouched). Mirrors FOLD_INTO_EQUITY in round-summary.get.ts.
+const FOLD_INTO_EQUITY = 'EQUITY'
 
 const companyId = computed(() => props.companyId)
 
@@ -94,6 +101,23 @@ const destinationOptions = computed(() => {
   return (roundSummary.value?.rounds || []).map(r => ({ value: r.code, label: roundLabel(r) }))
 })
 
+// Financing-stage options: a round pins the note's principal to that round's
+// Notes-financing line; the trailing "Fold into equity" entry drops it from the
+// notes line entirely. The select's empty default (renders "—") means Auto —
+// the round-era the note was issued in.
+const financingStageOptions = computed(() => [
+  ...(roundSummary.value?.rounds || []).map(r => ({ value: r.code, label: roundLabel(r) })),
+  { value: FOLD_INTO_EQUITY, label: 'Fold into equity' },
+])
+
+// Label for the financing-stage cell when not editing. null → Auto (issue-era),
+// 'EQUITY' → folded, else the round's friendly name.
+function financingStageLabel(code: string | null): string {
+  if (!code) return 'Auto'
+  if (code.toUpperCase() === FOLD_INTO_EQUITY) return 'Fold into equity'
+  return roundsByCode.value.get(code)?.name || code
+}
+
 // Are there any rounds at all? Drives the "Add a round first" callout when
 // CNs exist but the operator hasn't seeded rounds yet (typical first-load
 // flow after a Carta import — the importer doesn't auto-create rounds).
@@ -104,6 +128,7 @@ const cnCols = computed<EditableCol[]>(() => {
     { key: 'stakeholderName',      label: 'Holder',         width: 180, sortable: true, align: 'left',  type: 'text',   editable: true, placeholder: 'VCT Investments' },
     { key: 'includeInSummary',     label: 'In summary',     width: 90,  sortable: true, align: 'center' },
     { key: 'destinationClassCode', label: 'Destination',    width: 130, sortable: true, align: 'left',  type: 'select', editable: true, options: destinationOptions.value },
+    { key: 'financingStageCode',   label: 'Financing stage', width: 140, sortable: true, align: 'left', type: 'select', editable: true, options: financingStageOptions.value },
     { key: 'conversionDate',       label: 'Conv. date',     width: 130, sortable: true, align: 'left',  type: 'date',   editable: true },
     { key: 'principal',            label: 'Principal',      width: 120, sortable: true, align: 'right', type: 'usd',    editable: true, step: '1000' },
     { key: 'interestRate',         label: 'Interest rate',  width: 90,  sortable: true, align: 'right', type: 'pct',    editable: true, step: '0.001' },
@@ -262,6 +287,7 @@ async function onUpdate(row: CnRow, patch: Partial<CnRow>) {
   if ('conversionDiscount' in patch) body.conversion_discount = patch.conversionDiscount ?? 0
   if ('valuationCap' in patch) body.valuation_cap = patch.valuationCap ?? null
   if ('convPrice' in patch) body.conversion_price = patch.convPrice ?? null
+  if ('financingStageCode' in patch) body.financing_stage_code = patch.financingStageCode || null
   await $fetch(`/api/convertibles/${row.id}`, { method: 'PATCH', body })
   await refreshAll()
 }
@@ -446,6 +472,22 @@ async function onDelete(row: CnRow) {
               title="This destination doesn't match any round on the Cap Table. Edit the row to re-attribute."
             >{{ value }} — re-attribute</span>
           </template>
+        </template>
+        <template #cell-financingStageCode="{ value }">
+          <span
+            v-if="!value"
+            class="text-xs text-ink-500 italic"
+            title="Auto — the note's principal counts in the round-era it was issued in. Pick a round to pin it, or 'Fold into equity' to drop it from the Notes-financing line (its conversion to shares is unaffected)."
+          >Auto</span>
+          <span
+            v-else-if="String(value).toUpperCase() === FOLD_INTO_EQUITY"
+            class="text-xs font-medium px-1.5 py-0.5 rounded border text-ink-600 bg-ink-100 border-ink-200"
+            title="Folded into the round's equity raise — principal excluded from Notes financing; share conversion unaffected."
+          >Equity</span>
+          <span
+            v-else
+            class="text-xs font-medium px-1.5 py-0.5 rounded border text-ink-800 bg-ink-50 border-ink-200"
+          >{{ financingStageLabel(value) }}</span>
         </template>
         <template #cell-conversionDate="{ value }">
           <span v-if="value" class="text-ink-700">{{ value }}</span>

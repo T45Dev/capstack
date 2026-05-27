@@ -11,6 +11,7 @@ export default defineEventHandler(async (event) => {
     'valuation_cap', 'conversion_discount', 'conversion_price',
     'destination_class_code',
     'converts_at_round', 'include_in_summary',
+    'financing_stage_code',
     'status', 'external_id', 'stakeholder_id',
   ]
   const boolFields = new Set(['converts_at_round', 'include_in_summary'])
