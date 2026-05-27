@@ -29,6 +29,8 @@ const formation = reactive({ name: 'Formation', closeDate: null as string | null
 interface EditableRound {
   name: string; trancheCodes: string[]; closeDate: string | null; preMoney: number | null; poolIssued: number | null
   newMoney: number; notesConvertedPrincipal: number; convertibles: CandidateConvertible[]
+  open: boolean                 // model this as the open (currently-raising) round
+  projectedNewMoney: number | null   // editable raise when open
 }
 const rounds = ref<EditableRound[]>([])
 const formationInfo = ref<RoundCandidate | null>(null)
@@ -54,9 +56,17 @@ watchEffect(() => {
     newMoney: r.newMoney,
     notesConvertedPrincipal: r.notesConvertedPrincipal,
     convertibles: r.convertibles,
+    open: false,
+    projectedNewMoney: r.newMoney,
   }))
   openNotes.value = c.openConvertibles
 })
+
+// Only one round can be the open (modeled) round at a time.
+function toggleOpen(i: number) {
+  const willOpen = !rounds.value[i]!.open
+  rounds.value.forEach((r, idx) => { r.open = willOpen && idx === i })
+}
 
 // Running allocation check — the split must still sum to the total pool.
 const poolAllocated = computed(() => (formation.poolIssued || 0) + rounds.value.reduce((s, r) => s + (r.poolIssued || 0), 0))
@@ -80,6 +90,7 @@ async function complete() {
         formation: { name: formation.name, closeDate: formation.closeDate, poolIssued: formation.poolIssued },
         rounds: rounds.value.map(r => ({
           name: r.name, trancheCodes: r.trancheCodes, closeDate: r.closeDate, preMoney: r.preMoney, poolIssued: r.poolIssued,
+          open: r.open, newMoney: r.open ? r.projectedNewMoney : null,
         })),
       },
     })
@@ -161,7 +172,7 @@ async function complete() {
           notes converted. Set each round's pre-money valuation.
         </p>
         <div class="divide-y divide-ink-200 border border-ink-200 rounded-lg">
-          <div v-for="(r, i) in rounds" :key="i" class="p-3">
+          <div v-for="(r, i) in rounds" :key="i" class="p-3" :class="r.open ? 'bg-emerald-50/60' : ''">
             <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
               <div class="flex-1 min-w-[180px]">
                 <input
@@ -199,6 +210,19 @@ async function complete() {
                 Pool added
                 <NumberInput v-model="r.poolIssued" placeholder="0" class="mt-1 w-32" />
               </label>
+            </div>
+            <div class="mt-2 flex flex-wrap items-center gap-3 text-xs">
+              <label class="inline-flex items-center gap-1.5 cursor-pointer text-ink-700">
+                <input type="checkbox" :checked="r.open" class="rounded border-ink-300" @change="toggleOpen(i)" />
+                Model as the open round
+              </label>
+              <label v-if="r.open" class="inline-flex items-center gap-1.5 text-ink-600">
+                Projected new money
+                <NumberInput v-model="r.projectedNewMoney" prefix="$" class="w-40" />
+              </label>
+              <span v-if="r.open" class="text-[11px] text-emerald-700">
+                Baseline becomes the prior round — this round's dilution &amp; pool impact are modeled forward.
+              </span>
             </div>
           </div>
         </div>
