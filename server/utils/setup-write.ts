@@ -17,9 +17,10 @@ export interface ConfirmedRoundInput {
   trancheCodes: string[]
   closeDate?: string | null
   preMoney?: number | null
+  poolIssued?: number | null    // option pool authorized AT this round (top-up)
 }
 export interface ConfirmSetupBody {
-  formation?: { name?: string; closeDate?: string | null } | null
+  formation?: { name?: string; closeDate?: string | null; poolIssued?: number | null } | null
   rounds: ConfirmedRoundInput[]
 }
 
@@ -88,15 +89,19 @@ export function writeConfirmedRounds(d: Database.Database, companyId: string, bo
     d.prepare('DELETE FROM rounds WHERE company_id = ?').run(companyId)
     let seniority = 0
 
-    // Formation row from the CS tranche.
+    // Formation row from the CS tranche. The whole option pool defaults onto
+    // Formation; the wizard can re-allocate top-ups to later rounds (e.g. a
+    // pool increase that closed alongside a financing) by sending poolIssued
+    // per round, in which case Formation carries only its share.
     const cs = trancheByCode.get('CS')
     if (cs) {
       seniority++
       const csOut = outstandingByCode.get('CS') || 0
+      const formationPool = body.formation?.poolIssued ?? poolTotal
       ins.run(
         newId('rd'), companyId, 'CS', body.formation?.name || 'Formation', 'formation',
         body.formation?.closeDate || cs.closeDate || null, 'CS',
-        cs.sharePrice ?? null, cs.newMoney ?? 0, 0, poolTotal, null,
+        cs.sharePrice ?? null, cs.newMoney ?? 0, 0, formationPool, null,
         0, 0, 0, csOut, seniority, null,
       )
       written++
@@ -126,7 +131,8 @@ export function writeConfirmedRounds(d: Database.Database, companyId: string, bo
           newId('rd'), companyId, code,
           isAnchor ? round.name : cleanName(t.name, code), 'closed',
           (isAnchor ? round.closeDate : null) || t.closeDate || null, code,
-          t.sharePrice ?? null, t.newMoney ?? 0, t.debtCanceled ?? 0, 0,
+          t.sharePrice ?? null, t.newMoney ?? 0, t.debtCanceled ?? 0,
+          isAnchor ? (round.poolIssued ?? 0) : 0,
           isAnchor ? (round.preMoney ?? null) : null,
           preferred, preferred, Math.floor(cnShares),
           0, seniority, isAnchor ? null : anchorCode,

@@ -17,6 +17,7 @@ interface SetupData {
     formation: RoundCandidate | null
     rounds: RoundCandidate[]
     openConvertibles: CandidateConvertible[]
+    pool: { authorized: number; fdShares: number }
     warnings: string[]
   } | null
 }
@@ -24,14 +25,15 @@ interface SetupData {
 const { data, pending } = await useFetch<SetupData>(() => `/api/companies/${id.value}/setup`, { watch: [id] })
 
 // Editable working copy seeded from the suggestions.
-const formation = reactive({ name: 'Formation', closeDate: null as string | null })
+const formation = reactive({ name: 'Formation', closeDate: null as string | null, poolIssued: 0 })
 interface EditableRound {
-  name: string; trancheCodes: string[]; closeDate: string | null; preMoney: number | null
+  name: string; trancheCodes: string[]; closeDate: string | null; preMoney: number | null; poolIssued: number | null
   newMoney: number; notesConvertedPrincipal: number; convertibles: CandidateConvertible[]
 }
 const rounds = ref<EditableRound[]>([])
 const formationInfo = ref<RoundCandidate | null>(null)
 const openNotes = ref<CandidateConvertible[]>([])
+const poolTotal = ref(0)
 
 watchEffect(() => {
   const c = data.value?.candidates
@@ -39,17 +41,26 @@ watchEffect(() => {
   formationInfo.value = c.formation
   formation.name = c.formation?.suggestedName === 'Formation' ? 'Formation' : (c.formation?.suggestedName || 'Formation')
   formation.closeDate = c.formation?.closeDate ?? null
+  // Whole pool defaults onto Formation; the operator can move top-ups to the
+  // round where the board actually enlarged the pool.
+  poolTotal.value = c.pool?.fdShares ?? 0
+  formation.poolIssued = poolTotal.value
   rounds.value = c.rounds.map(r => ({
     name: r.suggestedName,
     trancheCodes: r.trancheCodes,
     closeDate: r.closeDate,
     preMoney: null,
+    poolIssued: 0,
     newMoney: r.newMoney,
     notesConvertedPrincipal: r.notesConvertedPrincipal,
     convertibles: r.convertibles,
   }))
   openNotes.value = c.openConvertibles
 })
+
+// Running allocation check — the split must still sum to the total pool.
+const poolAllocated = computed(() => (formation.poolIssued || 0) + rounds.value.reduce((s, r) => s + (r.poolIssued || 0), 0))
+const poolBalanced = computed(() => Math.abs(poolAllocated.value - poolTotal.value) < 1)
 
 const usd = (n: number | null | undefined) =>
   n == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
@@ -66,9 +77,9 @@ async function complete() {
     await $fetch(`/api/companies/${id.value}/setup`, {
       method: 'POST',
       body: {
-        formation: { name: formation.name, closeDate: formation.closeDate },
+        formation: { name: formation.name, closeDate: formation.closeDate, poolIssued: formation.poolIssued },
         rounds: rounds.value.map(r => ({
-          name: r.name, trancheCodes: r.trancheCodes, closeDate: r.closeDate, preMoney: r.preMoney,
+          name: r.name, trancheCodes: r.trancheCodes, closeDate: r.closeDate, preMoney: r.preMoney, poolIssued: r.poolIssued,
         })),
       },
     })
@@ -128,7 +139,15 @@ async function complete() {
                 Formation date
                 <DateInput v-model="formation.closeDate" class="mt-1 w-40" />
               </label>
+              <label class="text-xs text-ink-600">
+                Option pool reserved
+                <NumberInput v-model="formation.poolIssued" placeholder="0" class="mt-1 w-40" />
+              </label>
             </div>
+            <p class="text-[11px] text-ink-500 mt-2">
+              The whole pool ({{ num(poolTotal) }}) defaults here. If the board enlarged it at a later round, reduce
+              this and add the top-up on that round below.
+            </p>
           </div>
         </div>
       </UiCard>
@@ -176,9 +195,17 @@ async function complete() {
                 Pre-money
                 <NumberInput v-model="r.preMoney" prefix="$" placeholder="—" class="mt-1 w-36" />
               </label>
+              <label class="text-xs text-ink-600">
+                Pool added
+                <NumberInput v-model="r.poolIssued" placeholder="0" class="mt-1 w-32" />
+              </label>
             </div>
           </div>
         </div>
+        <p class="text-xs mt-2" :class="poolBalanced ? 'text-ink-500' : 'text-amber-700'">
+          Option pool allocated: {{ num(poolAllocated) }} of {{ num(poolTotal) }}
+          <span v-if="!poolBalanced"> — doesn't match the total pool yet.</span>
+        </p>
       </UiCard>
 
       <!-- Open notes -->

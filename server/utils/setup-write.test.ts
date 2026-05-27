@@ -107,6 +107,31 @@ describe.skipIf(!present)('writeConfirmedRounds (ANT)', () => {
     expect(byCode('SA2').pi).toBeLessThan(10)    // SA2 is ~entirely note-converted (sub-share floor noise)
   })
 
+  it('pool split reproduces the finance model FD progression', async () => {
+    ;(globalThis as any).__antParsed ||= await parseCartaXlsx(readFileSync(ANT))
+    const { d, cid, cand } = seedFromAnt()
+    // Finance model: 1,708,955 pool at Formation + 1,500,000 at A-4.
+    writeMod.writeConfirmedRounds(d, cid, {
+      formation: { name: 'Formation', closeDate: cand.formation?.closeDate ?? null, poolIssued: 1_708_955 },
+      rounds: cand.rounds.map((r: any) => ({
+        name: r.suggestedName, trancheCodes: r.trancheCodes, closeDate: r.closeDate, preMoney: null,
+        poolIssued: r.anchorCode === 'SA4' ? 1_500_000 : 0,
+      })),
+    })
+    const rounds = d.prepare(`
+      SELECT code, preferred_issued_override AS pi, notes_converted_override AS nc, common, option_pool_issued AS pool
+      FROM rounds WHERE company_id = ? ORDER BY (close_date IS NULL), close_date, seniority
+    `).all(cid) as Array<any>
+    let cum = 0
+    const cumBy: Record<string, number> = {}
+    for (const r of rounds) { cum += (r.pi || 0) + (r.nc || 0) + (r.common || 0) + (r.pool || 0); cumBy[r.code] = cum }
+    const near = (got: number, want: number) => Math.abs(got - want) <= 20
+    // The discriminating one: 16.81M only holds when the 1.5M isn't all at Formation.
+    expect(near(cumBy['SS'], 10_379_611), `Seed cum=${cumBy['SS']}`).toBe(true)
+    expect(near(cumBy['SA1'], 16_810_234), `Series A cum=${cumBy['SA1']}`).toBe(true)
+    expect(near(cumBy['SA4'], 20_800_645), `A-4 cum=${cumBy['SA4']}`).toBe(true)
+  })
+
   it('marks the company set up', () => {
     const cid = (dbMod.db().prepare("SELECT id FROM companies WHERE name='ANT' ORDER BY created_at DESC LIMIT 1").get() as any).id
     const done = (dbMod.db().prepare('SELECT setup_completed_at FROM companies WHERE id = ?').get(cid) as any).setup_completed_at
