@@ -15,10 +15,19 @@
 import ExcelJS from 'exceljs'
 import path from 'node:path'
 
-const [, , file, sheetArg, rowsArg] = process.argv
+// Positional args, plus an optional "cols=A,E,G" filter (any position) that
+// restricts the deep dump to specific columns — essential for the 58-column
+// ledger sheets where ~48 columns are per-certificate metadata noise.
+const raw = process.argv.slice(2)
+const colsArg = raw.find(a => a.startsWith('cols='))
+const positional = raw.filter(a => !a.startsWith('cols='))
+const [file, sheetArg, rowsArg] = positional
+const colFilter = colsArg
+  ? new Set(colsArg.slice('cols='.length).split(',').map(s => s.trim().toUpperCase()).filter(Boolean))
+  : null
 
 if (!file) {
-  console.error('usage: node scripts/inspect-xlsx.mjs <file.xlsx> [sheet] [rows]')
+  console.error('usage: node scripts/inspect-xlsx.mjs <file.xlsx> [sheet] [rows] [cols=A,E,G]')
   process.exit(1)
 }
 
@@ -57,11 +66,19 @@ function truncate(s, n = 40) {
 }
 
 // Pull the non-empty cells of a row as [{ letter, value }].
+// When a column filter is active, keep listed columns even if empty (so the
+// row's shape stays aligned across rows) and drop everything else.
 function rowCells(row, maxCol) {
   const out = []
   for (let c = 1; c <= maxCol; c++) {
-    const val = cell(row.getCell(c).value)
-    if (val !== '') out.push({ letter: colLetter(c), value: val })
+    const letter = colLetter(c)
+    if (colFilter) {
+      if (!colFilter.has(letter)) continue
+      out.push({ letter, value: cell(row.getCell(c).value) })
+    } else {
+      const val = cell(row.getCell(c).value)
+      if (val !== '') out.push({ letter, value: val })
+    }
   }
   return out
 }
