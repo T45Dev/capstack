@@ -196,6 +196,8 @@ const colDefs: ColDef[] = [
   { key: 'preferred_issued',    label: 'Preferred',           kind: 'override', group: 'shares', cellKind: 'shares', defaultWidth: 140, hint: 'new ÷ price' },
   { key: 'notes_converted',     label: 'Notes conv.',         kind: 'derived',  group: 'shares', cellKind: 'shares', defaultWidth: 140, hint: 'CN → shares' },
   { key: 'option_pool_issued',  label: 'Pool issued',         kind: 'typed',    group: 'shares', cellKind: 'shares', defaultWidth: 130 },
+  { key: 'option_pool_attributed', label: 'Pool attributed',  kind: 'derived',  group: 'shares', cellKind: 'shares', defaultWidth: 140, hint: 'grants this era' },
+  { key: 'available_options',   label: 'Available',           kind: 'derived',  group: 'shares', cellKind: 'shares', defaultWidth: 130, hint: 'pool − attributed' },
 ]
 
 // ── Width + row-height state ───────────────────────────────────────────

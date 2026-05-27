@@ -31,6 +31,8 @@ interface RoundColumn {
   notes_converted: number         // effective value: override if set, else Σ CN-attributed shares
   notes_converted_override: number | null   // Formation-snapshot override; null = derived from CN attributions
   option_pool_issued: number
+  option_pool_attributed: number   // options granted in this round's era (by grant issue date)
+  available_options: number        // running pool issued − cumulative attributed
   // Cumulative totals through and including this round:
   total_shares_fds: number
   total_shares_fds_override: number | null  // Formation-snapshot override; null = derive cumulatively
@@ -257,6 +259,33 @@ export default defineEventHandler((event) => {
     return ownPreFDS
   }
 
+  // Option grants attributed to each round by issue date: a grant belongs to
+  // the round-era it was issued in (latest round closed on/before its issue
+  // date). Drives the per-round Pool attributed + Available rows. Generic —
+  // uses the grants' Carta issue dates against the round close dates.
+  const grantRows = db().prepare(
+    `SELECT issue_date AS d, quantity AS q FROM grants WHERE company_id = ? AND status = 'outstanding'`,
+  ).all(id) as Array<{ d: string | null; q: number }>
+  const byClose = [...rounds].sort((a, b) =>
+    (a.close_date || '') < (b.close_date || '') ? -1 : (a.close_date || '') > (b.close_date || '') ? 1 : a.seniority - b.seniority)
+  const attributedByRoundId = new Map<string, number>()
+  for (const g of grantRows) {
+    let target = byClose[0]
+    for (const r of byClose) {
+      if (r.close_date && g.d && r.close_date <= g.d) target = r
+      else if (r.close_date && g.d && r.close_date > g.d) break
+    }
+    // Founders' formation carries no option grants — grants issued before the
+    // first financing roll into that first round, where the pool plan starts.
+    if (target && target.kind === 'formation') {
+      const idx = byClose.indexOf(target)
+      target = byClose[idx + 1] || target
+    }
+    if (target) attributedByRoundId.set(target.id, (attributedByRoundId.get(target.id) || 0) + (g.q || 0))
+  }
+  let cumPoolIssued = 0
+  let cumAttributed = 0
+
   for (let i = 0; i < rounds.length; i++) {
     const r = rounds[i]
     if (!r) continue
@@ -351,6 +380,11 @@ export default defineEventHandler((event) => {
     }
     cumulativeFinancing += newMoney + cnDollars
 
+    const optionPoolAttributed = attributedByRoundId.get(r.id) || 0
+    cumPoolIssued += poolIssued
+    cumAttributed += optionPoolAttributed
+    const availableOptions = cumPoolIssued - cumAttributed
+
     cols.push({
       round_id: r.id,
       code: r.code,
@@ -370,6 +404,8 @@ export default defineEventHandler((event) => {
       notes_converted: notesConverted,
       notes_converted_override: r.notes_converted_override != null ? Number(r.notes_converted_override) : null,
       option_pool_issued: poolIssued,
+      option_pool_attributed: optionPoolAttributed,
+      available_options: availableOptions,
       total_shares_fds: cumulativeFDS,
       total_shares_fds_override: r.total_shares_fds_override != null ? Number(r.total_shares_fds_override) : null,
       cumulated_financing: cumulativeFinancing,
