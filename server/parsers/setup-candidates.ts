@@ -37,9 +37,25 @@ export interface RoundCandidate {
   notesConvertedPrincipal: number        // Σ principal of those notes
 }
 
+// Per-tranche (per share class) financials, kept alongside the grouped rounds
+// so the wizard can re-group freely and the write endpoint can pull each
+// tranche's cash/price/date when expanding a confirmed group into rounds.
+export interface TrancheInfo {
+  code: string
+  name: string | null
+  kind: 'formation' | 'closed'
+  closeDate: string | null
+  sharePrice: number | null
+  newMoney: number
+  debtCanceled: number
+  sharesIssued: number
+  authorized: number | null
+}
+
 export interface SetupCandidates {
   formation: RoundCandidate | null
   rounds: RoundCandidate[]                 // preferred rounds, chronological
+  tranches: TrancheInfo[]                  // raw per-class figures (incl. formation)
   openConvertibles: CandidateConvertible[] // notes not yet converted
   warnings: string[]
 }
@@ -192,5 +208,17 @@ export function buildRoundCandidates(parsed: ParsedCartaCapTable): SetupCandidat
     formation.authorized = authByCode.get(formationRound.code) ?? null
   }
 
-  return { formation, rounds, openConvertibles, warnings }
+  const tranches: TrancheInfo[] = parsed.rounds.map(r => ({
+    code: r.code,
+    name: r.name ?? null,
+    kind: r.kind,
+    closeDate: r.closeDate,
+    sharePrice: r.sharePrice,
+    newMoney: r.newMoney,
+    debtCanceled: r.debtCanceled,
+    sharesIssued: r.sharesIssued,
+    authorized: authByCode.get(r.code) ?? null,
+  }))
+
+  return { formation, rounds, tranches, openConvertibles, warnings }
 }
