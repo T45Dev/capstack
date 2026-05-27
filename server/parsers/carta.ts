@@ -685,6 +685,7 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
       // this "Conversion Price" or sometimes "Issue Price" on the CN sheet
       // (distinct from the share-class issue price elsewhere).
       const cConvPrice = col(/conversion\s*price|conv\s*price|issue\s*price|price\s*per\s*share/i)
+      const cCancelReason = col(/cancellation\s*reason/i)
 
       if (cPrincipal < 0 || cName < 0) {
         warnings.push(
@@ -702,6 +703,14 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
           if (principal <= 0) continue
           const name = cName > 0 ? asString(row.getCell(cName).value) : ''
           if (!name) continue
+          // Skip notes voided for non-conversion reasons (e.g. "Clerical
+          // Error", repayment). Carta excludes these from Cash Raised and
+          // they never became real securities — counting their principal
+          // over-states convertibles (verified against a voided $800k note).
+          if (cCancelReason > 0) {
+            const reason = asString(row.getCell(cCancelReason).value)
+            if (reason && !/conversion/i.test(reason)) continue
+          }
           result.convertibles.push({
             externalId: cIdFmt > 0 ? asString(row.getCell(cIdFmt).value) || null : null,
             stakeholderName: name,
