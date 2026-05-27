@@ -226,6 +226,16 @@ function migrate(d: Database.Database): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_pool_events_company ON pool_events(company_id, event_date);
+
+    -- Parsed-but-unconfirmed setup data from the most recent import. The setup
+    -- wizard reads this to suggest formation + funding rounds; on finish it
+    -- writes the confirmed rounds to the rounds table. Kept separate so the
+    -- rounds table only ever holds operator-confirmed rounds.
+    CREATE TABLE IF NOT EXISTS setup_candidates (
+      company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+      candidates_json TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `)
 
   // ----- Idempotent column additions for upgrades on existing DBs -----
@@ -244,6 +254,10 @@ function migrate(d: Database.Database): void {
   ensureColumn('convertibles', 'include_in_summary', 'INTEGER NOT NULL DEFAULT 1')
   ensureColumn('companies', 'starting_round', 'TEXT')
   ensureColumn('companies', 'starting_round_date', 'TEXT')
+  // NULL = the setup wizard hasn't been completed; the route gate redirects
+  // company pages to /setup until it's set. Grandfather backfill below marks
+  // pre-wizard workspaces (those that already have rounds) as complete.
+  ensureColumn('companies', 'setup_completed_at', 'TEXT')
   ensureColumn('grants', 'approval_status', 'TEXT')
   // Per-grant details the Carta "Stock Option and Incentive Plan" sheet
   // carries. quantity_issued is the original grant size; quantity_exercised /
@@ -365,6 +379,16 @@ function migrate(d: Database.Database): void {
     })
     tx(dirty)
   }
+
+  // Grandfather pre-wizard workspaces: any company that already has rounds was
+  // set up before the wizard existed, so mark it complete and let it skip the
+  // gate. Fresh imports leave setup_completed_at NULL and route through /setup.
+  // Idempotent — only touches NULL rows.
+  d.exec(`
+    UPDATE companies SET setup_completed_at = datetime('now')
+    WHERE setup_completed_at IS NULL
+      AND id IN (SELECT DISTINCT company_id FROM rounds)
+  `)
 }
 
 export function reset(): void {

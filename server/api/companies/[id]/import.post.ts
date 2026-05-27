@@ -1,6 +1,7 @@
 import { db } from '~~/server/utils/db'
 import { newId } from '~~/server/utils/ids'
 import { parseCartaXlsx } from '~~/server/parsers/carta'
+import { buildRoundCandidates } from '~~/server/parsers/setup-candidates'
 
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
@@ -257,12 +258,25 @@ export default defineEventHandler(async (event) => {
       }
     }
 
-    // Rounds: NOT imported. The Carta share-class structure (SA1/SA2/SA3/…)
-    // doesn't map cleanly to how operators think about funding rounds, so
-    // the Summary card is user-driven now — they add rounds, type the
-    // numbers, and own that data. The importer still seeds CNs / holdings
-    // / grants / pool size so the downstream pages work; the parsed
-    // `parsed.rounds` array is just ignored.
+    // Rounds aren't written to the rounds table here — the setup wizard owns
+    // that, so the table only ever holds operator-confirmed rounds. Instead we
+    // stash the suggested formation + funding rounds (grouped from the ledgers,
+    // with CNs attributed to where they converted) for the wizard to read and
+    // confirm. setup_completed_at is left untouched: a brand-new company stays
+    // NULL (the gate routes it through /setup); re-importing an established
+    // workspace just refreshes the suggestions without re-gating it.
+    try {
+      const candidates = buildRoundCandidates(parsed)
+      db().prepare(`
+        INSERT INTO setup_candidates (company_id, candidates_json, created_at)
+        VALUES (?, ?, datetime('now'))
+        ON CONFLICT(company_id) DO UPDATE SET
+          candidates_json = excluded.candidates_json,
+          created_at = excluded.created_at
+      `).run(id, JSON.stringify(candidates))
+    } catch (err: any) {
+      parsed.warnings.push(`Couldn't compute setup candidates: ${err?.message || err}`)
+    }
 
     // Option pool. Prefer the Summary "Plan" row, otherwise derive from outstanding+available.
     let poolSize = parsed.poolAuthorized
