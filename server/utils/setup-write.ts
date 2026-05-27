@@ -82,9 +82,17 @@ export function writeConfirmedRounds(d: Database.Database, companyId: string, bo
   // Shares a note converts into AT a given round price — its own discount/cap
   // applied on top of that price. Ignores any Carta-recorded conversion price
   // (that was for a different, actual round) since we're modeling conversion
-  // at the open round's terms.
-  const sharesAtPrice = (c: CnConversionInput, price: number, preFDS: number): number => {
-    const total = (c.principal || 0) + accruedAtConversion(c)
+  // at the open round's terms. Interest accrues to the open round's close date
+  // (asOf): notes convert when that round closes, so the accrual window runs
+  // from issue to then — not to Carta's snapshot date.
+  const accruedTo = (c: CnConversionInput, asOf: string | null): number => {
+    const rate = c.interest_rate || 0, P = c.principal || 0
+    if (!asOf || !c.issue_date || rate <= 0) return c.interest_accrued || 0
+    const days = (new Date(asOf).getTime() - new Date(c.issue_date).getTime()) / 86400000
+    return days > 0 ? P * rate * (days / 365) : (c.interest_accrued || 0)
+  }
+  const sharesAtPrice = (c: CnConversionInput, price: number, preFDS: number, asOf: string | null): number => {
+    const total = (c.principal || 0) + accruedTo(c, asOf)
     if (total <= 0 || price <= 0) return 0
     const discountPrice = c.conversion_discount > 0 ? price * (1 - c.conversion_discount) : price
     const capPrice = (c.valuation_cap && c.valuation_cap > 0 && preFDS > 0) ? c.valuation_cap / preFDS : 0
@@ -187,9 +195,10 @@ export function writeConfirmedRounds(d: Database.Database, companyId: string, bo
 
       let notesShares = 0
       if (openPrice && openPrice > 0) {
+        const asOf = openRound.closeDate || null
         const openTranches = new Set(codes)
-        for (const [code, list] of cnByDest) if (openTranches.has(code)) for (const c of list) notesShares += sharesAtPrice(c, openPrice, cumFD)
-        for (const c of deferredNotes) notesShares += sharesAtPrice(c, openPrice, cumFD)
+        for (const [code, list] of cnByDest) if (openTranches.has(code)) for (const c of list) notesShares += sharesAtPrice(c, openPrice, cumFD, asOf)
+        for (const c of deferredNotes) notesShares += sharesAtPrice(c, openPrice, cumFD, asOf)
       }
 
       seniority++
