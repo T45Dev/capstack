@@ -57,6 +57,10 @@ export interface SetupCandidates {
   rounds: RoundCandidate[]                 // preferred rounds, chronological
   tranches: TrancheInfo[]                  // raw per-class figures (incl. formation)
   openConvertibles: CandidateConvertible[] // notes not yet converted
+  // Option pool. fdShares is the fully-diluted contribution (outstanding
+  // options + available), which is what Carta's FD total counts — NOT the
+  // authorized size, since exercised options already live in the common count.
+  pool: { authorized: number; fdShares: number }
   warnings: string[]
 }
 
@@ -220,5 +224,11 @@ export function buildRoundCandidates(parsed: ParsedCartaCapTable): SetupCandidat
     authorized: authByCode.get(r.code) ?? null,
   }))
 
-  return { formation, rounds, tranches, openConvertibles, warnings }
+  const grantsOutstanding = (parsed.grants || []).reduce((s, g) => s + (g.quantity || 0), 0)
+  const pool = {
+    authorized: parsed.poolAuthorized || 0,
+    fdShares: (parsed.poolAvailable || 0) + grantsOutstanding,
+  }
+
+  return { formation, rounds, tranches, openConvertibles, pool, warnings }
 }

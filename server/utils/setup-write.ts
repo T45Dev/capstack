@@ -67,7 +67,11 @@ export function writeConfirmedRounds(d: Database.Database, companyId: string, bo
       ? (cnByDest.get(code) || []).reduce((s, c) => s + Math.floor(((c.principal || 0) + accruedAtConversion(c)) / pps), 0)
       : 0
 
-  const poolTotal = (d.prepare('SELECT COALESCE(SUM(authorized),0) AS t FROM option_pools WHERE company_id = ?').get(companyId) as { t: number }).t || 0
+  // Pool contribution to fully-diluted: outstanding options + available
+  // (Carta's FD basis), captured at import. Falls back to authorized only if
+  // the snapshot is missing.
+  const poolTotal = candidates.pool?.fdShares
+    ?? ((d.prepare('SELECT COALESCE(SUM(authorized),0) AS t FROM option_pools WHERE company_id = ?').get(companyId) as { t: number }).t || 0)
 
   const ins = d.prepare(`
     INSERT INTO rounds (

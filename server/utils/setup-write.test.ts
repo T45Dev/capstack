@@ -72,14 +72,19 @@ describe.skipIf(!present)('writeConfirmedRounds (ANT)', () => {
       rounds: cand.rounds.map((r: any) => ({ name: r.suggestedName, trancheCodes: r.trancheCodes, closeDate: r.closeDate, preMoney: null })),
     })
 
-    const rounds = d.prepare('SELECT code, kind, preferred_issued_override AS pi, notes_converted_override AS nc, common, parent_round_code AS parent FROM rounds WHERE company_id = ?').all(cid) as Array<any>
+    const rounds = d.prepare('SELECT code, kind, preferred_issued_override AS pi, notes_converted_override AS nc, common, option_pool_issued AS pool, parent_round_code AS parent FROM rounds WHERE company_id = ?').all(cid) as Array<any>
     const totalIssued = (d.prepare('SELECT COALESCE(SUM(shares),0) AS t FROM holdings WHERE company_id = ?').get(cid) as any).t
     const outstanding = (code: string) => (d.prepare('SELECT COALESCE(SUM(h.shares),0) AS t FROM holdings h JOIN share_classes sc ON sc.id = h.share_class_id WHERE sc.company_id = ? AND sc.code = ?').get(cid, code) as any).t
     const byCode = (code: string) => rounds.find(r => r.code === code)
 
-    // Every share, accounted for exactly once.
+    // Every issued share, accounted for exactly once (preferred + converted + common).
     const sumShares = rounds.reduce((s, r) => s + (r.pi || 0) + (r.nc || 0) + (r.common || 0), 0)
     expect(sumShares).toBe(totalIssued)
+
+    // Fully-diluted total (adding the pool) ties to Carta's Summary: 27,011,260.
+    const sumFds = sumShares + rounds.reduce((s, r) => s + (r.pool || 0), 0)
+    expect(sumFds).toBe(totalIssued + cand.pool.fdShares)
+    expect(sumFds).toBe(27_011_260)
 
     // Per class: preferred + converted == that class's outstanding.
     for (const code of ['SS', 'SA1', 'SA2', 'SA3', 'SA4', 'PB1', 'PB2']) {
