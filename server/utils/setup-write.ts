@@ -87,8 +87,11 @@ export function writeConfirmedRounds(d: Database.Database, companyId: string, bo
   // from issue to then — not to Carta's snapshot date.
   const accruedTo = (c: CnConversionInput, asOf: string | null): number => {
     const rate = c.interest_rate || 0, P = c.principal || 0
-    if (!asOf || !c.issue_date || rate <= 0) return c.interest_accrued || 0
-    const days = (new Date(asOf).getTime() - new Date(c.issue_date).getTime()) / 86400000
+    // Already-converted notes accrue to their actual conversion date; a still-
+    // open note accrues to the modeled round's close (asOf).
+    const end = c.conversion_date || asOf
+    if (!end || !c.issue_date || rate <= 0) return c.interest_accrued || 0
+    const days = (new Date(end).getTime() - new Date(c.issue_date).getTime()) / 86400000
     return days > 0 ? P * rate * (days / 365) : (c.interest_accrued || 0)
   }
   const sharesAtPrice = (c: CnConversionInput, price: number, preFDS: number, asOf: string | null): number => {

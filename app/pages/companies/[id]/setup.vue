@@ -43,16 +43,17 @@ watchEffect(() => {
   formationInfo.value = c.formation
   formation.name = c.formation?.suggestedName === 'Formation' ? 'Formation' : (c.formation?.suggestedName || 'Formation')
   formation.closeDate = c.formation?.closeDate ?? null
-  // Whole pool defaults onto Formation; the operator can move top-ups to the
-  // round where the board actually enlarged the pool.
+  // Founders' formation doesn't carry an option pool — it's authorized at the
+  // first financing. Default the whole pool onto the first round; the operator
+  // splits later top-ups (e.g. an increase at a subsequent round) from there.
   poolTotal.value = c.pool?.fdShares ?? 0
-  formation.poolIssued = poolTotal.value
-  rounds.value = c.rounds.map(r => ({
+  formation.poolIssued = 0
+  rounds.value = c.rounds.map((r, idx) => ({
     name: r.suggestedName,
     trancheCodes: r.trancheCodes,
     closeDate: r.closeDate,
     preMoney: null,
-    poolIssued: 0,
+    poolIssued: idx === 0 ? poolTotal.value : 0,
     newMoney: r.newMoney,
     notesConvertedPrincipal: r.notesConvertedPrincipal,
     convertibles: r.convertibles,
@@ -156,8 +157,8 @@ async function complete() {
               </label>
             </div>
             <p class="text-[11px] text-ink-500 mt-2">
-              The whole pool ({{ num(poolTotal) }}) defaults here. If the board enlarged it at a later round, reduce
-              this and add the top-up on that round below.
+              The option pool ({{ num(poolTotal) }}) is authorized at the first financing by default — founders'
+              formation usually has none. Split top-ups across rounds below if the board enlarged it later.
             </p>
           </div>
         </div>
