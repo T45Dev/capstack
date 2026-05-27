@@ -12,3 +12,8 @@ data/*.db-shm
 data/*.db-wal
 .env
 .env.local
+
+# Raw, real Carta exports — may contain real PII (names, holdings, $).
+# Kept local for analysis only; never committed. De-identified fixtures
+# (synthetic names/numbers, real structure) go in a tracked dir instead.
+fixtures/private/
