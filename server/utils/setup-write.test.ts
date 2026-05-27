@@ -132,6 +132,50 @@ describe.skipIf(!present)('writeConfirmedRounds (ANT)', () => {
     expect(near(cumBy['SA4'], 20_800_645), `A-4 cum=${cumBy['SA4']}`).toBe(true)
   })
 
+  it('models Series B as the open round (projected raise + note conversions)', async () => {
+    ;(globalThis as any).__antParsed ||= await parseCartaXlsx(readFileSync(ANT))
+    const { d, cid, cand } = seedFromAnt()
+    writeMod.writeConfirmedRounds(d, cid, {
+      formation: { name: 'Formation', closeDate: cand.formation?.closeDate ?? null, poolIssued: 1_708_955 },
+      rounds: cand.rounds.map((r: any) => {
+        const isB = r.anchorCode === 'PB1'
+        return {
+          name: r.suggestedName, trancheCodes: r.trancheCodes, closeDate: r.closeDate,
+          preMoney: isB ? 37_000_000 : null,
+          poolIssued: r.anchorCode === 'SA4' ? 1_500_000 : 0,
+          open: isB, newMoney: isB ? 27_500_000 : null,
+        }
+      }),
+    })
+    const rounds = d.prepare(`
+      SELECT code, kind, share_price AS price, new_money AS nm, preferred_issued_override AS pi,
+             notes_converted_override AS nc, option_pool_issued AS pool, common
+      FROM rounds WHERE company_id = ? ORDER BY (close_date IS NULL), close_date, seniority
+    `).all(cid) as Array<any>
+
+    const open = rounds.find(r => r.kind === 'open')
+    expect(open, 'an open round exists').toBeTruthy()
+    expect(open.code).toBe('PB1')
+    expect(open.pi, 'open preferred is derived, not overridden').toBeNull()
+    // price = pre_money 37M / baseline FD 20.8M ≈ 1.77879
+    expect(Math.abs(open.price - 1.77879)).toBeLessThan(0.01)
+    const openPreferred = Math.floor(open.nm / open.price)
+    expect(Math.abs(openPreferred - 15_459_947)).toBeLessThan(2000)
+    expect(open.nc, 'notes convert into the open round').toBeGreaterThan(4_000_000)
+
+    // Baseline set to the last closed round (A-4).
+    expect((d.prepare('SELECT starting_round FROM companies WHERE id = ?').get(cid) as any).starting_round).toBe('SA4')
+
+    // Cumulative FD (mirrors round-summary) lands near the model's 41.57M.
+    let cum = 0
+    for (const r of rounds) {
+      const pref = r.kind === 'open' ? Math.floor((r.nm || 0) / (r.price || 1)) : (r.pi || 0)
+      cum += pref + (r.nc || 0) + (r.common || 0) + (r.pool || 0)
+    }
+    expect(cum, `post-B FD = ${cum.toLocaleString()}`).toBeGreaterThan(40_000_000)
+    expect(cum).toBeLessThan(43_000_000)
+  })
+
   it('marks the company set up', () => {
     const cid = (dbMod.db().prepare("SELECT id FROM companies WHERE name='ANT' ORDER BY created_at DESC LIMIT 1").get() as any).id
     const done = (dbMod.db().prepare('SELECT setup_completed_at FROM companies WHERE id = ?').get(cid) as any).setup_completed_at

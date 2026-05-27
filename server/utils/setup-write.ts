@@ -18,6 +18,8 @@ export interface ConfirmedRoundInput {
   closeDate?: string | null
   preMoney?: number | null
   poolIssued?: number | null    // option pool authorized AT this round (top-up)
+  open?: boolean                // model this as the open (currently-raising) round
+  newMoney?: number | null      // projected raise when open (overrides Carta actuals)
 }
 export interface ConfirmSetupBody {
   formation?: { name?: string; closeDate?: string | null; poolIssued?: number | null } | null
@@ -68,6 +70,28 @@ export function writeConfirmedRounds(d: Database.Database, companyId: string, bo
       ? (cnByDest.get(code) || []).reduce((s, c) => s + Math.floor(((c.principal || 0) + accruedAtConversion(c)) / pps), 0)
       : 0
 
+  // Notes that haven't converted (no destination) — they convert at the next
+  // priced round, i.e. the open round being modeled.
+  const deferredNotes = d.prepare(`
+    SELECT principal, interest_accrued, interest_rate, issue_date, conversion_date,
+           conversion_discount, valuation_cap, conversion_price
+    FROM convertibles WHERE company_id = ? AND status = 'outstanding'
+      AND (destination_class_code IS NULL OR destination_class_code = '')
+  `).all(companyId) as CnConversionInput[]
+
+  // Shares a note converts into AT a given round price — its own discount/cap
+  // applied on top of that price. Ignores any Carta-recorded conversion price
+  // (that was for a different, actual round) since we're modeling conversion
+  // at the open round's terms.
+  const sharesAtPrice = (c: CnConversionInput, price: number, preFDS: number): number => {
+    const total = (c.principal || 0) + accruedAtConversion(c)
+    if (total <= 0 || price <= 0) return 0
+    const discountPrice = c.conversion_discount > 0 ? price * (1 - c.conversion_discount) : price
+    const capPrice = (c.valuation_cap && c.valuation_cap > 0 && preFDS > 0) ? c.valuation_cap / preFDS : 0
+    const eff = capPrice > 0 ? Math.min(discountPrice, capPrice) : discountPrice
+    return eff > 0 ? Math.floor(total / eff) : 0
+  }
+
   // Pool contribution to fully-diluted: outstanding options + available
   // (Carta's FD basis), captured at import. Falls back to authorized only if
   // the snapshot is missing.
@@ -88,6 +112,8 @@ export function writeConfirmedRounds(d: Database.Database, companyId: string, bo
     // The wizard owns the rounds table — clear and rewrite (round_investors cascade).
     d.prepare('DELETE FROM rounds WHERE company_id = ?').run(companyId)
     let seniority = 0
+    let cumFD = 0                            // fully-diluted through the closed rounds = the open round's baseline
+    let lastClosedCode: string | null = null // becomes the pre-baseline
 
     // Formation row from the CS tranche. The whole option pool defaults onto
     // Formation; the wizard can re-allocate top-ups to later rounds (e.g. a
@@ -104,14 +130,18 @@ export function writeConfirmedRounds(d: Database.Database, companyId: string, bo
         cs.sharePrice ?? null, cs.newMoney ?? 0, 0, formationPool, null,
         0, 0, 0, csOut, seniority, null,
       )
+      cumFD += csOut + formationPool
+      lastClosedCode = 'CS'
       written++
     }
 
     const ordered = body.rounds.slice().sort((a, b) =>
       dateOf(a.closeDate, trancheByCode.get(a.trancheCodes[0])?.closeDate) <
       dateOf(b.closeDate, trancheByCode.get(b.trancheCodes[0])?.closeDate) ? -1 : 1)
+    const openRound = ordered.find(r => r.open) || null
+    const closedRounds = ordered.filter(r => r !== openRound)
 
-    for (const round of ordered) {
+    for (const round of closedRounds) {
       const codes = round.trancheCodes.filter(c => trancheByCode.has(c) && c !== 'CS')
       if (!codes.length) continue
       const cashCodes = codes.filter(c => (trancheByCode.get(c)?.newMoney || 0) > 0)
@@ -126,19 +156,52 @@ export function writeConfirmedRounds(d: Database.Database, companyId: string, bo
         const cnShares = Math.min(convertedFor(code, t.sharePrice || 0), outstanding)
         const preferred = outstanding - cnShares
         const isAnchor = code === anchorCode
+        const pool = isAnchor ? (round.poolIssued ?? 0) : 0
         seniority++
         ins.run(
           newId('rd'), companyId, code,
           isAnchor ? round.name : cleanName(t.name, code), 'closed',
           (isAnchor ? round.closeDate : null) || t.closeDate || null, code,
-          t.sharePrice ?? null, t.newMoney ?? 0, t.debtCanceled ?? 0,
-          isAnchor ? (round.poolIssued ?? 0) : 0,
+          t.sharePrice ?? null, t.newMoney ?? 0, t.debtCanceled ?? 0, pool,
           isAnchor ? (round.preMoney ?? null) : null,
           preferred, preferred, Math.floor(cnShares),
           0, seniority, isAnchor ? null : anchorCode,
         )
+        cumFD += preferred + Math.floor(cnShares) + pool
         written++
       }
+      lastClosedCode = anchorCode
+    }
+
+    // The open round: a single projected round priced off the closed baseline.
+    // preferred_issued derives from new_money ÷ price (price = pre_money ÷
+    // baseline FD); notes targeting its tranches plus all deferred notes
+    // convert into it at that price. Baseline (pre-round) view = the last
+    // closed round.
+    if (openRound) {
+      const codes = openRound.trancheCodes.filter(c => trancheByCode.has(c) && c !== 'CS')
+      const anchorCode = codes.find(c => (trancheByCode.get(c)?.newMoney || 0) > 0) || codes[0] || openRound.trancheCodes[0]!
+      const preMoney = openRound.preMoney ?? null
+      const newMoney = openRound.newMoney ?? 0
+      const openPrice = (preMoney && cumFD > 0) ? preMoney / cumFD : null
+
+      let notesShares = 0
+      if (openPrice && openPrice > 0) {
+        const openTranches = new Set(codes)
+        for (const [code, list] of cnByDest) if (openTranches.has(code)) for (const c of list) notesShares += sharesAtPrice(c, openPrice, cumFD)
+        for (const c of deferredNotes) notesShares += sharesAtPrice(c, openPrice, cumFD)
+      }
+
+      seniority++
+      ins.run(
+        newId('rd'), companyId, anchorCode, openRound.name, 'open',
+        openRound.closeDate || null, anchorCode,
+        openPrice, newMoney, 0, openRound.poolIssued ?? 0, preMoney,
+        0, null, Math.floor(notesShares),   // preferred derives from new_money ÷ price; notes converted is the override
+        0, seniority, null,
+      )
+      written++
+      if (lastClosedCode) d.prepare('UPDATE companies SET starting_round = ? WHERE id = ?').run(lastClosedCode, companyId)
     }
 
     d.prepare("UPDATE companies SET setup_completed_at = datetime('now') WHERE id = ?").run(companyId)
