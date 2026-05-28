@@ -61,35 +61,32 @@ interface CnReconciliation {
   attributed_dollars: number
   unattributed_dollars: number
   total_dollars: number
-  by_reason: { deferred: number; excluded: number; stale_destination: number }
+  by_reason: { excluded: number; folded: number }
   unreconciled: Array<{
     id: string
     stakeholderName: string
     dollars: number
     destinationCode: string | null
-    reason: 'deferred' | 'excluded' | 'stale_destination'
+    reason: 'excluded' | 'folded'
   }>
 }
 const { data: roundSummary, refresh: refreshRoundSummary } = await useFetch<{ rounds: RoundColumn[]; cn_reconciliation: CnReconciliation }>(() => `/api/companies/${id.value}/round-summary`, {
   watch: [id],
   default: () => ({
     rounds: [],
-    cn_reconciliation: { attributed_dollars: 0, unattributed_dollars: 0, total_dollars: 0, by_reason: { deferred: 0, excluded: 0, stale_destination: 0 }, unreconciled: [] },
+    cn_reconciliation: { attributed_dollars: 0, unattributed_dollars: 0, total_dollars: 0, by_reason: { excluded: 0, folded: 0 }, unreconciled: [] },
   }),
 })
 const roundCols = computed<RoundColumn[]>(() => roundSummary.value?.rounds || [])
-const cnReconciliation = computed<CnReconciliation>(() => roundSummary.value?.cn_reconciliation || { attributed_dollars: 0, unattributed_dollars: 0, total_dollars: 0, by_reason: { deferred: 0, excluded: 0, stale_destination: 0 }, unreconciled: [] })
+const cnReconciliation = computed<CnReconciliation>(() => roundSummary.value?.cn_reconciliation || { attributed_dollars: 0, unattributed_dollars: 0, total_dollars: 0, by_reason: { excluded: 0, folded: 0 }, unreconciled: [] })
 
-// Tooltip explaining why the CN ledger sum doesn't match Cumulated financing.
+// Tooltip explaining the note principal that sits OUTSIDE the Notes-financing
+// line. Both reasons are deliberate operator choices, not data errors.
 const cnReconcileTitle = computed(() => {
   const r = cnReconciliation.value
   const lines: string[] = []
-  if (r.by_reason.stale_destination > 0) {
-    const codes = [...new Set(r.unreconciled.filter(u => u.reason === 'stale_destination').map(u => u.destinationCode))].filter(Boolean).join(', ')
-    lines.push(`Stale destination: ${codes || 'CN destination doesn\'t match any round code'}. Fix on the Convertible notes ledger below.`)
-  }
-  if (r.by_reason.deferred > 0) lines.push('Unassigned: pick a destination round on the CN ledger.')
-  if (r.by_reason.excluded > 0) lines.push('Excluded: "In summary" toggled off on the CN ledger.')
+  if (r.by_reason.folded > 0) lines.push('Folded into equity: principal kept out of the Notes-financing line (the note still converts to shares).')
+  if (r.by_reason.excluded > 0) lines.push('Excluded: "In summary" toggled off on the CN ledger — out of the cap table entirely.')
   return lines.join('  •  ')
 })
 
@@ -317,23 +314,24 @@ function exportCsv() {
           @update:saving-count="(n) => savingCount = n"
         />
 
-        <!-- CN reconciliation banner. When the CN ledger total doesn't
-             equal Cumulated financing, surface the gap below the matrix. -->
+        <!-- Note principal sitting OUTSIDE the Notes-financing line. Both
+             reasons are deliberate (folded into equity / toggled out of the
+             summary), so this is an informational reconciliation note, not a
+             warning about a data gap. -->
         <div
           v-if="cnReconciliation.unattributed_dollars > 0"
-          class="mt-2 px-3 py-2 rounded-md border border-warn/30 bg-warn-soft text-warn text-[12px] flex items-center justify-between gap-3 num"
+          class="mt-2 px-3 py-2 rounded-md border border-ink-200 bg-ink-50 text-ink-600 text-[12px] flex items-center justify-between gap-3 num"
           :title="cnReconcileTitle"
         >
           <div class="flex items-center gap-2">
-            <span class="font-medium">CNs not rolled up</span>
+            <span class="font-medium">Outside the Notes-financing line</span>
             <span class="text-[10px] uppercase tracking-wide font-semibold">{{ cnReconciliation.unreconciled.length }}</span>
           </div>
           <div class="text-right">
-            <span class="font-semibold">{{ fmtUSD(cnReconciliation.unattributed_dollars) }}</span>
+            <span class="font-semibold text-ink-800">{{ fmtUSD(cnReconciliation.unattributed_dollars) }}</span>
             <span class="ml-2 text-[10px]">
-              <span v-if="cnReconciliation.by_reason.stale_destination > 0">{{ fmtUSD(cnReconciliation.by_reason.stale_destination) }} bad destination</span>
-              <span v-if="cnReconciliation.by_reason.deferred > 0" class="ml-2">{{ fmtUSD(cnReconciliation.by_reason.deferred) }} unassigned</span>
-              <span v-if="cnReconciliation.by_reason.excluded > 0" class="ml-2">{{ fmtUSD(cnReconciliation.by_reason.excluded) }} excluded</span>
+              <span v-if="cnReconciliation.by_reason.folded > 0">{{ fmtUSD(cnReconciliation.by_reason.folded) }} folded into equity</span>
+              <span v-if="cnReconciliation.by_reason.excluded > 0" class="ml-2">{{ fmtUSD(cnReconciliation.by_reason.excluded) }} excluded (In summary off)</span>
             </span>
           </div>
         </div>

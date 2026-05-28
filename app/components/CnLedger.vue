@@ -231,12 +231,15 @@ function priceMismatchTitle(stored: number, effective: number): string {
   return `Stored conv. price differs from cap/discount math by ${diff > 0 ? '+' : ''}${diff.toFixed(1)}%`
 }
 
-// Breakdown of CNs that don't roll up into Cumulated financing on the
-// Financings table above. Three reasons: deferred (no destination round
-// picked), stale (destination doesn't match any round code on the cap
-// table — typically a Carta share-class code that wasn't re-attributed
-// after import), excluded ("In summary" toggle off). The matched roundsByCode
-// map decides between deferred and stale.
+// Notes needing attention on the cap-table side — kept distinct from the
+// (issue-era) Notes-financing line, which counts principal by issue date
+// regardless of where a note converts. Two concerns:
+//   • deferred (no destination) / stale (destination matches no round) — the
+//     note won't CONVERT TO SHARES until it points at a real round; its
+//     principal is still counted in Notes financing.
+//   • excluded ("In summary" off) — out of the cap table entirely (no
+//     financing, no shares).
+// The matched roundsByCode map decides between deferred and stale.
 const unassignedSummary = computed(() => {
   let deferredDollars = 0, deferredCount = 0
   let staleDollars = 0, staleCount = 0
@@ -531,21 +534,24 @@ async function onDelete(row: CnRow) {
         </template>
       </UiEditableTable>
 
-      <div v-if="unassignedSummary.totalDollars > 0" class="px-4 py-2 text-xs text-amber-900 bg-amber-50/60 border-t border-amber-200/60 space-y-0.5">
-        <div class="font-medium">
-          {{ fmtUSD(unassignedSummary.totalDollars) }} of CNs not rolled up into Cumulated financing.
+      <div v-if="unassignedSummary.totalDollars > 0" class="px-4 py-2 text-xs text-amber-900 bg-amber-50/60 border-t border-amber-200/60 space-y-1">
+        <div v-if="(unassignedSummary.stale.count + unassignedSummary.deferred.count) > 0">
+          <div class="font-medium">
+            {{ fmtUSD(unassignedSummary.stale.dollars + unassignedSummary.deferred.dollars) }} in notes won't convert to shares yet
+            <span class="font-normal text-amber-700/80">— their principal still counts in Notes financing (by issue date); this only affects share conversion.</span>
+          </div>
+          <div class="text-amber-800 text-[11px]">
+            <span v-if="unassignedSummary.stale.count > 0">
+              <span class="font-medium">{{ fmtUSD(unassignedSummary.stale.dollars) }}</span> point at a destination that doesn't match any round —
+              edit those rows above and pick a real one (typical after a Carta re-import).
+            </span>
+            <span v-if="unassignedSummary.deferred.count > 0" :class="unassignedSummary.stale.count > 0 ? 'block' : ''">
+              <span class="font-medium">{{ fmtUSD(unassignedSummary.deferred.dollars) }}</span> have no destination round yet — pick one (or add the round on the Financings tab).
+            </span>
+          </div>
         </div>
-        <div class="text-amber-800 text-[11px]">
-          <span v-if="unassignedSummary.stale.count > 0">
-            <span class="font-medium">{{ fmtUSD(unassignedSummary.stale.dollars) }}</span> with a destination that doesn't match any round —
-            edit those rows above and pick a real destination (typical after a Carta re-import).
-          </span>
-          <span v-if="unassignedSummary.deferred.count > 0" :class="unassignedSummary.stale.count > 0 ? 'block' : ''">
-            <span class="font-medium">{{ fmtUSD(unassignedSummary.deferred.dollars) }}</span> unassigned — pick a destination round.
-          </span>
-          <span v-if="unassignedSummary.excluded.count > 0" :class="(unassignedSummary.stale.count + unassignedSummary.deferred.count) > 0 ? 'block' : ''">
-            <span class="font-medium">{{ fmtUSD(unassignedSummary.excluded.dollars) }}</span> excluded via the "In summary" toggle.
-          </span>
+        <div v-if="unassignedSummary.excluded.count > 0" class="text-[11px] text-amber-800">
+          <span class="font-medium">{{ fmtUSD(unassignedSummary.excluded.dollars) }}</span> excluded from the cap table entirely ("In summary" off).
         </div>
       </div>
     </div>

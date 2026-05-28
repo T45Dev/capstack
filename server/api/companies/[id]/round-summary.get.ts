@@ -179,7 +179,12 @@ export default defineEventHandler((event) => {
   // rolling up because Y" with actionable detail. Same totals also let
   // the Cap Table show its Cumulated financing gap explicitly instead of
   // silently disagreeing with the CN ledger.
-  type CnExclusionReason = 'deferred' | 'excluded' | 'stale_destination'
+  // Under issue-era financing, a note's principal counts UNLESS it's folded
+  // into a round's equity ('folded') or toggled out of the summary entirely
+  // ('excluded'). A missing/stale conversion destination is NOT a financing
+  // gap — it only stops the note from converting to shares — so it isn't
+  // reported here (the CN ledger surfaces that separately).
+  type CnExclusionReason = 'excluded' | 'folded'
   interface UnreconciledCn {
     id: string
     stakeholderName: string
@@ -286,12 +291,15 @@ export default defineEventHandler((event) => {
   const FOLD_INTO_EQUITY = 'EQUITY'
   const notesFinancingByRoundCode = new Map<string, number>()
   for (const c of cnRows) {
-    if (c.include_in_summary === 0) continue
     const principal = c.principal || 0
     if (principal <= 0) continue
+    if (c.include_in_summary === 0) {
+      unreconciled.push({ id: c.id, stakeholderName: c.stakeholder_name || '', dollars: principal, destinationCode: c.destination_class_code, reason: 'excluded' })
+      continue
+    }
     const override = (c.financing_stage_code || '').trim()
     if (override.toUpperCase() === FOLD_INTO_EQUITY) {
-      unreconciled.push({ id: c.id, stakeholderName: c.stakeholder_name || '', dollars: principal, destinationCode: c.destination_class_code, reason: 'excluded' })
+      unreconciled.push({ id: c.id, stakeholderName: c.stakeholder_name || '', dollars: principal, destinationCode: c.destination_class_code, reason: 'folded' })
       continue
     }
     let stageCode = override ? roundCodeByAttribKey.get(override.toUpperCase()) : undefined
@@ -455,18 +463,16 @@ export default defineEventHandler((event) => {
   // Reconciliation totals + per-CN breakdown for "why doesn't this match
   // the CN ledger?" The UI uses these to render a clear gap row beneath
   // Cumulated financing and link each unrolled-up CN back to its fix.
-  const unreconciledByReason: Record<'deferred' | 'excluded' | 'stale_destination', UnreconciledCn[]> = {
-    deferred: [],
+  const unreconciledByReason: Record<CnExclusionReason, UnreconciledCn[]> = {
     excluded: [],
-    stale_destination: [],
+    folded: [],
   }
   for (const u of unreconciled) unreconciledByReason[u.reason].push(u)
   const totalsByReason = {
-    deferred: unreconciledByReason.deferred.reduce((s, u) => s + u.dollars, 0),
     excluded: unreconciledByReason.excluded.reduce((s, u) => s + u.dollars, 0),
-    stale_destination: unreconciledByReason.stale_destination.reduce((s, u) => s + u.dollars, 0),
+    folded: unreconciledByReason.folded.reduce((s, u) => s + u.dollars, 0),
   }
-  const unattributedCnDollars = totalsByReason.deferred + totalsByReason.excluded + totalsByReason.stale_destination
+  const unattributedCnDollars = totalsByReason.excluded + totalsByReason.folded
 
   return {
     rounds: cols,
