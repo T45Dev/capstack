@@ -64,15 +64,19 @@ async function remove(id: string, name: string) {
       </UiButton>
     </div>
 
-    <UiEmpty
-      v-if="!companies?.length"
-      title="No companies yet"
-      description="Create your first portfolio company. You can import its Carta export immediately after."
-    >
-      <UiButton variant="primary" @click="showCreate = true">
-        <Plus :size="14" /> Create company
+    <div v-if="!companies?.length" class="mt-10 max-w-xl mx-auto text-center">
+      <div class="grid place-items-center w-14 h-14 rounded-full bg-brand-50 text-brand-600 mx-auto mb-4">
+        <Building2 :size="24" />
+      </div>
+      <h2 class="text-lg font-semibold text-ink-900">Let's set up your first cap table</h2>
+      <p class="text-sm text-ink-600 mt-2 leading-relaxed">
+        Create a company below — then on the next page you'll drop your Carta pro-forma export
+        and we'll suggest your rounds, pool, and open notes.
+      </p>
+      <UiButton variant="primary" size="lg" class="mt-5" @click="showCreate = true">
+        <Plus :size="14" /> Create your first company
       </UiButton>
-    </UiEmpty>
+    </div>
 
     <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       <NuxtLink
