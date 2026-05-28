@@ -31,6 +31,8 @@ interface RoundColumn {
   notes_converted: number         // effective value: override if set, else Σ CN-attributed shares
   notes_converted_override: number | null   // Formation-snapshot override; null = derived from CN attributions
   option_pool_issued: number
+  option_pool_attributed: number   // options granted in this round's era (by grant issue date)
+  available_options: number        // running pool issued − cumulative attributed
   // Cumulative totals through and including this round:
   total_shares_fds: number
   total_shares_fds_override: number | null  // Formation-snapshot override; null = derive cumulatively
@@ -120,7 +122,7 @@ export default defineEventHandler((event) => {
     SELECT id, stakeholder_name, principal, interest_accrued, interest_rate,
            issue_date, conversion_date, destination_class_code,
            conversion_discount, valuation_cap, conversion_price,
-           include_in_summary
+           include_in_summary, financing_stage_code
     FROM convertibles
     WHERE company_id = ? AND status = 'outstanding'
   `).all(id) as Array<{
@@ -130,7 +132,7 @@ export default defineEventHandler((event) => {
     destination_class_code: string | null;
     conversion_discount: number; valuation_cap: number | null;
     conversion_price: number | null;
-    include_in_summary: number;
+    include_in_summary: number; financing_stage_code: string | null;
   }>
 
   function accruedInterestFor(c: typeof cnRows[number]): number {
@@ -177,7 +179,12 @@ export default defineEventHandler((event) => {
   // rolling up because Y" with actionable detail. Same totals also let
   // the Cap Table show its Cumulated financing gap explicitly instead of
   // silently disagreeing with the CN ledger.
-  type CnExclusionReason = 'deferred' | 'excluded' | 'stale_destination'
+  // Under issue-era financing, a note's principal counts UNLESS it's folded
+  // into a round's equity ('folded') or toggled out of the summary entirely
+  // ('excluded'). A missing/stale conversion destination is NOT a financing
+  // gap — it only stops the note from converting to shares — so it isn't
+  // reported here (the CN ledger surfaces that separately).
+  type CnExclusionReason = 'excluded' | 'folded'
   interface UnreconciledCn {
     id: string
     stakeholderName: string
@@ -186,29 +193,21 @@ export default defineEventHandler((event) => {
     reason: CnExclusionReason
   }
   const unreconciled: UnreconciledCn[] = []
-  let attributedCnDollars = 0
 
   for (const c of cnRows) {
     const principal = c.principal || 0
     const accrued = accruedInterestFor(c)
     const total = principal + accrued
     if (total <= 0) continue
+    // Share bucketing is conversion-era: a note produces shares at the round
+    // its destination resolves to. Excluded / undestined / stale-destination
+    // notes simply produce no shares here — their *dollars* are handled by the
+    // issue-era financing pass below, independent of conversion.
+    if (c.include_in_summary === 0) continue
     const codeRaw = c.destination_class_code ? String(c.destination_class_code).replace(/-\d+$/, '').toUpperCase() : ''
-    const excluded = c.include_in_summary === 0
-    const hasDestination = !!codeRaw
-    const resolvedRoundCode = hasDestination ? roundCodeByAttribKey.get(codeRaw) : undefined
-    if (excluded) {
-      unreconciled.push({ id: c.id, stakeholderName: c.stakeholder_name || '', dollars: total, destinationCode: c.destination_class_code, reason: 'excluded' })
-      continue
-    }
-    if (!hasDestination) {
-      unreconciled.push({ id: c.id, stakeholderName: c.stakeholder_name || '', dollars: total, destinationCode: null, reason: 'deferred' })
-      continue
-    }
-    if (!resolvedRoundCode) {
-      unreconciled.push({ id: c.id, stakeholderName: c.stakeholder_name || '', dollars: total, destinationCode: c.destination_class_code, reason: 'stale_destination' })
-      continue
-    }
+    if (!codeRaw) continue
+    const resolvedRoundCode = roundCodeByAttribKey.get(codeRaw)
+    if (!resolvedRoundCode) continue
     // Bucket under the canonical round.code (uppercase) so the per-round
     // walk below finds the right bucket regardless of whether the CN's
     // destination matched the round's code or its share_class_code.
@@ -226,7 +225,6 @@ export default defineEventHandler((event) => {
       destinationCode: c.destination_class_code,
     })
     cnByCode.set(bucketKey, bucket)
-    attributedCnDollars += total
   }
 
   const cols: RoundColumn[] = []
@@ -256,6 +254,72 @@ export default defineEventHandler((event) => {
     }
     return ownPreFDS
   }
+
+  // Option grants attributed to each round by issue date: a grant belongs to
+  // the round-era it was issued in (latest round closed on/before its issue
+  // date). Drives the per-round Pool attributed + Available rows. Generic —
+  // uses the grants' Carta issue dates against the round close dates.
+  const grantRows = db().prepare(
+    `SELECT issue_date AS d, quantity AS q FROM grants WHERE company_id = ? AND status = 'outstanding'`,
+  ).all(id) as Array<{ d: string | null; q: number }>
+  const byClose = [...rounds].sort((a, b) =>
+    (a.close_date || '') < (b.close_date || '') ? -1 : (a.close_date || '') > (b.close_date || '') ? 1 : a.seniority - b.seniority)
+  const attributedByRoundId = new Map<string, number>()
+  for (const g of grantRows) {
+    let target = byClose[0]
+    for (const r of byClose) {
+      if (r.close_date && g.d && r.close_date <= g.d) target = r
+      else if (r.close_date && g.d && r.close_date > g.d) break
+    }
+    // Founders' formation carries no option grants — grants issued before the
+    // first financing roll into that first round, where the pool plan starts.
+    if (target && target.kind === 'formation') {
+      const idx = byClose.indexOf(target)
+      target = byClose[idx + 1] || target
+    }
+    if (target) attributedByRoundId.set(target.id, (attributedByRoundId.get(target.id) || 0) + (g.q || 0))
+  }
+
+  // Notes financing is issue-era: each note's PRINCIPAL counts in the round it
+  // was raised to bridge into, NOT where it eventually converts. Default stage
+  // = the latest round closed on/before the note's issue date (the round-era it
+  // landed in); falls back to the earliest closed round for pre-incorporation
+  // paper. The operator overrides per note via financing_stage_code: a round
+  // code pins the stage; 'EQUITY' folds the note into that round's equity raise
+  // (its principal drops out of the notes line while its share conversion above
+  // is left untouched).
+  const FOLD_INTO_EQUITY = 'EQUITY'
+  const notesFinancingByRoundCode = new Map<string, number>()
+  for (const c of cnRows) {
+    const principal = c.principal || 0
+    if (principal <= 0) continue
+    if (c.include_in_summary === 0) {
+      unreconciled.push({ id: c.id, stakeholderName: c.stakeholder_name || '', dollars: principal, destinationCode: c.destination_class_code, reason: 'excluded' })
+      continue
+    }
+    const override = (c.financing_stage_code || '').trim()
+    if (override.toUpperCase() === FOLD_INTO_EQUITY) {
+      unreconciled.push({ id: c.id, stakeholderName: c.stakeholder_name || '', dollars: principal, destinationCode: c.destination_class_code, reason: 'folded' })
+      continue
+    }
+    let stageCode = override ? roundCodeByAttribKey.get(override.toUpperCase()) : undefined
+    if (!stageCode) {
+      let target = byClose.find(r => !!r.close_date) || byClose[0]
+      for (const r of byClose) {
+        if (r.close_date && c.issue_date && r.close_date <= c.issue_date) target = r
+        else if (r.close_date && c.issue_date && r.close_date > c.issue_date) break
+      }
+      stageCode = target?.code
+    }
+    if (stageCode) {
+      const k = stageCode.toUpperCase()
+      notesFinancingByRoundCode.set(k, (notesFinancingByRoundCode.get(k) || 0) + principal)
+    }
+  }
+  const attributedCnDollars = [...notesFinancingByRoundCode.values()].reduce((s, v) => s + v, 0)
+
+  let cumPoolIssued = 0
+  let cumAttributed = 0
 
   for (let i = 0; i < rounds.length; i++) {
     const r = rounds[i]
@@ -290,11 +354,9 @@ export default defineEventHandler((event) => {
     preFDSByRoundCode.set(codeKey, ownPreFDS)
     const preFDS = qfInitialPreFDS(r, ownPreFDS)
 
-    let cnDollars = 0
     let cnShares = 0
     const notesAttributed: RoundColumn['notes_attributed'] = []
     for (const a of attribs) {
-      cnDollars += a.total
       // Share price basis: stored conv_price (Carta or user-typed) wins
       // over the round PPS. Effective conv price applies cap/discount on
       // top — same rule as /convertibles so the CN page's shares column
@@ -320,6 +382,11 @@ export default defineEventHandler((event) => {
         shares: sharesForThisCn,
       })
     }
+
+    // Issue-era notes financing for this round (principal of the notes raised
+    // in this round's era, less any folded into equity). Independent of the
+    // conversion-era share bucketing above.
+    const notesFinancing = notesFinancingByRoundCode.get(r.code.toUpperCase()) || 0
 
     const preMoney = (r.pre_money != null && r.pre_money !== 0) ? r.pre_money : null
     // Post-money = pre-money + new money only. Notes financing is reported
@@ -349,7 +416,12 @@ export default defineEventHandler((event) => {
     } else {
       cumulativeFDS += common + preferredIssued + poolIssued + notesConverted
     }
-    cumulativeFinancing += newMoney + cnDollars
+    cumulativeFinancing += newMoney + notesFinancing
+
+    const optionPoolAttributed = attributedByRoundId.get(r.id) || 0
+    cumPoolIssued += poolIssued
+    cumAttributed += optionPoolAttributed
+    const availableOptions = cumPoolIssued - cumAttributed
 
     cols.push({
       round_id: r.id,
@@ -361,7 +433,7 @@ export default defineEventHandler((event) => {
       share_class_code: r.share_class_code,
       share_price: r.share_price,
       new_money: newMoney,
-      notes_financing: cnDollars,
+      notes_financing: notesFinancing,
       pre_money: preMoney,
       post_money: postMoney,
       common,
@@ -370,6 +442,8 @@ export default defineEventHandler((event) => {
       notes_converted: notesConverted,
       notes_converted_override: r.notes_converted_override != null ? Number(r.notes_converted_override) : null,
       option_pool_issued: poolIssued,
+      option_pool_attributed: optionPoolAttributed,
+      available_options: availableOptions,
       total_shares_fds: cumulativeFDS,
       total_shares_fds_override: r.total_shares_fds_override != null ? Number(r.total_shares_fds_override) : null,
       cumulated_financing: cumulativeFinancing,
@@ -389,18 +463,16 @@ export default defineEventHandler((event) => {
   // Reconciliation totals + per-CN breakdown for "why doesn't this match
   // the CN ledger?" The UI uses these to render a clear gap row beneath
   // Cumulated financing and link each unrolled-up CN back to its fix.
-  const unreconciledByReason: Record<'deferred' | 'excluded' | 'stale_destination', UnreconciledCn[]> = {
-    deferred: [],
+  const unreconciledByReason: Record<CnExclusionReason, UnreconciledCn[]> = {
     excluded: [],
-    stale_destination: [],
+    folded: [],
   }
   for (const u of unreconciled) unreconciledByReason[u.reason].push(u)
   const totalsByReason = {
-    deferred: unreconciledByReason.deferred.reduce((s, u) => s + u.dollars, 0),
     excluded: unreconciledByReason.excluded.reduce((s, u) => s + u.dollars, 0),
-    stale_destination: unreconciledByReason.stale_destination.reduce((s, u) => s + u.dollars, 0),
+    folded: unreconciledByReason.folded.reduce((s, u) => s + u.dollars, 0),
   }
-  const unattributedCnDollars = totalsByReason.deferred + totalsByReason.excluded + totalsByReason.stale_destination
+  const unattributedCnDollars = totalsByReason.excluded + totalsByReason.folded
 
   return {
     rounds: cols,

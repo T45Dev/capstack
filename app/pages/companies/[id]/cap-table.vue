@@ -61,35 +61,32 @@ interface CnReconciliation {
   attributed_dollars: number
   unattributed_dollars: number
   total_dollars: number
-  by_reason: { deferred: number; excluded: number; stale_destination: number }
+  by_reason: { excluded: number; folded: number }
   unreconciled: Array<{
     id: string
     stakeholderName: string
     dollars: number
     destinationCode: string | null
-    reason: 'deferred' | 'excluded' | 'stale_destination'
+    reason: 'excluded' | 'folded'
   }>
 }
 const { data: roundSummary, refresh: refreshRoundSummary } = await useFetch<{ rounds: RoundColumn[]; cn_reconciliation: CnReconciliation }>(() => `/api/companies/${id.value}/round-summary`, {
   watch: [id],
   default: () => ({
     rounds: [],
-    cn_reconciliation: { attributed_dollars: 0, unattributed_dollars: 0, total_dollars: 0, by_reason: { deferred: 0, excluded: 0, stale_destination: 0 }, unreconciled: [] },
+    cn_reconciliation: { attributed_dollars: 0, unattributed_dollars: 0, total_dollars: 0, by_reason: { excluded: 0, folded: 0 }, unreconciled: [] },
   }),
 })
 const roundCols = computed<RoundColumn[]>(() => roundSummary.value?.rounds || [])
-const cnReconciliation = computed<CnReconciliation>(() => roundSummary.value?.cn_reconciliation || { attributed_dollars: 0, unattributed_dollars: 0, total_dollars: 0, by_reason: { deferred: 0, excluded: 0, stale_destination: 0 }, unreconciled: [] })
+const cnReconciliation = computed<CnReconciliation>(() => roundSummary.value?.cn_reconciliation || { attributed_dollars: 0, unattributed_dollars: 0, total_dollars: 0, by_reason: { excluded: 0, folded: 0 }, unreconciled: [] })
 
-// Tooltip explaining why the CN ledger sum doesn't match Cumulated financing.
+// Tooltip explaining the note principal that sits OUTSIDE the Notes-financing
+// line. Both reasons are deliberate operator choices, not data errors.
 const cnReconcileTitle = computed(() => {
   const r = cnReconciliation.value
   const lines: string[] = []
-  if (r.by_reason.stale_destination > 0) {
-    const codes = [...new Set(r.unreconciled.filter(u => u.reason === 'stale_destination').map(u => u.destinationCode))].filter(Boolean).join(', ')
-    lines.push(`Stale destination: ${codes || 'CN destination doesn\'t match any round code'}. Fix on the Convertible notes ledger below.`)
-  }
-  if (r.by_reason.deferred > 0) lines.push('Unassigned: pick a destination round on the CN ledger.')
-  if (r.by_reason.excluded > 0) lines.push('Excluded: "In summary" toggled off on the CN ledger.')
+  if (r.by_reason.folded > 0) lines.push('Folded into equity: principal kept out of the Notes-financing line (the note still converts to shares).')
+  if (r.by_reason.excluded > 0) lines.push('Excluded: "In summary" toggled off on the CN ledger — out of the cap table entirely.')
   return lines.join('  •  ')
 })
 
@@ -148,8 +145,15 @@ const showFormulas = ref(true)
 const matrixDensity = ref<Density>('regular')
 const matrixGroupBy = ref<GroupBy>('flat')
 const matrixStatusFilter = ref<StatusFilter>('all')
+// Read-only finance-model view (rounds as columns, tranches combined) vs the
+// editable per-round grid. Default to the model — it's the familiar layout.
+const financingsView = ref<'model' | 'edit'>('model')
 
-if (typeof window !== 'undefined') {
+// Restore persisted toolbar prefs after the component mounts (not in
+// setup). Reading localStorage during setup would flip these refs
+// between SSR's defaults and the client's first render, producing a
+// Vue hydration mismatch.
+onMounted(() => {
   try {
     const v = localStorage.getItem('capstack:financings:show-formulas')
     if (v !== null) showFormulas.value = v === '1'
@@ -160,19 +164,23 @@ if (typeof window !== 'undefined') {
     const s = localStorage.getItem('capstack:financings:status-filter')
     if (s === 'all' || s === 'open' || s === 'closed') matrixStatusFilter.value = s
   } catch { /* ignore */ }
-  watch(showFormulas, (v) => {
-    try { localStorage.setItem('capstack:financings:show-formulas', v ? '1' : '0') } catch { /* ignore */ }
-  })
-  watch(matrixDensity, (v) => {
-    try { localStorage.setItem('capstack:financings:density', v) } catch { /* ignore */ }
-  })
-  watch(matrixGroupBy, (v) => {
-    try { localStorage.setItem('capstack:financings:group-by', v) } catch { /* ignore */ }
-  })
-  watch(matrixStatusFilter, (v) => {
-    try { localStorage.setItem('capstack:financings:status-filter', v) } catch { /* ignore */ }
-  })
-}
+})
+watch(showFormulas, (v) => {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem('capstack:financings:show-formulas', v ? '1' : '0') } catch { /* ignore */ }
+})
+watch(matrixDensity, (v) => {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem('capstack:financings:density', v) } catch { /* ignore */ }
+})
+watch(matrixGroupBy, (v) => {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem('capstack:financings:group-by', v) } catch { /* ignore */ }
+})
+watch(matrixStatusFilter, (v) => {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem('capstack:financings:status-filter', v) } catch { /* ignore */ }
+})
 
 // Active sub-tab — 'financings' (matrix), 'notes' (CN ledger), or
 // 'investors' (per-investor allocation matrix — the historical canon of
@@ -271,8 +279,15 @@ function exportCsv() {
     <div v-show="activeTab === 'financings'" class="space-y-4">
       <FinancingsSummaryBar v-if="roundCols.length" :rounds="roundCols" />
 
+      <!-- Read-only finance model (rounds as columns, tranches combined) vs
+           the editable per-round grid. Model is the default — familiar layout. -->
+      <div v-if="roundCols.length" class="inline-flex rounded-md border border-ink-200 overflow-hidden text-xs">
+        <button type="button" class="px-3 py-1.5" :class="financingsView === 'model' ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-100'" @click="financingsView = 'model'">Model</button>
+        <button type="button" class="px-3 py-1.5 border-l border-ink-200" :class="financingsView === 'edit' ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-100'" @click="financingsView = 'edit'">Edit grid</button>
+      </div>
+
       <FinancingsToolbar
-        v-if="roundCols.length"
+        v-if="roundCols.length && financingsView === 'edit'"
         v-model="matrixQuery"
         :density="matrixDensity"
         :group-by="matrixGroupBy"
@@ -288,6 +303,7 @@ function exportCsv() {
       <div v-if="!roundCols.length" class="px-4 py-10 text-center text-sm text-ink-500 border border-dashed border-ink-300 rounded-lg bg-white">
         No rounds yet. Click <span class="font-medium text-ink-700">Add round</span> above to start typing your funding history.
       </div>
+      <FinancingsModel v-else-if="financingsView === 'model'" :rounds="roundCols" />
       <div v-else>
         <FinancingsMatrix
           :rounds="filteredRoundCols"
@@ -298,23 +314,24 @@ function exportCsv() {
           @update:saving-count="(n) => savingCount = n"
         />
 
-        <!-- CN reconciliation banner. When the CN ledger total doesn't
-             equal Cumulated financing, surface the gap below the matrix. -->
+        <!-- Note principal sitting OUTSIDE the Notes-financing line. Both
+             reasons are deliberate (folded into equity / toggled out of the
+             summary), so this is an informational reconciliation note, not a
+             warning about a data gap. -->
         <div
           v-if="cnReconciliation.unattributed_dollars > 0"
-          class="mt-2 px-3 py-2 rounded-md border border-warn/30 bg-warn-soft text-warn text-[12px] flex items-center justify-between gap-3 num"
+          class="mt-2 px-3 py-2 rounded-md border border-ink-200 bg-ink-50 text-ink-600 text-[12px] flex items-center justify-between gap-3 num"
           :title="cnReconcileTitle"
         >
           <div class="flex items-center gap-2">
-            <span class="font-medium">CNs not rolled up</span>
+            <span class="font-medium">Outside the Notes-financing line</span>
             <span class="text-[10px] uppercase tracking-wide font-semibold">{{ cnReconciliation.unreconciled.length }}</span>
           </div>
           <div class="text-right">
-            <span class="font-semibold">{{ fmtUSD(cnReconciliation.unattributed_dollars) }}</span>
+            <span class="font-semibold text-ink-800">{{ fmtUSD(cnReconciliation.unattributed_dollars) }}</span>
             <span class="ml-2 text-[10px]">
-              <span v-if="cnReconciliation.by_reason.stale_destination > 0">{{ fmtUSD(cnReconciliation.by_reason.stale_destination) }} bad destination</span>
-              <span v-if="cnReconciliation.by_reason.deferred > 0" class="ml-2">{{ fmtUSD(cnReconciliation.by_reason.deferred) }} unassigned</span>
-              <span v-if="cnReconciliation.by_reason.excluded > 0" class="ml-2">{{ fmtUSD(cnReconciliation.by_reason.excluded) }} excluded</span>
+              <span v-if="cnReconciliation.by_reason.folded > 0">{{ fmtUSD(cnReconciliation.by_reason.folded) }} folded into equity</span>
+              <span v-if="cnReconciliation.by_reason.excluded > 0" class="ml-2">{{ fmtUSD(cnReconciliation.by_reason.excluded) }} excluded (In summary off)</span>
             </span>
           </div>
         </div>

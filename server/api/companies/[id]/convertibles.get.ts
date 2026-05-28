@@ -27,6 +27,8 @@ interface CnLine {
   shares: number                 // totalInvestment / effectiveConvPrice
   basisApplied: 'destination' | 'deferred'
   includeInSummary: boolean      // when false, round-summary skips this CN
+  issueDate: string | null       // drives the default financing-stage attribution
+  financingStageCode: string | null  // null = auto (issue-era); round code = pinned; 'EQUITY' = folded
 }
 
 export default defineEventHandler((event) => {
@@ -72,7 +74,7 @@ export default defineEventHandler((event) => {
     SELECT id, stakeholder_name, principal, interest_accrued, interest_rate,
            issue_date, conversion_date, destination_class_code,
            conversion_discount, valuation_cap, conversion_price,
-           include_in_summary
+           include_in_summary, financing_stage_code
     FROM convertibles WHERE company_id = ? AND status = 'outstanding'
   `).all(id) as Array<{
     id: string; stakeholder_name: string | null; principal: number;
@@ -81,7 +83,7 @@ export default defineEventHandler((event) => {
     destination_class_code: string | null;
     conversion_discount: number; valuation_cap: number | null;
     conversion_price: number | null;
-    include_in_summary: number;
+    include_in_summary: number; financing_stage_code: string | null;
   }>
 
   // Accrued interest = principal × rate × (conversion_date − issue_date) / 365.
@@ -211,6 +213,8 @@ export default defineEventHandler((event) => {
       shares,
       basisApplied: c.destination_class_code ? 'destination' : 'deferred',
       includeInSummary: c.include_in_summary !== 0,
+      issueDate: c.issue_date || null,
+      financingStageCode: c.financing_stage_code || null,
     }
   })
 

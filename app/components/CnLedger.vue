@@ -36,7 +36,14 @@ interface CnRow {
   shares: number
   basisApplied: string
   includeInSummary: boolean
+  issueDate: string | null
+  financingStageCode: string | null
 }
+
+// Sentinel financing_stage_code that folds a note into a round's equity raise
+// (its principal drops out of the Notes-financing line; its share conversion is
+// untouched). Mirrors FOLD_INTO_EQUITY in round-summary.get.ts.
+const FOLD_INTO_EQUITY = 'EQUITY'
 
 const companyId = computed(() => props.companyId)
 
@@ -94,6 +101,23 @@ const destinationOptions = computed(() => {
   return (roundSummary.value?.rounds || []).map(r => ({ value: r.code, label: roundLabel(r) }))
 })
 
+// Financing-stage options: a round pins the note's principal to that round's
+// Notes-financing line; the trailing "Fold into equity" entry drops it from the
+// notes line entirely. The select's empty default (renders "—") means Auto —
+// the round-era the note was issued in.
+const financingStageOptions = computed(() => [
+  ...(roundSummary.value?.rounds || []).map(r => ({ value: r.code, label: roundLabel(r) })),
+  { value: FOLD_INTO_EQUITY, label: 'Fold into equity' },
+])
+
+// Label for the financing-stage cell when not editing. null → Auto (issue-era),
+// 'EQUITY' → folded, else the round's friendly name.
+function financingStageLabel(code: string | null): string {
+  if (!code) return 'Auto'
+  if (code.toUpperCase() === FOLD_INTO_EQUITY) return 'Fold into equity'
+  return roundsByCode.value.get(code)?.name || code
+}
+
 // Are there any rounds at all? Drives the "Add a round first" callout when
 // CNs exist but the operator hasn't seeded rounds yet (typical first-load
 // flow after a Carta import — the importer doesn't auto-create rounds).
@@ -104,6 +128,7 @@ const cnCols = computed<EditableCol[]>(() => {
     { key: 'stakeholderName',      label: 'Holder',         width: 180, sortable: true, align: 'left',  type: 'text',   editable: true, placeholder: 'VCT Investments' },
     { key: 'includeInSummary',     label: 'In summary',     width: 90,  sortable: true, align: 'center' },
     { key: 'destinationClassCode', label: 'Destination',    width: 130, sortable: true, align: 'left',  type: 'select', editable: true, options: destinationOptions.value },
+    { key: 'financingStageCode',   label: 'Financing stage', width: 140, sortable: true, align: 'left', type: 'select', editable: true, options: financingStageOptions.value },
     { key: 'conversionDate',       label: 'Conv. date',     width: 130, sortable: true, align: 'left',  type: 'date',   editable: true },
     { key: 'principal',            label: 'Principal',      width: 120, sortable: true, align: 'right', type: 'usd',    editable: true, step: '1000' },
     { key: 'interestRate',         label: 'Interest rate',  width: 90,  sortable: true, align: 'right', type: 'pct',    editable: true, step: '0.001' },
@@ -206,12 +231,15 @@ function priceMismatchTitle(stored: number, effective: number): string {
   return `Stored conv. price differs from cap/discount math by ${diff > 0 ? '+' : ''}${diff.toFixed(1)}%`
 }
 
-// Breakdown of CNs that don't roll up into Cumulated financing on the
-// Financings table above. Three reasons: deferred (no destination round
-// picked), stale (destination doesn't match any round code on the cap
-// table — typically a Carta share-class code that wasn't re-attributed
-// after import), excluded ("In summary" toggle off). The matched roundsByCode
-// map decides between deferred and stale.
+// Notes needing attention on the cap-table side — kept distinct from the
+// (issue-era) Notes-financing line, which counts principal by issue date
+// regardless of where a note converts. Two concerns:
+//   • deferred (no destination) / stale (destination matches no round) — the
+//     note won't CONVERT TO SHARES until it points at a real round; its
+//     principal is still counted in Notes financing.
+//   • excluded ("In summary" off) — out of the cap table entirely (no
+//     financing, no shares).
+// The matched roundsByCode map decides between deferred and stale.
 const unassignedSummary = computed(() => {
   let deferredDollars = 0, deferredCount = 0
   let staleDollars = 0, staleCount = 0
@@ -262,6 +290,7 @@ async function onUpdate(row: CnRow, patch: Partial<CnRow>) {
   if ('conversionDiscount' in patch) body.conversion_discount = patch.conversionDiscount ?? 0
   if ('valuationCap' in patch) body.valuation_cap = patch.valuationCap ?? null
   if ('convPrice' in patch) body.conversion_price = patch.convPrice ?? null
+  if ('financingStageCode' in patch) body.financing_stage_code = patch.financingStageCode || null
   await $fetch(`/api/convertibles/${row.id}`, { method: 'PATCH', body })
   await refreshAll()
 }
@@ -447,6 +476,22 @@ async function onDelete(row: CnRow) {
             >{{ value }} — re-attribute</span>
           </template>
         </template>
+        <template #cell-financingStageCode="{ value }">
+          <span
+            v-if="!value"
+            class="text-xs text-ink-500 italic"
+            title="Auto — the note's principal counts in the round-era it was issued in. Pick a round to pin it, or 'Fold into equity' to drop it from the Notes-financing line (its conversion to shares is unaffected)."
+          >Auto</span>
+          <span
+            v-else-if="String(value).toUpperCase() === FOLD_INTO_EQUITY"
+            class="text-xs font-medium px-1.5 py-0.5 rounded border text-ink-600 bg-ink-100 border-ink-200"
+            title="Folded into the round's equity raise — principal excluded from Notes financing; share conversion unaffected."
+          >Equity</span>
+          <span
+            v-else
+            class="text-xs font-medium px-1.5 py-0.5 rounded border text-ink-800 bg-ink-50 border-ink-200"
+          >{{ financingStageLabel(value) }}</span>
+        </template>
         <template #cell-conversionDate="{ value }">
           <span v-if="value" class="text-ink-700">{{ value }}</span>
           <span v-else class="text-amber-700 text-xs">no date</span>
@@ -489,21 +534,24 @@ async function onDelete(row: CnRow) {
         </template>
       </UiEditableTable>
 
-      <div v-if="unassignedSummary.totalDollars > 0" class="px-4 py-2 text-xs text-amber-900 bg-amber-50/60 border-t border-amber-200/60 space-y-0.5">
-        <div class="font-medium">
-          {{ fmtUSD(unassignedSummary.totalDollars) }} of CNs not rolled up into Cumulated financing.
+      <div v-if="unassignedSummary.totalDollars > 0" class="px-4 py-2 text-xs text-amber-900 bg-amber-50/60 border-t border-amber-200/60 space-y-1">
+        <div v-if="(unassignedSummary.stale.count + unassignedSummary.deferred.count) > 0">
+          <div class="font-medium">
+            {{ fmtUSD(unassignedSummary.stale.dollars + unassignedSummary.deferred.dollars) }} in notes won't convert to shares yet
+            <span class="font-normal text-amber-700/80">— their principal still counts in Notes financing (by issue date); this only affects share conversion.</span>
+          </div>
+          <div class="text-amber-800 text-[11px]">
+            <span v-if="unassignedSummary.stale.count > 0">
+              <span class="font-medium">{{ fmtUSD(unassignedSummary.stale.dollars) }}</span> point at a destination that doesn't match any round —
+              edit those rows above and pick a real one (typical after a Carta re-import).
+            </span>
+            <span v-if="unassignedSummary.deferred.count > 0" :class="unassignedSummary.stale.count > 0 ? 'block' : ''">
+              <span class="font-medium">{{ fmtUSD(unassignedSummary.deferred.dollars) }}</span> have no destination round yet — pick one (or add the round on the Financings tab).
+            </span>
+          </div>
         </div>
-        <div class="text-amber-800 text-[11px]">
-          <span v-if="unassignedSummary.stale.count > 0">
-            <span class="font-medium">{{ fmtUSD(unassignedSummary.stale.dollars) }}</span> with a destination that doesn't match any round —
-            edit those rows above and pick a real destination (typical after a Carta re-import).
-          </span>
-          <span v-if="unassignedSummary.deferred.count > 0" :class="unassignedSummary.stale.count > 0 ? 'block' : ''">
-            <span class="font-medium">{{ fmtUSD(unassignedSummary.deferred.dollars) }}</span> unassigned — pick a destination round.
-          </span>
-          <span v-if="unassignedSummary.excluded.count > 0" :class="(unassignedSummary.stale.count + unassignedSummary.deferred.count) > 0 ? 'block' : ''">
-            <span class="font-medium">{{ fmtUSD(unassignedSummary.excluded.dollars) }}</span> excluded via the "In summary" toggle.
-          </span>
+        <div v-if="unassignedSummary.excluded.count > 0" class="text-[11px] text-amber-800">
+          <span class="font-medium">{{ fmtUSD(unassignedSummary.excluded.dollars) }}</span> excluded from the cap table entirely ("In summary" off).
         </div>
       </div>
     </div>

@@ -35,8 +35,11 @@ export function useSortableTable(opts: SortableTableOpts) {
     dir: opts.defaultSort?.dir || 'asc',
   }) as { key: string; dir: 'asc' | 'desc' }
 
-  // Restore widths + sort from localStorage
-  if (typeof window !== 'undefined') {
+  // Restore widths + sort from localStorage AFTER the host component
+  // mounts. Reading during setup would diverge from the SSR render
+  // (which uses opts.columns' default widths + defaultSort), producing
+  // a Vue hydration mismatch on the <col> widths and sort-arrow cells.
+  onMounted(() => {
     try {
       const savedW = JSON.parse(localStorage.getItem(`${opts.key}:widths`) || 'null') as Record<string, number> | null
       if (savedW) {
@@ -50,7 +53,7 @@ export function useSortableTable(opts: SortableTableOpts) {
         sort.dir = savedS.dir
       }
     } catch { /* ignore */ }
-  }
+  })
 
   function persistWidths() {
     if (typeof window === 'undefined') return

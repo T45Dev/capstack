@@ -57,7 +57,12 @@ export interface ParsedRound {
   sharePrice: number | null          // Original Issue Price (constant per ledger)
   newMoney: number                   // Sum of "Cash Contributed to Company"
   debtCanceled: number               // Sum of "Debt Canceled" (== CN-driven conversions; informational)
-  sharesIssued: number               // Sum of "Quantity Issued"
+  sharesIssued: number               // Sum of "Quantity Issued" (cash-bought + note-converted)
+  cashShares: number                 // Quantity Issued for rows with Cash Contributed > 0 only.
+                                     // The note-converted remainder (sharesIssued − cashShares) is
+                                     // supplied separately by CN attribution (destination = this code),
+                                     // so a round stores cashShares as preferred_issued to avoid
+                                     // double-counting the converted portion.
 }
 
 export interface ParsedConvertible {
@@ -153,6 +158,38 @@ function asDate(v: unknown): string | null {
   return null
 }
 
+// Classify a sheet by whether any of its first rows carries ALL the given
+// header patterns. Excel truncates tab names to 31 chars (so "2019 Stock
+// Option and Incentive Plan" arrives as "2019 Stock Option and Incentiv") and
+// names vary across customers, so column-signature matching is the robust
+// fallback to name matching.
+function sheetMatchesHeaders(ws: import('exceljs').Worksheet, patterns: RegExp[]): boolean {
+  const maxRow = Math.min(ws.rowCount || 0, 12)
+  for (let r = 1; r <= maxRow; r++) {
+    const labels = ((ws.getRow(r).values as any[]) || []).map(v => asString(v).toLowerCase())
+    if (patterns.every(p => labels.some(l => p.test(l)))) return true
+  }
+  return false
+}
+
+// The option-grant ledger — by name OR by its unique column signature.
+// "Exercise Price" + "Quantity Issued" appear together only on this sheet
+// (share-class ledgers have Quantity Issued but no Exercise Price; the CN
+// ledger has neither), so the signature classifies it even when the tab
+// name is truncated or oddly labelled.
+function isOptionPlanSheet(ws: import('exceljs').Worksheet): boolean {
+  const n = (ws.name || '').toLowerCase()
+  const byName = /(stock\s*option|equity).+(plan|incentive|ledger)/.test(n)
+    || /option.+(ledger|detail)/.test(n)
+    || /^stock\s*options?$/.test(n)
+    || /option\s*(grants?|awards?)/.test(n)
+    || /outstanding\s*options?/.test(n)
+    || /grants?\s*(detail|ledger)/.test(n)
+    || /^awards?$/.test(n)
+    || /stock\s*option/.test(n)
+  return byName || sheetMatchesHeaders(ws, [/exercise\s*price/, /quantity\s*issued/])
+}
+
 // Pull (CODE) out of "Series Seed Preferred (SS) Stock"
 function extractCode(name: string, fallback: string): string {
   const m = /\(([A-Z][A-Z0-9-]{0,8})\)/.exec(name)
@@ -213,6 +250,7 @@ function parseLedgerSheet(sheet: import('exceljs').Worksheet, code: string, warn
   let newMoney = 0
   let debtCanceled = 0
   let sharesIssued = 0
+  let cashShares = 0
   let maxBoard: string | null = null
   let maxIssue: string | null = null
   let minIssue: string | null = null
@@ -230,7 +268,11 @@ function parseLedgerSheet(sheet: import('exceljs').Worksheet, code: string, warn
       const p = asNumber(row.getCell(cIssue).value)
       if (p > 0) sharePrice = p
     }
-    if (cCash > 0)  newMoney     += asNumber(row.getCell(cCash).value)
+    if (cCash > 0) {
+      const cash = asNumber(row.getCell(cCash).value)
+      newMoney += cash
+      if (cash > 0) cashShares += qty   // new-money shares (vs note-converted)
+    }
     if (cDebt > 0)  debtCanceled += asNumber(row.getCell(cDebt).value)
     if (cBoard > 0)     maxBoard = trackMax(maxBoard, asDate(row.getCell(cBoard).value))
     if (cIssueDate > 0) {
@@ -264,6 +306,7 @@ function parseLedgerSheet(sheet: import('exceljs').Worksheet, code: string, warn
     newMoney,
     debtCanceled,
     sharesIssued,
+    cashShares,
   }
 }
 
@@ -359,17 +402,7 @@ export function detectCartaSheetRoles(wb: ExcelJS.Workbook): CartaSheetRoles {
     const n = (ws.name || '').toLowerCase()
     return /convertible|^notes?\b|note\s*ledger|safes?/.test(n)
   })
-  const plan = wb.worksheets.find(ws => {
-    const n = (ws.name || '').toLowerCase()
-    return /(stock\s*option|equity).+(plan|incentive|ledger)/.test(n)
-      || /option.+ledger/.test(n)
-      || /option.+detail/.test(n)
-      || /^stock\s*options?$/.test(n)
-      || /option\s*(grants?|awards?)/.test(n)
-      || /outstanding\s*options?/.test(n)
-      || /grants?\s*(detail|ledger)/.test(n)
-      || /^awards?$/.test(n)
-  })
+  const plan = wb.worksheets.find(isOptionPlanSheet)
   const summary = wb.getWorksheet('Summary Cap Table')
   return {
     detailedCapTableSheet: detailed?.name || null,
@@ -685,6 +718,7 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
       // this "Conversion Price" or sometimes "Issue Price" on the CN sheet
       // (distinct from the share-class issue price elsewhere).
       const cConvPrice = col(/conversion\s*price|conv\s*price|issue\s*price|price\s*per\s*share/i)
+      const cCancelReason = col(/cancellation\s*reason/i)
 
       if (cPrincipal < 0 || cName < 0) {
         warnings.push(
@@ -702,6 +736,14 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
           if (principal <= 0) continue
           const name = cName > 0 ? asString(row.getCell(cName).value) : ''
           if (!name) continue
+          // Skip notes voided for non-conversion reasons (e.g. "Clerical
+          // Error", repayment). Carta excludes these from Cash Raised and
+          // they never became real securities — counting their principal
+          // over-states convertibles (verified against a voided $800k note).
+          if (cCancelReason > 0) {
+            const reason = asString(row.getCell(cCancelReason).value)
+            if (reason && !/conversion/i.test(reason)) continue
+          }
           result.convertibles.push({
             externalId: cIdFmt > 0 ? asString(row.getCell(cIdFmt).value) || null : null,
             stakeholderName: name,
@@ -753,22 +795,7 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
   // When present, we overlay the per-grant data onto whatever the cap
   // table already gave us — and add any grant rows the cap table missed.
   const planSheet = (overrides.optionPlanSheet ? wb.getWorksheet(overrides.optionPlanSheet) : null)
-                 || wb.worksheets.find(ws => {
-                   const n = (ws.name || '').toLowerCase()
-                   // Broad pattern bank so we catch the many ways Carta labels this
-                   // sheet across templates and customers. Real-world names seen:
-                   //   "2019 Stock Option and Incentive Plan", "Equity Incentive Plan",
-                   //   "Option Ledger", "ANT Post A-4 Option Detail", "Stock Options",
-                   //   "Option Grants", "Grants Detail", "Awards", "Outstanding Options".
-                   return /(stock\s*option|equity).+(plan|incentive|ledger)/.test(n)
-                     || /option.+ledger/.test(n)
-                     || /option.+detail/.test(n)
-                     || /^stock\s*options?$/.test(n)
-                     || /option\s*(grants?|awards?)/.test(n)
-                     || /outstanding\s*options?/.test(n)
-                     || /grants?\s*(detail|ledger)/.test(n)
-                     || /^awards?$/.test(n)
-                 })
+                 || wb.worksheets.find(isOptionPlanSheet)
   if (planSheet && overrides.optionPlanSheet) {
     warnings.push(`Option grants sheet: "${planSheet.name}" (operator selection).`)
   }
@@ -972,7 +999,11 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
           const qtyIssued = cQtyIssued > 0 ? asNumber(row.getCell(cQtyIssued).value) : 0
           const qtyOutstanding = cQtyOutstanding > 0 ? asNumber(row.getCell(cQtyOutstanding).value) : 0
           const qtyGeneric = cQtyGeneric > 0 ? asNumber(row.getCell(cQtyGeneric).value) : 0
-          const quantity = qtyOutstanding > 0 ? qtyOutstanding
+          // Use the Quantity Outstanding column's value even when it's 0:
+          // a fully exercised/cancelled grant has 0 outstanding and its shares
+          // now live in common, so falling back to Issued would double-count
+          // them. Only fall back to Issued when there's no Outstanding column.
+          const quantity = cQtyOutstanding > 0 ? qtyOutstanding
                          : qtyIssued > 0 ? qtyIssued
                          : qtyGeneric
           if (quantity <= 0) { skippedNoQty++; continue }
