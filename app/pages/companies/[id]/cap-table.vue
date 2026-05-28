@@ -141,7 +141,7 @@ const openRoundName = computed<string | null>(() => {
 // Toolbar / view-mode state. All persisted to localStorage so the
 // operator's preferences survive reloads. Default values match the
 // design's "least surprising" defaults.
-const showFormulas = ref(true)
+const showFormulas = ref(false)
 const matrixDensity = ref<Density>('regular')
 const matrixGroupBy = ref<GroupBy>('flat')
 const matrixStatusFilter = ref<StatusFilter>('all')
