@@ -269,8 +269,8 @@ function exportCsv() {
 
     <UiEmpty
       v-if="!data.stakeholders.length && !roundCols.length"
-      title="No cap table loaded"
-      description="Import a Carta export to populate stakeholders, share classes, and convertibles — or click Add round above to start typing your funding history."
+      title="No cap table yet"
+      description="Drop a Carta export to load option grants and stakeholders, or click Add round above to start typing your funding history."
     >
       <NuxtLink :to="`/companies/${id}/import`"><UiButton variant="primary"><Upload :size="14" /> Import Carta export</UiButton></NuxtLink>
     </UiEmpty>

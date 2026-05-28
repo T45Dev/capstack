@@ -259,9 +259,9 @@ function migrate(d: Database.Database): void {
   ensureColumn('convertibles', 'financing_stage_code', 'TEXT')
   ensureColumn('companies', 'starting_round', 'TEXT')
   ensureColumn('companies', 'starting_round_date', 'TEXT')
-  // NULL = the setup wizard hasn't been completed; the route gate redirects
-  // company pages to /setup until it's set. Grandfather backfill below marks
-  // pre-wizard workspaces (those that already have rounds) as complete.
+  // Stamped on the first successful Carta import. The import UI uses it
+  // to decide between "Welcome" and "Re-import" framing; nothing else
+  // gates on it now that the setup wizard is gone.
   ensureColumn('companies', 'setup_completed_at', 'TEXT')
   ensureColumn('grants', 'approval_status', 'TEXT')
   // Per-grant details the Carta "Stock Option and Incentive Plan" sheet
@@ -385,9 +385,9 @@ function migrate(d: Database.Database): void {
     tx(dirty)
   }
 
-  // Grandfather pre-wizard workspaces: any company that already has rounds was
-  // set up before the wizard existed, so mark it complete and let it skip the
-  // gate. Fresh imports leave setup_completed_at NULL and route through /setup.
+  // Grandfather established workspaces: any company that already has rounds
+  // shouldn't see "Welcome — let's load your option grants" on the import
+  // page. Stamp setup_completed_at so they get the re-import framing.
   // Idempotent — only touches NULL rows.
   d.exec(`
     UPDATE companies SET setup_completed_at = datetime('now')
