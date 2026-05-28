@@ -1,8 +1,12 @@
 import { db } from '~~/server/utils/db'
 import { newId } from '~~/server/utils/ids'
 import { parseCartaXlsx } from '~~/server/parsers/carta'
-import { buildRoundCandidates } from '~~/server/parsers/setup-candidates'
 
+// The Carta import is narrow: only the bits of the file that aren't
+// captured by the operator on the Financings page. That's stakeholders
+// (so future grants/CNs can attach by name), option grants, and the
+// option-pool authorized total. Share classes, holdings, convertible
+// notes, and round structure are user-managed.
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
   if (!id) throw createError({ statusCode: 400, message: 'id required' })
@@ -25,120 +29,32 @@ export default defineEventHandler(async (event) => {
   const replaceFlag = parts.find(p => p.name === 'replace')
   const replace = replaceFlag?.data ? String(replaceFlag.data).trim() === 'true' : true
 
-  // Per-category opt-out flags so the operator can re-import without
-  // overwriting categories they've curated manually. Default = import
-  // everything (preserves existing behavior). Rounds + assumptions +
-  // pool_events + round_investors are NEVER touched by re-import
-  // regardless of these flags.
-  function flagFor(name: string, dflt = true): boolean {
-    const p = parts!.find(x => x.name === name)
-    if (!p?.data) return dflt
-    return String(p.data).trim() !== 'false'
-  }
-  const include = {
-    shareClasses: flagFor('include_share_classes'),
-    stakeholders: flagFor('include_stakeholders'),
-    holdings:     flagFor('include_holdings'),
-    grants:       flagFor('include_grants'),
-    convertibles: flagFor('include_convertibles'),
-    optionPools:  flagFor('include_option_pools'),
-  }
-
-  // Sheet-role overrides from the import UI. Empty string = "auto-
-  // detect"; any other value is the explicit sheet name to use.
-  function sheetFor(name: string): string | null {
-    const p = parts!.find(x => x.name === name)
-    if (!p?.data) return null
-    const v = String(p.data).trim()
-    return v.length ? v : null
-  }
-  const sheetOverrides = {
-    detailedCapTableSheet: sheetFor('sheet_detailed_cap_table'),
-    convertibleNotesSheet: sheetFor('sheet_convertible_notes'),
-    optionPlanSheet:       sheetFor('sheet_option_plan'),
-    summaryCapTableSheet:  sheetFor('sheet_summary_cap_table'),
-  }
-
   let parsed
   try {
-    parsed = await parseCartaXlsx(Buffer.from(file.data), sheetOverrides)
+    parsed = await parseCartaXlsx(Buffer.from(file.data))
   } catch (e: any) {
     throw createError({ statusCode: 400, message: `Failed to parse xlsx: ${e?.message || e}` })
   }
 
   const tx = db().transaction(() => {
     if (replace) {
-      // Order matters: convertibles.stakeholder_id has a FK to stakeholders
-      // with default ON DELETE RESTRICT, so all referencing rows must go
-      // first. Same logic for holdings (which references both stakeholders
-      // and share_classes) and grants. Then we can remove the parents.
-      //
-      // Per-category opt-out: skipping a category means we keep the
-      // existing rows AND don't insert new ones for it (the importer's
-      // category section short-circuits below).
-      if (include.convertibles) db().prepare('DELETE FROM convertibles WHERE company_id = ?').run(id)
-      if (include.grants)       db().prepare('DELETE FROM grants WHERE company_id = ?').run(id)
-      if (include.holdings)     db().prepare('DELETE FROM holdings WHERE company_id = ?').run(id)
-      if (include.shareClasses) db().prepare('DELETE FROM share_classes WHERE company_id = ?').run(id)
-      // Stakeholders: only safe to delete when EVERYTHING that references
-      // them is also being replaced — otherwise the FK constraints fail.
-      // The operator can leave stakeholders alone individually only if
-      // they also keep grants + holdings + convertibles + round_investors.
-      const safeToDeleteStakeholders = include.stakeholders && include.grants && include.holdings && include.convertibles
-      if (safeToDeleteStakeholders) db().prepare('DELETE FROM stakeholders WHERE company_id = ?').run(id)
-      else if (include.stakeholders) {
-        parsed.warnings.push('Stakeholders kept (referenced by holdings/grants/CNs you opted out of). They will be merged, not replaced.')
-      }
-      if (include.optionPools) db().prepare('DELETE FROM option_pools WHERE company_id = ?').run(id)
-      // Rounds, assumptions, pool_events, round_investors are NEVER
-      // touched by re-import — they're user-managed via the Financings
-      // page and Option Pool Impact page.
+      // Grants get re-loaded each import; pool too. Stakeholders are
+      // merged (not wiped) so manually-added people aren't lost when
+      // the operator re-imports for fresh grants.
+      db().prepare('DELETE FROM grants WHERE company_id = ?').run(id)
+      db().prepare('DELETE FROM option_pools WHERE company_id = ?').run(id)
+      // Share classes, holdings, convertibles, rounds, assumptions,
+      // pool_events, round_investors: never touched.
     }
 
-    // Share classes — always populate the lookup map (downstream sections
-    // need to link holdings to share classes by code), but only INSERT new
-    // rows when the operator opted to include them. Mirrors the
-    // stakeholders pattern below.
-    const codeToId = new Map<string, string>()
-    const existingSC = db().prepare('SELECT id, code FROM share_classes WHERE company_id = ?').all(id) as any[]
-    for (const row of existingSC) codeToId.set(row.code, row.id)
-
-    if (include.shareClasses) {
-    const insSC = db().prepare(`
-      INSERT INTO share_classes (id, company_id, code, name, kind, seniority, authorized, issue_price)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(company_id, code) DO UPDATE SET
-        name = excluded.name,
-        kind = excluded.kind,
-        seniority = excluded.seniority,
-        authorized = excluded.authorized,
-        issue_price = excluded.issue_price
-    `)
-
-    let seniority = 0
-    for (const sc of parsed.shareClasses) {
-      seniority++
-      let scId = codeToId.get(sc.code)
-      if (!scId) { scId = newId('sc'); codeToId.set(sc.code, scId) }
-      try {
-        insSC.run(scId, id, sc.code, sc.name, sc.kind, seniority, sc.authorized ?? null, sc.issuePrice ?? null)
-      } catch (err: any) {
-        parsed.warnings.push(`Couldn't import share class "${sc.code}": ${err?.message || err}`)
-      }
-    }
-    }  // end if include.shareClasses
-
-    // Stakeholders — always populate the lookup map (downstream sections
-    // need to link grants/holdings/CNs to stakeholders by name), but only
-    // INSERT new rows when the operator opted to include them.
+    // Stakeholders — merged in (we add new names, leave existing ones
+    // alone). Grants attach to the existing row when the name matches.
     const insSH = db().prepare(`
       INSERT INTO stakeholders (id, company_id, name, external_id) VALUES (?, ?, ?, ?)
     `)
     const nameToId = new Map<string, string>()
     const existingSH = db().prepare('SELECT id, name FROM stakeholders WHERE company_id = ?').all(id) as any[]
     for (const r of existingSH) nameToId.set(r.name, r.id)
-
-    if (include.stakeholders) {
     for (const sh of parsed.stakeholders) {
       if (nameToId.has(sh.name)) continue
       const shId = newId('sh')
@@ -149,31 +65,9 @@ export default defineEventHandler(async (event) => {
         parsed.warnings.push(`Couldn't import stakeholder "${sh.name}": ${err?.message || err}`)
       }
     }
-    }  // end if include.stakeholders
 
-    // Holdings
-    if (include.holdings) {
-    const insH = db().prepare(`
-      INSERT INTO holdings (company_id, stakeholder_id, share_class_id, shares) VALUES (?, ?, ?, ?)
-      ON CONFLICT(stakeholder_id, share_class_id) DO UPDATE SET shares = excluded.shares
-    `)
-    for (const h of parsed.holdings) {
-      const shId = nameToId.get(h.stakeholderName)
-      const scId = codeToId.get(h.shareClassCode)
-      if (!shId || !scId) continue
-      try {
-        insH.run(id, shId, scId, Math.floor(h.shares))
-      } catch (err: any) {
-        parsed.warnings.push(`Couldn't import holding for "${h.stakeholderName}" / ${h.shareClassCode}: ${err?.message || err}`)
-      }
-    }
-    }  // end if include.holdings
-
-    // Grants — when the Carta Stock Option Plan sheet was found, every
-    // parsed grant comes through with strike + issue date + vesting +
-    // (issued / exercised / forfeited) counts. Otherwise we have just the
-    // qty-rolled-up-per-stakeholder stub from the Detailed Cap Table.
-    if (include.grants && parsed.grants.length) {
+    // Grants — per-grant detail from the Stock Option Plan sheet.
+    if (parsed.grants.length) {
       const insG = db().prepare(`
         INSERT INTO grants (
           id, company_id, stakeholder_id, recipient_name, recipient_type, round,
@@ -215,89 +109,22 @@ export default defineEventHandler(async (event) => {
       }
     }
 
-    // Convertibles
-    if (include.convertibles && parsed.convertibles.length) {
-      // Notes with a conversion date are attributed to that round; notes
-      // without one default to Deferred (the user can flip either via the
-      // Convertible notes ledger or by setting a conversion date inline).
-      const insCN = db().prepare(`
-        INSERT INTO convertibles (
-          id, company_id, stakeholder_id, external_id, stakeholder_name,
-          principal, interest_accrued, interest_rate, issue_date, maturity_date,
-          conversion_date, destination_class_code,
-          valuation_cap, conversion_discount, conversion_price,
-          converts_at_round, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outstanding')
-      `)
-      for (const cn of parsed.convertibles) {
-        try {
-          insCN.run(
-            newId('cn'),
-            id,
-            nameToId.get(cn.stakeholderName) || null,
-            cn.externalId ?? null,
-            cn.stakeholderName,
-            cn.principal ?? 0,
-            cn.interestAccrued ?? 0,
-            cn.interestRate ?? 0,
-            cn.issueDate ?? null,
-            cn.maturityDate ?? null,
-            cn.conversionDate ?? null,
-            cn.destinationClassCode ?? null,
-            cn.valuationCap ?? null,
-            cn.conversionDiscount ?? 0,
-            cn.conversionPrice ?? null,
-            cn.conversionDate ? 1 : 0,
-          )
-        } catch (err: any) {
-          // Surface a structured warning instead of failing the whole import.
-          parsed.warnings.push(
-            `Couldn't import convertible "${cn.stakeholderName}" (${cn.externalId || 'no ID'}): ${err?.message || err}`,
-          )
-        }
-      }
-    }
-
-    // Rounds aren't written to the rounds table here — the setup wizard owns
-    // that, so the table only ever holds operator-confirmed rounds. Instead we
-    // stash the suggested formation + funding rounds (grouped from the ledgers,
-    // with CNs attributed to where they converted) for the wizard to read and
-    // confirm. setup_completed_at is left untouched: a brand-new company stays
-    // NULL (the gate routes it through /setup); re-importing an established
-    // workspace just refreshes the suggestions without re-gating it.
-    try {
-      const candidates = buildRoundCandidates(parsed)
-      db().prepare(`
-        INSERT INTO setup_candidates (company_id, candidates_json, created_at)
-        VALUES (?, ?, datetime('now'))
-        ON CONFLICT(company_id) DO UPDATE SET
-          candidates_json = excluded.candidates_json,
-          created_at = excluded.created_at
-      `).run(id, JSON.stringify(candidates))
-    } catch (err: any) {
-      parsed.warnings.push(`Couldn't compute setup candidates: ${err?.message || err}`)
-    }
-
-    // Option pool. Prefer the Summary "Plan" row, otherwise derive from outstanding+available.
+    // Option pool. Prefer the Summary "Plan" row; otherwise derive
+    // from outstanding grants + available.
     let poolSize = parsed.poolAuthorized
     if (!poolSize) {
       const grantTotal = parsed.grants.reduce((a, g) => a + g.quantity, 0)
       const derived = grantTotal + (parsed.poolAvailable || 0)
       if (derived > 0) poolSize = derived
     }
-    if (include.optionPools && poolSize > 0) {
-      const poolId = newId('pl')
+    if (poolSize > 0) {
       try {
         db().prepare(`
           INSERT INTO option_pools (id, company_id, name, authorized) VALUES (?, ?, ?, ?)
-        `).run(poolId, id, 'Stock Option Plan', poolSize)
+        `).run(newId('pl'), id, 'Stock Option Plan', poolSize)
       } catch (err: any) {
         parsed.warnings.push(`Couldn't write option pool: ${err?.message || err}`)
       }
-      // Pool attribution per round lives on the Summary card now — the
-      // user types option_pool_issued into whichever round(s) authorized
-      // the top-ups. The imported total here is just for reference (still
-      // visible on the Securities card below the Summary).
     }
 
     // Audit row
@@ -315,9 +142,6 @@ export default defineEventHandler(async (event) => {
           warnings: parsed.warnings,
           counts: {
             stakeholders: parsed.stakeholders.length,
-            holdings: parsed.holdings.length,
-            shareClasses: parsed.shareClasses.length,
-            convertibles: parsed.convertibles.length,
             grants: parsed.grants.length,
           },
         }),
@@ -325,11 +149,17 @@ export default defineEventHandler(async (event) => {
     } catch (err: any) {
       parsed.warnings.push(`Couldn't write import audit row: ${err?.message || err}`)
     }
+
+    // Mark setup as complete on first import. The setup wizard no longer
+    // owns round structure (the Financings page does), so once stakeholders
+    // + grants + pool land the workspace is "set up" and the gate stops
+    // bouncing the user back to /setup. Re-imports leave the timestamp alone.
+    db().prepare(`
+      UPDATE companies SET setup_completed_at = COALESCE(setup_completed_at, datetime('now'))
+      WHERE id = ?
+    `).run(id)
   })
 
-  // Run the whole insert transaction. If anything still escapes the per-row
-  // try/catches, surface the real error message to the client as a 400 so
-  // they can see what's wrong, and log to server stderr for `docker logs`.
   try {
     tx()
   } catch (err: any) {
@@ -343,16 +173,10 @@ export default defineEventHandler(async (event) => {
   return {
     ok: true,
     counts: {
-      // Reported as 0 for categories the operator opted out of so the
-      // import-result UI can show "Skipped" instead of inflating numbers
-      // from the parsed file.
-      stakeholders: include.stakeholders ? parsed.stakeholders.length : 0,
-      shareClasses: include.shareClasses ? parsed.shareClasses.length : 0,
-      holdings:     include.holdings     ? parsed.holdings.length     : 0,
-      grants:       include.grants       ? parsed.grants.length       : 0,
-      convertibles: include.convertibles ? parsed.convertibles.length : 0,
+      stakeholders: parsed.stakeholders.length,
+      grants:       parsed.grants.length,
     },
-    skipped: Object.entries(include).filter(([, v]) => !v).map(([k]) => k),
+    poolAuthorized: parsed.poolAuthorized || 0,
     warnings: parsed.warnings,
   }
 })

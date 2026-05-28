@@ -1,11 +1,13 @@
 import { parseCartaXlsx, detectCartaSheetRoles } from '~~/server/parsers/carta'
 import ExcelJS from 'exceljs'
 
-// Dry-run parse: same code path as the real import but no DB writes.
-// Returns counts + a handful of sample rows per category so the upload
-// UI can show "this is what we're about to import" before the operator
-// commits. Sheet roles are auto-detected — the override dropdowns are
-// gone from the redesigned UI in favour of just trusting detection.
+// Dry-run parse: same code path as the real import, no DB writes.
+// Returns counts + sample rows so the upload UI can show "this is
+// what we're about to land" before the operator commits. We only
+// preview the things the import actually writes — stakeholders,
+// option grants, and the pool size. Share classes / holdings /
+// convertibles / round suggestions are user-managed and never
+// imported, so they're omitted from the preview too.
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
   if (!id) throw createError({ statusCode: 400, message: 'id required' })
@@ -23,8 +25,6 @@ export default defineEventHandler(async (event) => {
 
   const buf = Buffer.from(file.data)
 
-  // Detect sheet roles once so we can return them alongside the parse
-  // result (the UI displays "we'll read X from the Detailed Cap Table sheet").
   let detected
   try {
     const wb = new ExcelJS.Workbook()
@@ -48,24 +48,20 @@ export default defineEventHandler(async (event) => {
     companyName: parsed.companyName || null,
     asOfDate: parsed.asOfDate || null,
     sheets: {
-      detailedCapTable: detected.detailedCapTableSheet || null,
-      optionPlan:       detected.optionPlanSheet       || null,
-      convertibleNotes: detected.convertibleNotesSheet || null,
-      summaryCapTable:  detected.summaryCapTableSheet  || null,
+      // Only the sheets we actually read for the import are surfaced.
+      // The convertibles + cap-table sheets are still parsed for
+      // diagnostics (warnings, audit row) but they don't drive any
+      // DB writes, so we don't advertise them in the preview.
+      optionPlan: detected.optionPlanSheet || null,
+      summaryCapTable: detected.summaryCapTableSheet || null,
     },
     counts: {
-      shareClasses: parsed.shareClasses.length,
       stakeholders: parsed.stakeholders.length,
-      holdings:     parsed.holdings.length,
       grants:       parsed.grants.length,
-      convertibles: parsed.convertibles.length,
     },
     samples: {
-      shareClasses: parsed.shareClasses.slice(0, SAMPLE_N),
       stakeholders: parsed.stakeholders.slice(0, SAMPLE_N),
-      holdings:     parsed.holdings.slice(0, SAMPLE_N),
       grants:       parsed.grants.slice(0, SAMPLE_N),
-      convertibles: parsed.convertibles.slice(0, SAMPLE_N),
     },
     poolAuthorized: parsed.poolAuthorized,
     warnings: parsed.warnings,
