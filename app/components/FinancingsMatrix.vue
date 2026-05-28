@@ -67,7 +67,7 @@ interface Props {
   //             close_date years
   groupBy?: 'flat' | 'tranche' | 'year'
 }
-const props = withDefaults(defineProps<Props>(), { showFormulas: true, density: 'regular', groupBy: 'flat' })
+const props = withDefaults(defineProps<Props>(), { showFormulas: false, density: 'regular', groupBy: 'flat' })
 
 const emit = defineEmits<{
   (e: 'refresh'): void
@@ -379,10 +379,10 @@ function isFirstInGroup(idx: number): boolean {
 }
 
 function groupAccent(idx: number): string {
-  if (!isFirstInGroup(idx)) return ''
-  return colDefs[idx].group === 'money'
-    ? 'shadow-[inset_2px_0_0_rgba(161,98,7,0.18)]'
-    : 'shadow-[inset_2px_0_0_rgba(29,78,216,0.18)]'
+  // Group separation comes from the existing `border-l border-ink-200`; no
+  // colored stripe needed (matches the Model view's neutral palette).
+  void idx
+  return ''
 }
 
 function otherRoundsFor(r: RoundColumn) {
@@ -472,18 +472,18 @@ const displayRows = computed<Row[]>(() => {
             <th rowspan="2" class="sticky left-0 bg-white z-20 border-r border-ink-200 px-4 py-2 text-left">
               <div class="text-[10.5px] uppercase tracking-[0.08em] text-ink-500 font-semibold">Round</div>
             </th>
-            <th colspan="6" class="text-left px-3 py-2 bg-edit-soft/40 border-l border-ink-200">
+            <th colspan="6" class="text-left px-3 py-2 bg-ink-50/60 border-l border-ink-200">
               <div class="flex items-center gap-2.5 flex-wrap">
-                <span class="text-[10.5px] uppercase tracking-[0.08em] font-semibold text-edit-edge">Money</span>
+                <span class="text-[10.5px] uppercase tracking-[0.08em] font-semibold text-ink-500">Money</span>
                 <template v-if="showFormulas">
                   <MatrixFormulaChip tone="money">pre + new = post</MatrixFormulaChip>
                   <MatrixFormulaChip tone="money">new ÷ price = preferred</MatrixFormulaChip>
                 </template>
               </div>
             </th>
-            <th colspan="5" class="text-left px-3 py-2 bg-brand-soft/40 border-l border-ink-200">
+            <th colspan="5" class="text-left px-3 py-2 bg-ink-50/60 border-l border-ink-200">
               <div class="flex items-center gap-2.5 flex-wrap">
-                <span class="text-[10.5px] uppercase tracking-[0.08em] font-semibold text-brand-edge">Shares</span>
+                <span class="text-[10.5px] uppercase tracking-[0.08em] font-semibold text-ink-500">Shares</span>
                 <MatrixFormulaChip v-if="showFormulas" tone="shares">prev FDS + Δ issuances = total FDS</MatrixFormulaChip>
               </div>
             </th>
@@ -531,7 +531,7 @@ const displayRows = computed<Row[]>(() => {
               <td
                 class="relative sticky left-0 z-10 border-r border-ink-200 align-top"
                 :class="[
-                  effectiveKind(row.round) === 'open' ? 'bg-brand-soft/30' : 'bg-white',
+                  effectiveKind(row.round) === 'open' ? 'bg-emerald-50/60' : 'bg-white',
                   cellPadCls,
                 ]"
               >
@@ -651,19 +651,10 @@ const displayRows = computed<Row[]>(() => {
       </table>
     </div>
 
-    <!-- Footer status bar -->
-    <div class="px-4 py-2 border-t border-ink-100 bg-ink-50/50 text-[11.5px] text-ink-500 flex items-center gap-3 flex-wrap">
+    <!-- Footer status bar — minimal: round count + transient save indicator. -->
+    <div class="px-4 py-2 border-t border-ink-100 text-[11px] text-ink-500 flex items-center gap-2">
       <span class="num">{{ rounds.length }} round{{ rounds.length === 1 ? '' : 's' }}</span>
-      <span class="text-ink-300">·</span>
-      <span class="inline-flex items-center gap-1.5">
-        <IconPen :size="10" class="text-edit" /> typed
-      </span>
-      <span class="inline-flex items-center gap-1.5">
-        <IconFx :size="10" class="text-ink-400" /> derived (hover for formula)
-      </span>
-      <span v-if="savingCount > 0" class="text-ink-500 italic">· Saving…</span>
-      <span class="flex-1" />
-      <span class="text-[11px]">Drag a row's bottom edge to resize · drag a column header's right edge to widen</span>
+      <span v-if="savingCount > 0" class="text-ink-400 italic">· Saving…</span>
     </div>
   </div>
 </template>

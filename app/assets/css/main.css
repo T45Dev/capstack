@@ -139,9 +139,10 @@ thead .sticky-col {
   color: #344054;
 }
 
-/* Open-round row tint — soft brand-blue wash, only visible across the row. */
+/* Open-round row tint — soft emerald wash, matching the Model view's
+   emerald-50 treatment for open columns. */
 .row-open {
-  background: linear-gradient(to right, rgba(29, 78, 216, 0.04), rgba(29, 78, 216, 0.02) 30%, transparent);
+  background: linear-gradient(to right, rgba(16, 185, 129, 0.05), rgba(16, 185, 129, 0.02) 30%, transparent);
 }
 .row-open .num {
   color: #1e293b;
