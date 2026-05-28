@@ -109,6 +109,27 @@ function effective<K extends keyof RoundDraft>(r: RoundColumn, field: K): RoundD
   return (r as any)[field]
 }
 
+// Tranche inheritance: when a tranche row (parent_round_code set) carries the
+// same typed value as its parent (e.g. A-2 / A-3 share Series A's pre-money),
+// flag it so the cell renders muted with a ↑ glyph instead of repeating the
+// number outright. The lookup uses draft-aware effective() on both sides so
+// in-flight edits propagate immediately.
+const roundByCode = computed<Map<string, RoundColumn>>(() => {
+  const m = new Map<string, RoundColumn>()
+  for (const r of props.rounds) m.set(r.code.toUpperCase(), r)
+  return m
+})
+function isInheritedFromParent(row: RoundColumn, key: keyof RoundDraft): boolean {
+  const parentCode = effective(row, 'parent_round_code') ?? row.parent_round_code
+  if (!parentCode) return false
+  const parent = roundByCode.value.get(String(parentCode).toUpperCase())
+  if (!parent || parent.round_id === row.round_id) return false
+  const mine = effective(row, key)
+  const theirs = effective(parent, key)
+  if (mine == null || theirs == null) return false
+  return mine === theirs
+}
+
 function effectiveKind(r: RoundColumn): 'formation' | 'closed' | 'open' {
   const d = drafts.value[r.round_id]
   if (d && 'kind' in d && d.kind) return d.kind
@@ -576,6 +597,7 @@ const displayRows = computed<Row[]>(() => {
                   :kind="c.cellKind"
                   align="right"
                   :title="tooltip(c.key, row.round)"
+                  :inherited="isInheritedFromParent(row.round, c.key as any)"
                   @update="(v) => setDraft(row.round.round_id, c.key as any, v ?? (c.cellKind === 'shares' ? 0 : null))"
                   @commit="commitRound(row.round.round_id)"
                 />

@@ -12,6 +12,14 @@
 // The .cell-edit container ALREADY supplies hover/focus border + focus ring,
 // so the inner control is bare (no extra border, no extra padding). That's
 // why the design's "amber chrome" shouting goes away — there's only the dot.
+//
+// inherited=true → the value equals the parent round's value (this row is a
+// tranche of another round). Render a small ↑ glyph + italic muted text so
+// repeated values across A-2/A-3/etc. read as "same as the anchor" instead
+// of looking like independent inputs. Still editable — typing diverges from
+// the parent and drops the inheritance.
+import { ArrowUp } from 'lucide-vue-next'
+
 interface Props {
   value: number | null
   editable: boolean
@@ -20,8 +28,9 @@ interface Props {
   align?: 'left' | 'right'
   placeholder?: string
   title?: string
+  inherited?: boolean
 }
-const props = withDefaults(defineProps<Props>(), { align: 'right', placeholder: '—', title: '' })
+const props = withDefaults(defineProps<Props>(), { align: 'right', placeholder: '—', title: '', inherited: false })
 
 const emit = defineEmits<{
   (e: 'update', v: number | null): void
@@ -46,23 +55,34 @@ function formatted(): string {
 // 5-dp Carta precision.
 const prefix = computed(() => props.kind === 'usd' || props.kind === 'price' ? '$' : undefined)
 const digits = computed(() => props.kind === 'price' ? 5 : 0)
+
+const inheritedTitle = computed(() => props.inherited
+  ? 'Inherited from the parent round — edit the parent to change, or type here to override.'
+  : props.title)
 </script>
 
 <template>
-  <div v-if="!editable" class="cell-read num text-[13px] text-ink-900" :class="align === 'right' ? 'text-right' : ''" :title="title">
+  <div v-if="!editable" class="cell-read num text-[13px]" :class="[align === 'right' ? 'text-right' : '', inherited ? 'flex items-center gap-1' : '']" :title="inheritedTitle">
     <template v-if="value == null">
       <span class="text-ink-400">{{ placeholder }}</span>
     </template>
-    <template v-else>{{ formatted() }}</template>
+    <template v-else>
+      <span v-if="inherited" :class="align === 'right' ? 'ml-auto inline-flex items-center gap-1' : 'inline-flex items-center gap-1'">
+        <ArrowUp :size="11" class="shrink-0 text-ink-400" />
+        <span class="italic text-ink-500">{{ formatted() }}</span>
+      </span>
+      <template v-else>{{ formatted() }}</template>
+    </template>
   </div>
-  <label v-else class="cell-edit block" :title="title">
+  <label v-else class="cell-edit block relative" :class="inherited ? 'cell-inherited' : ''" :title="inheritedTitle">
+    <ArrowUp v-if="inherited && value != null" :size="10" class="absolute left-1 top-1.5 text-ink-400 pointer-events-none" />
     <NumberInput
       variant="bare"
       :model-value="value"
       :prefix="prefix"
       :digits="digits"
       :placeholder="placeholder"
-      :input-class="`num text-[13px] bg-transparent ${align === 'right' ? 'text-right' : 'text-left'}`"
+      :input-class="`num text-[13px] bg-transparent ${inherited ? 'italic text-ink-500' : ''} ${align === 'right' ? 'text-right' : 'text-left'}`"
       @update:model-value="(v) => emit('update', v)"
       @blur="emit('commit')"
     />
