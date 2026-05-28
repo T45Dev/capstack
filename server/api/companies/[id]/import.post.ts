@@ -150,10 +150,9 @@ export default defineEventHandler(async (event) => {
       parsed.warnings.push(`Couldn't write import audit row: ${err?.message || err}`)
     }
 
-    // Mark setup as complete on first import. The setup wizard no longer
-    // owns round structure (the Financings page does), so once stakeholders
-    // + grants + pool land the workspace is "set up" and the gate stops
-    // bouncing the user back to /setup. Re-imports leave the timestamp alone.
+    // Stamp setup_completed_at on first import so the upload page can
+    // switch from "Welcome" to "Re-import" copy. Re-imports leave the
+    // timestamp alone.
     db().prepare(`
       UPDATE companies SET setup_completed_at = COALESCE(setup_completed_at, datetime('now'))
       WHERE id = ?
