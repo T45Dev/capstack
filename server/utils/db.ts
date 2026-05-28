@@ -236,6 +236,53 @@ function migrate(d: Database.Database): void {
       candidates_json TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- "Previous Round" aggregate. One row per company; holds typed
+    -- summary numbers covering everything before the open round.
+    -- Replaces the per-round Formation+closed rows on the simplified
+    -- Financings page. The open round still lives in rounds.
+    CREATE TABLE IF NOT EXISTS aggregate_round (
+      company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+      pre_money REAL,
+      new_money REAL,
+      share_price REAL,
+      cumulated_financing REAL,
+      total_shares_fds REAL,
+      option_pool_total REAL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Archive of per-round rows from before the Financings page
+    -- collapsed to Previous-aggregate + Open Round. Same shape as
+    -- rounds; populated by a one-time migration below so the typed
+    -- data isn't lost.
+    CREATE TABLE IF NOT EXISTS rounds_archive (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL,
+      code TEXT NOT NULL,
+      name TEXT,
+      kind TEXT NOT NULL,
+      close_date TEXT,
+      share_class_code TEXT,
+      share_price REAL,
+      new_money REAL NOT NULL DEFAULT 0,
+      debt_canceled REAL NOT NULL DEFAULT 0,
+      seniority INTEGER NOT NULL DEFAULT 0,
+      notes TEXT,
+      option_pool_issued REAL,
+      parent_round_code TEXT,
+      pre_money REAL,
+      preferred_issued REAL,
+      common REAL,
+      preferred_issued_override REAL,
+      notes_converted_override REAL,
+      total_shares_fds_override REAL,
+      liq_pref_multiple REAL,
+      participation TEXT,
+      participation_cap REAL,
+      pref_tier INTEGER,
+      archived_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `)
 
   // ----- Idempotent column additions for upgrades on existing DBs -----
@@ -394,6 +441,36 @@ function migrate(d: Database.Database): void {
     WHERE setup_completed_at IS NULL
       AND id IN (SELECT DISTINCT company_id FROM rounds)
   `)
+
+  // One-time: when the Financings page collapsed to Previous-aggregate +
+  // Open Round, all per-round rows from the old design got moved to
+  // rounds_archive. Only fires when there's anything in rounds AND
+  // archive is empty (the signal that this code's running for the first
+  // time against a pre-redesign DB). Idempotent — once archived, never
+  // re-runs.
+  const liveRoundsCount = (d.prepare('SELECT COUNT(*) AS n FROM rounds').get() as { n: number }).n
+  const archivedRoundsCount = (d.prepare('SELECT COUNT(*) AS n FROM rounds_archive').get() as { n: number }).n
+  if (liveRoundsCount > 0 && archivedRoundsCount === 0) {
+    d.exec(`
+      INSERT INTO rounds_archive (
+        id, company_id, code, name, kind, close_date, share_class_code,
+        share_price, new_money, debt_canceled, seniority, notes,
+        option_pool_issued, parent_round_code, pre_money,
+        preferred_issued, common, preferred_issued_override,
+        notes_converted_override, total_shares_fds_override,
+        liq_pref_multiple, participation, participation_cap, pref_tier
+      )
+      SELECT
+        id, company_id, code, name, kind, close_date, share_class_code,
+        share_price, new_money, debt_canceled, seniority, notes,
+        option_pool_issued, parent_round_code, pre_money,
+        preferred_issued, common, preferred_issued_override,
+        notes_converted_override, total_shares_fds_override,
+        liq_pref_multiple, participation, participation_cap, pref_tier
+      FROM rounds
+    `)
+    d.exec('DELETE FROM rounds')
+  }
 }
 
 export function reset(): void {
