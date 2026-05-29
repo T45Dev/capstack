@@ -231,10 +231,7 @@ function sumDeltaClass(delta: number, newMoney: number): string {
                 <span class="text-[11.5px] font-medium" :class="r.kind === 'open' ? 'text-brand-edge' : 'text-ink-700'">{{ r.name || r.code }}</span>
                 <span v-if="r.kind === 'open'" class="text-[9px] uppercase tracking-wider text-brand-edge font-semibold">Open</span>
               </div>
-              <div class="text-[10px] text-ink-400 num text-right mt-0.5">
-                {{ r.close_date || '—' }}
-                <span v-if="r.share_price" class="ml-1">· ${{ r.share_price.toFixed(4) }}/sh</span>
-              </div>
+              <div class="text-[10px] text-ink-400 num text-right mt-0.5">{{ r.close_date || '—' }}</div>
             </th>
             <th class="px-3 py-2 border-b border-ink-200 text-right bg-amber-50/40">
               <div class="flex items-center justify-end gap-1.5">
@@ -243,8 +240,7 @@ function sumDeltaClass(delta: number, newMoney: number): string {
               <div class="text-[10px] text-ink-400 mt-0.5">principal + accrued</div>
             </th>
             <th class="px-3 py-2 border-b border-ink-200 text-right">
-              <span class="text-[10.5px] uppercase tracking-[0.08em] text-ink-500 font-semibold">Total</span>
-              <div class="text-[10px] text-ink-400 mt-0.5">shares + $</div>
+              <span class="text-[10.5px] uppercase tracking-[0.08em] text-ink-500 font-semibold">Total shares</span>
             </th>
             <th class="px-3 py-2 border-b border-ink-200"></th>
           </tr>
@@ -279,15 +275,12 @@ function sumDeltaClass(delta: number, newMoney: number): string {
                   @keydown.enter="(e: KeyboardEvent) => (e.target as HTMLInputElement).blur()"
                 />
               </label>
-              <!-- Secondary: $ amount when we have a price, or a hint
-                   when the operator hasn't set one yet (so they know to
-                   pop into the round's card and fill share_price). -->
+              <!-- Hint when the round has no share_price yet (cell fell
+                   back to $ editing because we can't derive shares
+                   without a price). Operator pops into the round's
+                   card to set it. -->
               <div
-                v-if="ppsForRound(r.id) > 0 && (cellAmount(r.id, inv.id) || 0) > 0"
-                class="text-[10px] text-ink-400 num text-right mt-0.5"
-              >{{ fmtUSD(cellAmount(r.id, inv.id) || 0) }}</div>
-              <div
-                v-else-if="ppsForRound(r.id) <= 0 && (cellAmount(r.id, inv.id) || 0) > 0"
+                v-if="ppsForRound(r.id) <= 0 && (cellAmount(r.id, inv.id) || 0) > 0"
                 class="text-[10px] text-amber-600 text-right mt-0.5 italic"
               >set $/share to show shares</div>
             </td>
@@ -308,11 +301,9 @@ function sumDeltaClass(delta: number, newMoney: number): string {
             <td class="px-3 py-1.5 text-right text-[13px]">
               <template v-if="totalSharesForInvestor(inv) > 0">
                 <div class="num font-semibold text-ink-900">{{ fmtShares(totalSharesForInvestor(inv)) }}</div>
-                <div v-if="totalDollarsForInvestor(inv) > 0" class="text-[10px] text-ink-400 num mt-0.5">{{ fmtUSD(totalDollarsForInvestor(inv)) }}</div>
               </template>
-              <template v-else-if="totalDollarsForInvestor(inv) > 0">
-                <div class="num font-medium text-amber-800">{{ fmtUSD(totalDollarsForInvestor(inv)) }}</div>
-                <div class="text-[10px] text-amber-600 mt-0.5">CN only</div>
+              <template v-else-if="cnFor(inv.id)?.total">
+                <span class="text-[11px] text-amber-700 italic">CN only</span>
               </template>
               <span v-else class="text-ink-300">—</span>
             </td>
@@ -370,32 +361,31 @@ function sumDeltaClass(delta: number, newMoney: number): string {
           </tr>
         </tbody>
         <tfoot class="num">
-          <!-- Allocated: shares primary (per the shares-first switch);
-               $ kept as a smaller subtext so the operator can sanity
-               check against new_money below. -->
+          <!-- Allocated: shares per round. Reconciliation against
+               preferred_issued (Δ row below). -->
           <tr class="bg-ink-50/60 border-t border-ink-200">
             <td class="px-3 py-2 text-right pr-6 sticky left-0 z-10 bg-ink-50/95 text-[10.5px] uppercase tracking-[0.06em] text-ink-500 font-semibold">Allocated</td>
             <td
               v-for="r in data.rounds"
               :key="r.id"
-              class="px-3 py-2 text-right text-[13px]"
+              class="px-3 py-2 text-right font-semibold text-[13px]"
               :class="[r.kind === 'open' ? 'bg-brand-soft/30' : '', sumDeltaClass(data.sums[r.id]?.delta_shares ?? 0, r.preferred_issued)]"
             >
-              <div class="font-semibold">{{ fmtShares(data.sums[r.id]?.allocated_shares ?? 0) }}</div>
-              <div class="text-[10px] text-ink-400 mt-0.5">{{ fmtUSD(data.sums[r.id]?.allocated ?? 0) }}</div>
+              {{ fmtShares(data.sums[r.id]?.allocated_shares ?? 0) }}
             </td>
+            <!-- CN column stays in $ — convertible notes are paper
+                 money that hasn't converted to shares yet. -->
             <td class="px-3 py-2 text-right font-semibold text-amber-800 text-[13px] bg-amber-50/40">
               {{ data.cn_total ? fmtUSD(data.cn_total) : '—' }}
             </td>
             <td class="px-3 py-2" colspan="2"></td>
           </tr>
           <!-- Target row: round.preferred_issued (the share count the
-               round expects). $ subtext = round.new_money for parity. -->
+               round expects). -->
           <tr class="text-[11.5px] text-ink-500 border-t border-ink-100">
             <td class="px-3 py-1.5 text-right pr-6 sticky left-0 z-10 bg-white">Round expects</td>
             <td v-for="r in data.rounds" :key="r.id" class="px-3 py-1.5 text-right" :class="r.kind === 'open' ? 'bg-brand-soft/20' : ''">
-              <div>{{ fmtShares(r.preferred_issued || 0) }}</div>
-              <div class="text-[10px] text-ink-400 mt-0.5">{{ fmtUSD(r.new_money) }}</div>
+              {{ fmtShares(r.preferred_issued || 0) }}
             </td>
             <td class="px-3 py-1.5 bg-amber-50/20"></td>
             <td colspan="2"></td>
@@ -423,7 +413,7 @@ function sumDeltaClass(delta: number, newMoney: number): string {
       </table>
     </div>
     <p v-if="data?.rounds.length" class="px-4 py-2 text-[11.5px] text-ink-500 bg-ink-50/50 border-t border-ink-100">
-      Cells show shares (primary) and the implied $ contribution (smaller below, = shares × round share price). Per-round Δ goes green when allocated shares sum to the round's Preferred-issued line on the Rounds tab.
+      Cells show shares per investor per round. Δ goes green when allocated shares sum to the round's Preferred-issued line. CN column stays in $ — convertibles are paper money that hasn't priced into shares yet.
     </p>
   </div>
 </template>
