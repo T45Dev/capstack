@@ -14,8 +14,7 @@ interface Grant { id: string; stakeholder_id: string | null; recipient_name: str
 const { data } = await useFetch<{ share_classes: ShareClassRow[]; stakeholders: Stakeholder[]; holdings: Holding[]; grants: Grant[]; pools: any[]; current_pps: number }>(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => ({ share_classes: [], stakeholders: [], holdings: [], grants: [], pools: [], current_pps: 0 } as any) })
 
 // Round summary still drives the open-round card and the Investors tab.
-// CN reconciliation banner is dropped from this page — the CnLedger code
-// stays compiled, just unmounted.
+// The CN reconciliation banner was dropped from this page.
 interface RoundColumn {
   round_id: string
   code: string

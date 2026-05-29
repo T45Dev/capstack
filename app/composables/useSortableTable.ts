@@ -31,7 +31,7 @@ export interface SortableTableOpts {
 export function useSortableTable(opts: SortableTableOpts) {
   const cols = reactive<SortableCol[]>(opts.columns.map(c => ({ ...c })))
   const sort = reactive({
-    key: opts.defaultSort?.key || cols[0].key,
+    key: opts.defaultSort?.key || cols[0]?.key || '',
     dir: opts.defaultSort?.dir || 'asc',
   }) as { key: string; dir: 'asc' | 'desc' }
 

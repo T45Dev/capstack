@@ -621,8 +621,11 @@ const chartW = 720, chartH = 160, padL = 50, padR = 12, padT = 10, padB = 26
 const chart = computed(() => {
   const pts = chartPoints.value
   if (!pts.length) return { path: '', dots: [] as Array<{ x: number; y: number; t: string; balance: number; label?: string }>, yMin: 0, yMax: 0, xTicks: [] as Array<{ x: number; label: string }>, yTicks: [] as Array<{ y: number; label: string }> }
-  const minT = new Date(pts[0].t).getTime()
-  const maxT = new Date(pts[pts.length - 1].t).getTime()
+  // Guarded above: pts is non-empty, so first/last are defined.
+  const first = pts[0]!
+  const last = pts[pts.length - 1]!
+  const minT = new Date(first.t).getTime()
+  const maxT = new Date(last.t).getTime()
   const spanT = Math.max(1, maxT - minT)
   const yVals = pts.map(p => p.balance)
   const yMin = Math.min(0, ...yVals)
@@ -641,7 +644,7 @@ const chart = computed(() => {
   const yTicks = [yMin, (yMin + yMax) / 2, yMax].map(v => ({ y: yOf(v), label: fmtShares(v) }))
   // X ticks: first and last
   const xTicks = pts.length > 1
-    ? [{ x: xOf(pts[0].t), label: fmtDate(pts[0].t) }, { x: xOf(pts[pts.length - 1].t), label: fmtDate(pts[pts.length - 1].t) }]
+    ? [{ x: xOf(first.t), label: fmtDate(first.t) }, { x: xOf(last.t), label: fmtDate(last.t) }]
     : []
 
   const dots = pts.filter(p => p.label).map(p => ({ x: xOf(p.t), y: yOf(p.balance), t: p.t, balance: p.balance, label: p.label }))

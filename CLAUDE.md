@@ -68,7 +68,7 @@ Current nav (top → bottom):
 - **Option Pool Impact**
 - **Exit Scenarios**
 
-Removed: standalone Convertible Notes page (now under Financings), Securities rollup card, Holdings pivot card. The CN ledger lives in `app/components/CnLedger.vue` so the Financings page can embed it.
+Removed: standalone Convertible Notes page (now under Financings), Securities rollup card, Holdings pivot card. The embeddable CN-ledger component (`CnLedger.vue`) and the legacy `FinancingsMatrix.vue` / `FinancingsModel.vue` were deleted once they went unmounted — the current model uses the side-by-side Previous/Open round cards plus the InvestorMatrix instead.
 
 ## UI patterns worth knowing
 
@@ -86,6 +86,8 @@ Removed: standalone Convertible Notes page (now under Financings), Securities ro
 5. **Notes converted rolls into FDS.** It was treated as "informational only" before; that was a bug from the legacy model.
 6. **Effective conv price uses SharePrice as basis**, not just the round PPS. So editing a CN's Share price flows into Effective and Shares.
 7. **Interest accrues through conversion_date**, no today-fallback.
+8. **"Invested $" cost basis = priced rounds only.** Formation (founder common-stock) contributions are excluded from the Dilution Invested-$ sum, and the Preferred Investor matrix drops the formation column plus any founder who only contributed there. Cost basis reflects preferred/priced money in.
+9. **Notes Converted is operator-overridable on the Open Round card.** The `notes_converted_override` column (already in the schema) is surfaced as a typed field: a value replaces the CN-attribution-derived count and rolls into Total FDS; blank reverts to auto-derive. Editing a CN's destination still clears the override so the engine re-derives.
 
 ## Endpoints
 

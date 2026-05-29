@@ -27,6 +27,8 @@ interface OpenRound {
   new_money: number | null
   pre_money: number | null
   option_pool_issued: number | null
+  notes_converted: number | null           // effective: override if set, else Σ CN-attributed shares
+  notes_converted_override: number | null  // null = derive from CN attributions
 }
 
 interface Aggregate {
@@ -54,6 +56,8 @@ const round = computed<OpenRound | null>(() => {
     new_money: r.new_money,
     pre_money: r.pre_money,
     option_pool_issued: r.option_pool_issued,
+    notes_converted: r.notes_converted,
+    notes_converted_override: r.notes_converted_override,
   } : null
 })
 
@@ -68,6 +72,10 @@ const preMoney          = ref<number | null>(null)
 const newMoney          = ref<number | null>(null)
 const sharePrice        = ref<number | null>(null)
 const optionPoolIssued  = ref<number | null>(null)
+// Notes converted = CN-converted shares that roll into total FDS. Null
+// means "derive from CN attributions"; a typed value pins
+// notes_converted_override and wins over the engine's per-note math.
+const notesConverted    = ref<number | null>(null)
 
 function syncFromServer(r: OpenRound | null) {
   if (!r) return
@@ -77,6 +85,7 @@ function syncFromServer(r: OpenRound | null) {
   newMoney.value         = r.new_money
   sharePrice.value       = r.share_price
   optionPoolIssued.value = r.option_pool_issued
+  notesConverted.value   = r.notes_converted_override
 }
 
 function eqN(a: number | null | undefined, b: number | null | undefined) {
@@ -98,6 +107,7 @@ const dirty = computed(() => {
       || !eqN(newMoney.value,        r.new_money)
       || !eqN(sharePrice.value,      r.share_price)
       || !eqN(optionPoolIssued.value, r.option_pool_issued)
+      || !eqN(notesConverted.value,  r.notes_converted_override)
 })
 
 // First server payload always syncs (local refs start uninitialized, so
@@ -134,6 +144,7 @@ async function save() {
         new_money: newMoney.value,
         share_price: sharePrice.value,
         option_pool_issued: optionPoolIssued.value,
+        notes_converted_override: notesConverted.value,
       },
     })
     await refreshRound()
@@ -227,12 +238,19 @@ const newShares = computed(() => {
   if (!newMoney.value || !sharePrice.value) return null
   return Math.floor(newMoney.value / sharePrice.value)
 })
+// Effective notes-converted for the live preview: the operator's typed
+// override wins; otherwise fall back to the server's CN-derived count.
+const effNotesConverted = computed(() => {
+  if (notesConverted.value != null) return notesConverted.value
+  return round.value?.notes_converted ?? 0
+})
 const totalSharesFdsPost = computed(() => {
   const base = agg.value?.total_shares_fds ?? 0
   const issued = newShares.value ?? 0
   const pool = optionPoolIssued.value ?? 0
-  if (!base && !issued && !pool) return null
-  return base + issued + pool
+  const notes = effNotesConverted.value ?? 0
+  if (!base && !issued && !pool && !notes) return null
+  return base + issued + pool + notes
 })
 const ownership = computed(() => {
   if (!newShares.value || !totalSharesFdsPost.value) return null
@@ -334,6 +352,23 @@ const ownership = computed(() => {
         <div>
           <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Option pool top-up</label>
           <NumberInput v-model="optionPoolIssued" placeholder="0" class="w-full" />
+        </div>
+        <div>
+          <label class="block text-[11.5px] font-medium text-ink-700 mb-1">
+            Notes converted <span class="text-ink-400 font-normal">(CN shares → FDS)</span>
+          </label>
+          <NumberInput
+            v-model="notesConverted"
+            :placeholder="(round?.notes_converted ?? 0) > 0 ? fmtShares(round?.notes_converted ?? 0) : '0'"
+            class="w-full"
+          />
+          <p class="mt-1 text-[10px] text-ink-400 leading-tight">
+            <template v-if="notesConverted != null">
+              Manual override ·
+              <button type="button" class="text-brand-edge hover:underline" @click="notesConverted = null">revert to auto</button>
+            </template>
+            <template v-else>Auto-derived from note attributions</template>
+          </p>
         </div>
       </div>
 

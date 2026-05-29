@@ -111,7 +111,11 @@ export default defineEventHandler(async (event) => {
       s.id, s.name, s.type, s.linked_to,
       COALESCE(SUM(h.shares), 0) AS held_shares,
       COALESCE((SELECT SUM(g.quantity) FROM grants g WHERE g.stakeholder_id = s.id AND g.status = 'outstanding'), 0) AS option_shares,
-      COALESCE((SELECT SUM(ri.amount)   FROM round_investors ri WHERE ri.stakeholder_id = s.id), 0) AS invested_dollars
+      -- Cost basis = priced-round cash only; formation (founder common)
+      -- contributions are excluded per the operator's rule.
+      COALESCE((SELECT SUM(ri.amount) FROM round_investors ri
+                  JOIN rounds rd ON rd.id = ri.round_id
+                 WHERE ri.stakeholder_id = s.id AND rd.kind != 'formation'), 0) AS invested_dollars
     FROM stakeholders s
     LEFT JOIN holdings h ON h.stakeholder_id = s.id
     WHERE s.company_id = ?

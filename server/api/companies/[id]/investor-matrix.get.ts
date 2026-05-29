@@ -13,9 +13,13 @@ export default defineEventHandler((event) => {
   const id = getRouterParam(event, 'id')
   if (!id) throw createError({ statusCode: 400, message: 'id required' })
 
+  // Preferred-investor matrix: priced rounds only. Formation (founder
+  // common stock) is excluded per the operator's rule — its column drops
+  // out and founders who only contributed at formation don't appear as
+  // "investors".
   const rounds = db().prepare(`
     SELECT id, code, name, kind, close_date, share_price, new_money, preferred_issued, seniority
-    FROM rounds WHERE company_id = ?
+    FROM rounds WHERE company_id = ? AND kind != 'formation'
     ORDER BY kind = 'open' ASC, COALESCE(close_date, '9999-99-99') ASC, seniority ASC
   `).all(id) as Array<{
     id: string; code: string; name: string | null; kind: 'formation' | 'closed' | 'open';
@@ -24,8 +28,9 @@ export default defineEventHandler((event) => {
   }>
 
   const allocations = db().prepare(`
-    SELECT id, round_id, stakeholder_id, amount, notes
-    FROM round_investors WHERE company_id = ?
+    SELECT ri.id, ri.round_id, ri.stakeholder_id, ri.amount, ri.notes
+    FROM round_investors ri JOIN rounds rd ON rd.id = ri.round_id
+    WHERE ri.company_id = ? AND rd.kind != 'formation'
   `).all(id) as Array<{ id: string; round_id: string; stakeholder_id: string; amount: number; notes: string | null }>
 
   // Preferred-investor filter: per the operator's rule, a "preferred
@@ -92,8 +97,8 @@ export default defineEventHandler((event) => {
   for (const r of rounds) matrix[r.id] = {}
   for (const a of allocations) {
     const pps = ppsByRound.get(a.round_id) || 0
-    if (!matrix[a.round_id]) matrix[a.round_id] = {}
-    matrix[a.round_id][a.stakeholder_id] = {
+    const bucket = (matrix[a.round_id] ??= {})
+    bucket[a.stakeholder_id] = {
       id: a.id,
       amount: a.amount || 0,
       shares: pps > 0 ? Math.floor((a.amount || 0) / pps) : 0,
