@@ -88,6 +88,7 @@ Removed: standalone Convertible Notes page (now under Financings), Securities ro
 7. **Interest accrues through conversion_date**, no today-fallback.
 8. **"Invested $" cost basis = priced rounds only.** Formation (founder common-stock) contributions are excluded from the Dilution Invested-$ sum, and the Preferred Investor matrix drops the formation column plus any founder who only contributed there. Cost basis reflects preferred/priced money in.
 9. **Notes Converted is operator-overridable on the Open Round card.** The `notes_converted_override` column (already in the schema) is surfaced as a typed field: a value replaces the CN-attribution-derived count and rolls into Total FDS; blank reverts to auto-derive. Editing a CN's destination still clears the override so the engine re-derives.
+10. **Overall Dilution uses TWO denominators so dilution is visible.** `preFDS` = FDS through the round *before* the current one (aggregate base + prior round's cumulative `total_shares_fds`); `postFDS` = aggregate base + the current round's cumulative `total_shares_fds`. pre% = shares/preFDS, post% = shares/postFDS. A holder whose share count doesn't change is still diluted because the denominator grows — **same numerator, bigger denominator** → pre% > post%. (We briefly tried a single post-FDS basis for both columns; that zeroed Δ for non-participants and hid their dilution — rejected.) Proposed/idea grants augment only the POST numerator, never the denominator (they draw from pool capacity already inside postFDS).
 
 ## Endpoints
 

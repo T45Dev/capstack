@@ -4,17 +4,23 @@
 // are sortable and resizable; widths + sort direction persist in
 // localStorage via useSortableTable.
 //
-// Toggle: "Include proposed + ideas in post" rolls in not-yet-issued
-// grants (status='proposed' from the Grants page) and pool Ideas
-// (anonymous future grants from the Pool Impact page) on the POST
-// side only. Pre stays as-is. Both the per-stakeholder postShares
-// and the postFDS denominator are augmented when toggled.
+// Denominators (TWO, so dilution is visible):
+//   - pre%  = stakeholder shares ÷ FDS through the round BEFORE the
+//             current one (aggregate base + prior round's cumulative
+//             total_shares_fds)
+//   - post% = stakeholder shares ÷ FDS through the current round
+//             (aggregate base + current round's cumulative total_shares_fds)
+// A holder whose share count doesn't change is STILL diluted: the
+// numerator is the same but the denominator grows, so pre% > post%.
+// That's the point — dilution comes from the denominator, not from
+// the holder needing to lose/gain shares.
 //
-// Denominators (per user spec):
-//   - post% = stakeholder shares ÷ open round's total_shares_fds
-//             (+ proposed + ideas if toggled)
-//   - pre%  = stakeholder shares ÷ (round IMMEDIATELY BEFORE open)'s
-//             total_shares_fds
+// Toggle: "Include proposed + ideas in post" rolls not-yet-issued
+// grants (status='proposed' from the Grants page) and pool Ideas
+// (anonymous future grants from the Pool Impact page) into the POST
+// NUMERATOR only — per-stakeholder postShares, plus a synthetic
+// "Future ideas" row. Pre and the denominator are untouched (proposed/
+// ideas draw from pool capacity already inside postFDS).
 import { ArrowUp, ArrowDown, Upload } from 'lucide-vue-next'
 import { fmtUSD, fmtPct, fmtShares } from '~/utils/format'
 
@@ -117,16 +123,17 @@ const ideaCount = computed(() =>
   (ideas.value || []).filter((ie: any) => ie.type === 'grant' || ie.type === 'reserve').length,
 )
 
-// Augment postFDS denominator with future shares when the toggle is on.
+// Total proposed shares — for the header chip and per-stakeholder
+// numerator augmentation when the toggle is on. These do NOT grow the
+// denominator (they draw from pool capacity already in total_shares_fds).
 const proposedTotal = computed(() => {
   let total = 0
   for (const p of proposedByStakeholder.value.values()) total += p.shares
   return total
 })
-// PRE FDS = the Previous-Round aggregate's fully-diluted total (the
-// state before the current round). If earlier closed rounds are still
-// sitting in the rounds table, add their cumulative FDS on top of the
-// aggregate base.
+// Two denominators so dilution shows. PRE FDS = fully-diluted total
+// through the round BEFORE the current one: aggregate base (Previous-
+// Round card's Total FDS) + the prior round's cumulative total_shares_fds.
 const preFDS = computed(() => {
   const base = aggregate.value?.total_shares_fds || 0
   const rs = timelineRounds.value
@@ -134,11 +141,10 @@ const preFDS = computed(() => {
   const prev = idx > 0 ? rs[idx - 1] : null
   return base + (prev?.total_shares_fds || 0)
 })
-// POST FDS = pre + the current round's new fully-diluted shares.
-// round-summary's total_shares_fds is cumulative across the rounds
-// table, so aggregate base + the current round's cumulative gives the
-// post-close total. Static denominator — proposed/idea grants attribute
-// already-counted pool capacity rather than growing it.
+// POST FDS = aggregate base + the current round's cumulative
+// total_shares_fds. Bigger than preFDS by this round's new shares, so a
+// holder with the same numerator dilutes pre→post. Proposed/idea grants
+// do NOT grow it (they draw from pool capacity already counted here).
 const postFDS = computed(() => {
   const base = aggregate.value?.total_shares_fds || 0
   return base + (currentRound.value?.total_shares_fds || 0)
@@ -355,7 +361,8 @@ async function onImported() {
           <h1 class="text-xl font-semibold tracking-tight text-ink-900">Overall Dilution</h1>
           <p class="text-sm text-ink-600 mt-1">
             Comparing <span class="font-medium text-ink-800">pre-{{ currentRoundName }}</span> vs.
-            <span class="font-medium text-brand-700">post-{{ currentRoundName }}</span>.
+            <span class="font-medium text-brand-700">post-{{ currentRoundName }}</span> —
+            same shares against a bigger post denominator, so holders dilute even with no new shares.
             Δ = post − pre; red = dilution, green = growth.
           </p>
         </div>
