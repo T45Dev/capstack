@@ -56,7 +56,8 @@ export default defineEventHandler(async (event) => {
         SELECT id FROM share_classes WHERE company_id = ? AND code != 'PREV-PREF'
       )`).run(id, id)
       db().prepare("DELETE FROM share_classes WHERE company_id = ? AND code != 'PREV-PREF'").run(id)
-      // Convertibles, assumptions, pool_events: never touched.
+      db().prepare("DELETE FROM convertibles WHERE company_id = ?").run(id)
+      // Assumptions, pool_events: never touched.
     }
 
     // Stakeholders — merged in (we add new names, leave existing ones
@@ -114,6 +115,31 @@ export default defineEventHandler(async (event) => {
           insH.run(id, shId, scId, Math.floor(h.shares))
         } catch (err: any) {
           parsed.warnings.push(`Couldn't write holding ${h.stakeholderName}/${h.shareClassCode}: ${err?.message || err}`)
+        }
+      }
+    }
+
+    // Share-class synthesis from ledger sheets. parsed.shareClasses
+    // is populated by the Detailed Cap Table path; when DCT doesn't
+    // parse, each round (a ledger sheet) still gives us enough info
+    // — code, name, kind — to ensure a share_class exists. Without
+    // this, holdings synthesis and the Shareholders page both see
+    // 0 preferred / 0 common across the board.
+    if (parsed.rounds.length) {
+      const insSCfromRound = db().prepare(`
+        INSERT INTO share_classes (id, company_id, code, name, kind, seniority, issue_price)
+        VALUES (?, ?, ?, ?, ?, 0, ?)
+      `)
+      for (const round of parsed.rounds) {
+        if (shareClassIdByCode.has(round.code)) continue
+        const scId = newId('sc')
+        const kind = round.kind === 'formation' ? 'common' : 'preferred'
+        const name = round.name || round.code
+        try {
+          insSCfromRound.run(scId, id, round.code, name, kind, round.sharePrice ?? null)
+          shareClassIdByCode.set(round.code, scId)
+        } catch (err: any) {
+          parsed.warnings.push(`Couldn't synthesize share class for round "${round.code}": ${err?.message || err}`)
         }
       }
     }
@@ -191,6 +217,102 @@ export default defineEventHandler(async (event) => {
           } catch (err: any) {
             parsed.warnings.push(`Couldn't write round investor ${inv.stakeholderName}/${round.code}: ${err?.message || err}`)
           }
+        }
+      }
+    }
+
+    // Holdings synthesis: when the Detailed Cap Table didn't parse
+    // (or it's missing entirely), the holdings table stays empty even
+    // though we know exactly who paid how much into each ledger. Each
+    // round_investors row plus the round's share_price gives us
+    // shares; the round's share_class_code lets us tie that to the
+    // synthesized share_class we created above. INSERT OR IGNORE so
+    // any rows the Detailed Cap Table did seed earlier win (Carta's
+    // explicit share counts are more authoritative than amount /
+    // share_price, which can lose fractions to integer math).
+    if (parsed.rounds.length && shareClassIdByCode.size > 0) {
+      const insHFromRound = db().prepare(`
+        INSERT OR IGNORE INTO holdings (company_id, stakeholder_id, share_class_id, shares)
+        VALUES (?, ?, ?, ?)
+      `)
+      // Same stakeholder can contribute to the same round from
+      // multiple ledger rows; we already grouped those at parse time,
+      // so a single insert per (stakeholder, share_class) is enough.
+      const sharesByPair = new Map<string, number>()
+      for (const round of parsed.rounds) {
+        const scId = shareClassIdByCode.get(round.code)
+        if (!scId || !round.investors?.length) continue
+        const pps = round.sharePrice && round.sharePrice > 0 ? round.sharePrice : 0
+        if (pps <= 0) continue
+        for (const inv of round.investors) {
+          if (inv.cashContributed <= 0) continue
+          const shId = nameToId.get(inv.stakeholderName)
+          if (!shId) continue
+          // Prefer the parser-captured sharesIssued; fall back to
+          // amount / share_price for older parsed payloads that
+          // didn't carry the share count through.
+          const shares = inv.sharesIssued > 0
+            ? Math.floor(inv.sharesIssued)
+            : Math.floor(inv.cashContributed / pps)
+          if (shares <= 0) continue
+          const key = `${shId}|${scId}`
+          sharesByPair.set(key, (sharesByPair.get(key) || 0) + shares)
+        }
+      }
+      for (const [key, shares] of sharesByPair) {
+        const [shId, scId] = key.split('|')
+        try {
+          insHFromRound.run(id, shId, scId, shares)
+        } catch (err: any) {
+          parsed.warnings.push(`Couldn't synthesize holding ${shId}/${scId}: ${err?.message || err}`)
+        }
+      }
+    }
+
+    // Convertible notes. Parsed from the Convertible Notes / SAFEs
+    // sheet; tied back to a stakeholder by name (auto-create when the
+    // ledger introduces someone new). The CN column on the Preferred
+    // Investor matrix + CN attribution to rounds both read from this
+    // table.
+    if (parsed.convertibles.length) {
+      const insCN = db().prepare(`
+        INSERT INTO convertibles (
+          id, company_id, stakeholder_id, external_id, stakeholder_name,
+          principal, interest_accrued, interest_rate,
+          issue_date, maturity_date,
+          valuation_cap, conversion_discount,
+          status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outstanding')
+      `)
+      for (const cn of parsed.convertibles) {
+        let shId = nameToId.get(cn.stakeholderName) || null
+        if (!shId && cn.stakeholderName) {
+          shId = newId('sh')
+          try {
+            insSH.run(shId, id, cn.stakeholderName, null)
+            nameToId.set(cn.stakeholderName, shId)
+          } catch (err: any) {
+            parsed.warnings.push(`Couldn't auto-create stakeholder "${cn.stakeholderName}" from CN ledger: ${err?.message || err}`)
+            shId = null
+          }
+        }
+        try {
+          insCN.run(
+            newId('cn'),
+            id,
+            shId,
+            cn.externalId || null,
+            cn.stakeholderName,
+            cn.principal || 0,
+            cn.interestAccrued || 0,
+            cn.interestRate || 0,
+            cn.issueDate || null,
+            cn.maturityDate || null,
+            cn.valuationCap ?? null,
+            cn.conversionDiscount || 0,
+          )
+        } catch (err: any) {
+          parsed.warnings.push(`Couldn't write convertible for "${cn.stakeholderName}": ${err?.message || err}`)
         }
       }
     }
@@ -301,12 +423,13 @@ export default defineEventHandler(async (event) => {
   return {
     ok: true,
     counts: {
-      stakeholders: parsed.stakeholders.length,
-      grants:       parsed.grants.length,
-      shareClasses: parsed.shareClasses.length,
-      holdings:     parsed.holdings.length,
-      rounds:       parsed.rounds.length,
+      stakeholders:   parsed.stakeholders.length,
+      grants:         parsed.grants.length,
+      shareClasses:   parsed.shareClasses.length,
+      holdings:       parsed.holdings.length,
+      rounds:         parsed.rounds.length,
       roundInvestors: parsed.rounds.reduce((s, r) => s + (r.investors?.length || 0), 0),
+      convertibles:   parsed.convertibles.length,
     },
     poolAuthorized: parsed.poolAuthorized || 0,
     warnings: parsed.warnings,

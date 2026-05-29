@@ -17,18 +17,25 @@ const emit = defineEmits<{ refreshed: [] }>()
 interface MatrixRound { id: string; code: string; name: string | null; kind: 'formation' | 'closed' | 'open'; close_date: string | null; share_price: number | null; new_money: number }
 interface MatrixInvestor { id: string; name: string; type: string | null }
 interface Cell { id: string; amount: number; shares: number; notes: string | null }
+interface CnEntry { principal: number; accrued: number; total: number; notes: number }
 interface MatrixResponse {
   rounds: MatrixRound[]
   investors: MatrixInvestor[]
   matrix: Record<string, Record<string, Cell>>
   sums: Record<string, { allocated: number; new_money: number; delta: number }>
+  cn: Record<string, CnEntry>
+  cn_total: number
 }
 
 const companyId = computed(() => props.companyId)
 const { data, refresh } = await useFetch<MatrixResponse>(() => `/api/companies/${companyId.value}/investor-matrix`, {
   watch: [companyId],
-  default: () => ({ rounds: [], investors: [], matrix: {}, sums: {} }),
+  default: () => ({ rounds: [], investors: [], matrix: {}, sums: {}, cn: {}, cn_total: 0 }),
 })
+
+function cnFor(stakeholderId: string): CnEntry | null {
+  return data.value?.cn?.[stakeholderId] || null
+}
 
 // Local drafts so cell edits batch sensibly (one PATCH per blurred cell;
 // no debouncing yet — the matrix is small enough that direct writes are
@@ -135,7 +142,10 @@ async function removeInvestor(inv: MatrixInvestor) {
   emit('refreshed')
 }
 
-// Total invested per investor (sum across rounds).
+// Total invested per investor — sum across rounds, plus outstanding
+// CN principal + accrued interest. The CN total is paper-money the
+// investor has on the table (not yet converted), but it counts in the
+// "total invested" view because it'll fold into a round at close.
 function totalForInvestor(inv: MatrixInvestor): number {
   let sum = 0
   const matrix = data.value?.matrix || {}
@@ -143,6 +153,7 @@ function totalForInvestor(inv: MatrixInvestor): number {
     const amt = drafts.value[r.id]?.[inv.id] ?? matrix[r.id]?.[inv.id]?.amount ?? 0
     sum += amt
   }
+  sum += cnFor(inv.id)?.total || 0
   return sum
 }
 
@@ -170,6 +181,7 @@ function sumDeltaClass(delta: number, newMoney: number): string {
         <colgroup>
           <col style="width: 220px" />
           <col v-for="r in data.rounds" :key="r.id" style="min-width: 150px" />
+          <col style="width: 130px" /> <!-- CN column -->
           <col style="width: 140px" />
           <col style="width: 40px" />
         </colgroup>
@@ -189,6 +201,12 @@ function sumDeltaClass(delta: number, newMoney: number): string {
                 <span v-if="r.kind === 'open'" class="text-[9px] uppercase tracking-wider text-brand-edge font-semibold">Open</span>
               </div>
               <div class="text-[10px] text-ink-400 num text-right mt-0.5">{{ r.close_date || '—' }}</div>
+            </th>
+            <th class="px-3 py-2 border-b border-ink-200 text-right bg-amber-50/40">
+              <div class="flex items-center justify-end gap-1.5">
+                <span class="text-[11.5px] font-medium text-amber-700">Convertible notes</span>
+              </div>
+              <div class="text-[10px] text-ink-400 mt-0.5">principal + accrued</div>
             </th>
             <th class="px-3 py-2 border-b border-ink-200 text-right">
               <span class="text-[10.5px] uppercase tracking-[0.08em] text-ink-500 font-semibold">Total invested</span>
@@ -221,6 +239,20 @@ function sumDeltaClass(delta: number, newMoney: number): string {
                 />
               </label>
               <div v-if="cellShares(r.id, inv.id) > 0" class="text-[10px] text-ink-400 num text-right mt-0.5">{{ fmtShares(cellShares(r.id, inv.id)) }} sh</div>
+            </td>
+            <!-- CN total per investor. Read-only — CN data lives on the
+                 Convertible-notes ledger; this column is a roll-up so
+                 the operator can see paper money alongside cash on the
+                 same row. -->
+            <td class="px-3 py-1.5 text-right bg-amber-50/30">
+              <template v-if="cnFor(inv.id)?.total">
+                <div class="text-[13px] num font-medium text-amber-800"
+                  :title="`${cnFor(inv.id)?.notes ?? 0} note${(cnFor(inv.id)?.notes ?? 0) === 1 ? '' : 's'} · principal ${fmtUSD(cnFor(inv.id)?.principal ?? 0)} + accrued ${fmtUSD(cnFor(inv.id)?.accrued ?? 0)}`">
+                  {{ fmtUSD(cnFor(inv.id)?.total ?? 0) }}
+                </div>
+                <div v-if="(cnFor(inv.id)?.notes ?? 0) > 1" class="text-[10px] text-amber-600 mt-0.5">{{ cnFor(inv.id)?.notes }} notes</div>
+              </template>
+              <span v-else class="text-ink-300 text-[12px]">—</span>
             </td>
             <td class="px-3 py-1.5 text-right font-semibold text-ink-900 text-[13px]">
               {{ totalForInvestor(inv) > 0 ? fmtUSD(totalForInvestor(inv)) : '—' }}
@@ -257,6 +289,10 @@ function sumDeltaClass(delta: number, newMoney: number): string {
                 />
               </label>
             </td>
+            <!-- CN column slot — no inline edit; notes live on the
+                 Convertible-notes ledger. Kept empty so the column
+                 alignment stays put on the add-investor row. -->
+            <td class="px-2 py-1.5 bg-amber-50/30"></td>
             <td class="px-3 py-1.5 text-right">
               <button
                 v-if="newName.trim()"
@@ -279,11 +315,15 @@ function sumDeltaClass(delta: number, newMoney: number): string {
             >
               {{ fmtUSD(data.sums[r.id]?.allocated ?? 0) }}
             </td>
+            <td class="px-3 py-2 text-right font-semibold text-amber-800 text-[13px] bg-amber-50/40">
+              {{ data.cn_total ? fmtUSD(data.cn_total) : '—' }}
+            </td>
             <td class="px-3 py-2" colspan="2"></td>
           </tr>
           <tr class="text-[11.5px] text-ink-500 border-t border-ink-100">
             <td class="px-3 py-1.5 text-right pr-6 sticky left-0 z-10 bg-white">New money on round</td>
             <td v-for="r in data.rounds" :key="r.id" class="px-3 py-1.5 text-right" :class="r.kind === 'open' ? 'bg-brand-soft/20' : ''">{{ fmtUSD(r.new_money) }}</td>
+            <td class="px-3 py-1.5 bg-amber-50/20"></td>
             <td colspan="2"></td>
           </tr>
           <tr class="text-[11.5px] border-t border-ink-100">
@@ -300,6 +340,7 @@ function sumDeltaClass(delta: number, newMoney: number): string {
                 {{ fmtUSD(data.sums[r.id]?.delta ?? 0) }}
               </span>
             </td>
+            <td class="px-3 py-1.5 bg-amber-50/20"></td>
             <td colspan="2"></td>
           </tr>
         </tfoot>

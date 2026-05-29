@@ -39,17 +39,50 @@ export default defineEventHandler((event) => {
     ).all(id) as Array<{ stakeholder_id: string }>).map(r => r.stakeholder_id),
   )
 
-  // Investors: every stakeholder that's referenced in allocations, plus
-  // every stakeholder typed as 'Investor' on the company (so the matrix
-  // shows known investors even if they haven't been allocated yet),
-  // minus any option-holder.
+  // Investors: every stakeholder that's referenced in allocations OR
+  // holds an outstanding convertible OR is typed as 'Investor' on the
+  // company. Minus any option-holder (per the operator rule:
+  // "preferred investors are anyone that isn't an option holder").
+  // A CN-only investor — someone who only put money in via a note,
+  // no equity yet — still belongs on this matrix; the CN column is
+  // what surfaces their stake.
   const involvedIds = new Set<string>(allocations.map(a => a.stakeholder_id))
+  const cnHolderIds = new Set<string>(
+    (db().prepare(
+      `SELECT DISTINCT stakeholder_id FROM convertibles WHERE company_id = ? AND status = 'outstanding' AND stakeholder_id IS NOT NULL`,
+    ).all(id) as Array<{ stakeholder_id: string }>).map(r => r.stakeholder_id),
+  )
+  for (const c of cnHolderIds) involvedIds.add(c)
   const rawInvestors = db().prepare(`
     SELECT id, name, type FROM stakeholders WHERE company_id = ?
       AND (type = 'Investor' OR id IN (${involvedIds.size ? Array.from(involvedIds).map(() => '?').join(',') : 'NULL'}))
     ORDER BY name COLLATE NOCASE
   `).all(id, ...Array.from(involvedIds)) as Array<{ id: string; name: string; type: string | null }>
   const allInvestors = rawInvestors.filter(s => !optionHolderIds.has(s.id))
+
+  // Convertible-note totals per stakeholder. The Preferred Investor
+  // matrix surfaces these alongside the per-round cash columns so the
+  // operator can see paper-money + cash in one view. Total = principal
+  // + accrued (the effective cash-equivalent the note represents);
+  // breakdown surfaces principal separately for cell tooltips.
+  const cnRows = db().prepare(`
+    SELECT stakeholder_id,
+           COALESCE(SUM(principal), 0) AS principal,
+           COALESCE(SUM(interest_accrued), 0) AS accrued,
+           COUNT(*) AS notes
+    FROM convertibles
+    WHERE company_id = ? AND status = 'outstanding' AND stakeholder_id IS NOT NULL
+    GROUP BY stakeholder_id
+  `).all(id) as Array<{ stakeholder_id: string; principal: number; accrued: number; notes: number }>
+  const cnByStakeholder = new Map<string, { principal: number; accrued: number; total: number; notes: number }>()
+  for (const r of cnRows) {
+    cnByStakeholder.set(r.stakeholder_id, {
+      principal: r.principal,
+      accrued:   r.accrued,
+      total:     r.principal + r.accrued,
+      notes:     r.notes,
+    })
+  }
 
   // allocations[round_id][stakeholder_id]
   const matrix: Record<string, Record<string, { id: string; amount: number; shares: number; notes: string | null }>> = {}
@@ -74,6 +107,16 @@ export default defineEventHandler((event) => {
     sums[r.id] = { allocated, new_money: r.new_money || 0, delta: allocated - (r.new_money || 0) }
   }
 
+  // Per-stakeholder CN totals to surface as an extra column in the
+  // matrix. Filtered to only the visible (non-option-holder) investors
+  // so the column lines up with the row set.
+  const cn: Record<string, { principal: number; accrued: number; total: number; notes: number }> = {}
+  for (const inv of allInvestors) {
+    const row = cnByStakeholder.get(inv.id)
+    if (row) cn[inv.id] = row
+  }
+  const cnTotal = Object.values(cn).reduce((s, v) => s + v.total, 0)
+
   return {
     rounds: rounds.map(r => ({
       id: r.id, code: r.code, name: r.name, kind: r.kind,
@@ -82,5 +125,7 @@ export default defineEventHandler((event) => {
     investors: allInvestors,
     matrix,
     sums,
+    cn,                   // per-investor CN totals (keyed by stakeholder id)
+    cn_total: cnTotal,    // footer total across visible investors
   }
 })
