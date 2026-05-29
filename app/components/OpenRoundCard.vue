@@ -16,6 +16,7 @@ interface OpenRound {
   id: string
   code: string
   name: string | null
+  kind: 'formation' | 'closed' | 'open'
   close_date: string | null
   share_price: number | null
   new_money: number | null
@@ -33,11 +34,18 @@ const { data: roundSummary, refresh: refreshRound } = await useFetch<{ rounds: a
 const { data: agg } = await useFetch<Aggregate>(() => `/api/companies/${props.companyId}/aggregate-round`, { watch: [() => props.companyId] })
 
 const round = computed<OpenRound | null>(() => {
-  const r = (roundSummary.value?.rounds || []).find((x: any) => x.kind === 'open')
+  const rounds = roundSummary.value?.rounds || []
+  // Prefer the open round, but fall back to the latest non-formation
+  // round so the pre/post model stays visible after the round is
+  // flipped to "closed" — closing it shouldn't hide the modeling.
+  const open = rounds.find((x: any) => x.kind === 'open')
+  const latest = [...rounds].reverse().find((x: any) => x.kind !== 'formation')
+  const r = open || latest
   return r ? {
     id: r.round_id,
     code: r.code,
     name: r.name,
+    kind: r.kind,
     close_date: r.close_date,
     share_price: r.share_price,
     new_money: r.new_money,
@@ -45,6 +53,8 @@ const round = computed<OpenRound | null>(() => {
     option_pool_issued: r.option_pool_issued,
   } : null
 })
+
+const isOpen = computed(() => round.value?.kind === 'open')
 
 // Local editable copy; synced from server data on round changes.
 const name              = ref<string>('')
@@ -104,9 +114,17 @@ async function createOpenRound() {
   finally { emitSaving(-1) }
 }
 
+// Flip the round between "open" (currently raising) and "closed"
+// (done). The model footer stays visible either way; closing just
+// changes status so the page header's "open round" pill clears.
+async function setKind(kind: 'open' | 'closed') {
+  if (!round.value || round.value.kind === kind) return
+  await commit('kind', kind)
+}
+
 async function deleteOpenRound() {
   if (!round.value) return
-  if (!confirm('Delete the open round? This wipes its allocations too.')) return
+  if (!confirm('Delete this round? This wipes its allocations too.')) return
   emitSaving(+1)
   try {
     await $fetch(`/api/rounds/${round.value.id}`, { method: 'DELETE' })
@@ -151,24 +169,32 @@ const ownership = computed(() => {
 </script>
 
 <template>
-  <section class="rounded-xl border border-brand-300 bg-white shadow-[0_1px_0_rgba(16,24,40,0.04)]">
+  <section class="rounded-xl border bg-white shadow-[0_1px_0_rgba(16,24,40,0.04)]" :class="isOpen ? 'border-brand-300' : 'border-ink-200'">
     <header class="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3">
       <div class="flex items-center gap-2">
-        <div class="grid place-items-center w-7 h-7 rounded-md bg-brand-soft text-brand-edge">
+        <div class="grid place-items-center w-7 h-7 rounded-md" :class="isOpen ? 'bg-brand-soft text-brand-edge' : 'bg-ink-100 text-ink-600'">
           <Sparkles :size="14" />
         </div>
         <div>
           <h2 class="text-[14px] font-semibold text-ink-900">Open Round</h2>
-          <p class="text-[11px] text-ink-500 leading-tight">Currently raising — iterates as you tweak the terms</p>
+          <p class="text-[11px] text-ink-500 leading-tight">{{ isOpen ? 'Currently raising — iterates as you tweak the terms' : 'Closed — pre/post model kept for reference' }}</p>
         </div>
       </div>
-      <button v-if="round" class="text-[11px] text-ink-500 hover:text-red-600 inline-flex items-center gap-1" @click="deleteOpenRound">
-        <Trash2 :size="11" /> delete
-      </button>
+      <div v-if="round" class="flex items-center gap-3">
+        <!-- Status toggle. Closing the round keeps the model below
+             visible; it just clears the "open round" pill in the header. -->
+        <div class="inline-flex rounded-md border border-ink-200 overflow-hidden text-[11px]">
+          <button type="button" class="px-2.5 py-1" :class="isOpen ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="setKind('open')">Open</button>
+          <button type="button" class="px-2.5 py-1 border-l border-ink-200" :class="!isOpen ? 'bg-ink-700 text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="setKind('closed')">Closed</button>
+        </div>
+        <button class="text-[11px] text-ink-500 hover:text-red-600 inline-flex items-center gap-1" @click="deleteOpenRound">
+          <Trash2 :size="11" /> delete
+        </button>
+      </div>
     </header>
 
     <div v-if="!round" class="px-5 py-10 text-center">
-      <p class="text-[13px] text-ink-600">No open round yet.</p>
+      <p class="text-[13px] text-ink-600">No round to model yet.</p>
       <UiButton variant="primary" size="md" class="mt-3" @click="createOpenRound">
         <Plus :size="14" /> Start an open round
       </UiButton>
@@ -188,8 +214,8 @@ const ownership = computed(() => {
           />
         </div>
         <div>
-          <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Close date <span class="text-ink-400 font-normal">(target)</span></label>
-          <DateInput v-model="closeDate" class="w-full" @blur="commit('close_date', closeDate)" />
+          <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Close date <span class="text-ink-400 font-normal">{{ isOpen ? '(target)' : '' }}</span></label>
+          <DateInput v-model="closeDate" class="w-full" @change="(v) => commit('close_date', v)" />
         </div>
       </div>
 
@@ -213,8 +239,9 @@ const ownership = computed(() => {
         </div>
       </div>
 
-      <!-- Derived footer: live cap-table impact of the open-round terms. -->
-      <div class="px-5 py-3 border-t border-ink-100 bg-brand-soft/40 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-[12px]">
+      <!-- Derived footer: live cap-table impact of the round's terms.
+           Shown whether the round is open or closed. -->
+      <div class="px-5 py-3 border-t border-ink-100 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-[12px]" :class="isOpen ? 'bg-brand-soft/40' : 'bg-ink-50/50'">
         <div>
           <div class="text-[10px] uppercase tracking-[0.06em] text-ink-500 font-medium">Post-money</div>
           <div class="num font-semibold text-ink-900">{{ postMoney != null ? fmtUSD(postMoney) : '—' }}</div>

@@ -428,7 +428,7 @@ export default defineEventHandler((event) => {
       code: r.code,
       name: r.name,
       kind: effectiveKind,
-      close_date: effectiveKind === 'open' ? null : r.close_date,
+      close_date: r.close_date,
       seniority: r.seniority,
       share_class_code: r.share_class_code,
       share_price: r.share_price,
