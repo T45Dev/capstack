@@ -14,15 +14,24 @@ import { fmtUSD, fmtShares } from '~/utils/format'
 const props = defineProps<{ companyId: string }>()
 const emit = defineEmits<{ refreshed: [] }>()
 
-interface MatrixRound { id: string; code: string; name: string | null; kind: 'formation' | 'closed' | 'open'; close_date: string | null; share_price: number | null; new_money: number }
+interface MatrixRound {
+  id: string; code: string; name: string | null
+  kind: 'formation' | 'closed' | 'open'
+  close_date: string | null; share_price: number | null
+  new_money: number; preferred_issued: number
+}
 interface MatrixInvestor { id: string; name: string; type: string | null }
 interface Cell { id: string; amount: number; shares: number; notes: string | null }
 interface CnEntry { principal: number; accrued: number; total: number; notes: number }
+interface RoundSums {
+  allocated: number; new_money: number; delta: number
+  allocated_shares: number; preferred_issued: number; delta_shares: number
+}
 interface MatrixResponse {
   rounds: MatrixRound[]
   investors: MatrixInvestor[]
   matrix: Record<string, Record<string, Cell>>
-  sums: Record<string, { allocated: number; new_money: number; delta: number }>
+  sums: Record<string, RoundSums>
   cn: Record<string, CnEntry>
   cn_total: number
 }
@@ -30,19 +39,21 @@ interface MatrixResponse {
 const companyId = computed(() => props.companyId)
 const { data, refresh } = await useFetch<MatrixResponse>(() => `/api/companies/${companyId.value}/investor-matrix`, {
   watch: [companyId],
-  default: () => ({ rounds: [], investors: [], matrix: {}, sums: {}, cn: {}, cn_total: 0 }),
+  default: () => ({ rounds: [], investors: [], matrix: {}, sums: {}, cn: {}, cn_total: 0 } as MatrixResponse),
 })
 
 function cnFor(stakeholderId: string): CnEntry | null {
   return data.value?.cn?.[stakeholderId] || null
 }
 
-// Local drafts so cell edits batch sensibly (one PATCH per blurred cell;
-// no debouncing yet — the matrix is small enough that direct writes are
-// fine, but using a draft buffer lets us avoid PATCHing on every keystroke).
+// Local drafts buffer cell edits so we commit one PATCH per blurred
+// cell. Stored as AMOUNTS ($) since that's what round_investors holds;
+// when the operator edits shares we convert via the round's
+// share_price before saving.
 const drafts = ref<Record<string, Record<string, number>>>({})
-function draftKey(roundId: string, stakeholderId: string) {
-  return `${roundId}::${stakeholderId}`
+function ppsForRound(roundId: string): number {
+  const r = data.value?.rounds.find(x => x.id === roundId)
+  return r?.share_price && r.share_price > 0 ? r.share_price : 0
 }
 function cellAmount(roundId: string, stakeholderId: string): number | null {
   const d = drafts.value[roundId]?.[stakeholderId]
@@ -52,14 +63,22 @@ function cellAmount(roundId: string, stakeholderId: string): number | null {
 }
 function cellShares(roundId: string, stakeholderId: string): number {
   const amt = cellAmount(roundId, stakeholderId) || 0
-  const r = data.value?.rounds.find(x => x.id === roundId)
-  const pps = r?.share_price && r.share_price > 0 ? r.share_price : 0
+  const pps = ppsForRound(roundId)
   return pps > 0 ? Math.floor(amt / pps) : 0
 }
-function setDraft(roundId: string, stakeholderId: string, value: number | null) {
-  const v = value ?? 0
+// Edit path: operator types SHARES; convert × share_price → amount
+// for storage. Rounds with no share_price (the open round before the
+// operator's typed one) fall back to amount-editing in the cell.
+function setSharesDraft(roundId: string, stakeholderId: string, shares: number | null) {
+  const pps = ppsForRound(roundId)
   if (!drafts.value[roundId]) drafts.value[roundId] = {}
-  drafts.value[roundId][stakeholderId] = v
+  if (pps > 0) {
+    drafts.value[roundId][stakeholderId] = (shares ?? 0) * pps
+  } else {
+    // No price set: treat the input as raw $ amount so the field is
+    // still usable. The cell renders a small "set $/share" hint.
+    drafts.value[roundId][stakeholderId] = shares ?? 0
+  }
 }
 
 async function commitCell(roundId: string, stakeholderId: string) {
@@ -142,11 +161,18 @@ async function removeInvestor(inv: MatrixInvestor) {
   emit('refreshed')
 }
 
-// Total invested per investor — sum across rounds, plus outstanding
-// CN principal + accrued interest. The CN total is paper-money the
-// investor has on the table (not yet converted), but it counts in the
-// "total invested" view because it'll fold into a round at close.
-function totalForInvestor(inv: MatrixInvestor): number {
+// Total shares per investor across all rounds. CNs don't add to
+// shares — they're paper money that converts later — so they get
+// surfaced in a separate $ rollup.
+function totalSharesForInvestor(inv: MatrixInvestor): number {
+  let sum = 0
+  for (const r of data.value?.rounds || []) sum += cellShares(r.id, inv.id)
+  return sum
+}
+// Total $ per investor — sum across rounds (using live drafts) plus
+// outstanding CN principal + accrued. Shown as a secondary number so
+// the operator who still thinks in dollars has it in view.
+function totalDollarsForInvestor(inv: MatrixInvestor): number {
   let sum = 0
   const matrix = data.value?.matrix || {}
   for (const r of data.value?.rounds || []) {
@@ -160,7 +186,12 @@ function totalForInvestor(inv: MatrixInvestor): number {
 // Sorted investors — biggest cheque first by default.
 const sortedInvestors = computed<MatrixInvestor[]>(() => {
   const list = [...(data.value?.investors || [])]
-  list.sort((a, b) => totalForInvestor(b) - totalForInvestor(a))
+  // Sort by total shares (matrix is shares-first); ties break on $.
+  list.sort((a, b) => {
+    const ds = totalSharesForInvestor(b) - totalSharesForInvestor(a)
+    if (ds !== 0) return ds
+    return totalDollarsForInvestor(b) - totalDollarsForInvestor(a)
+  })
   return list
 })
 
@@ -209,7 +240,7 @@ function sumDeltaClass(delta: number, newMoney: number): string {
               <div class="text-[10px] text-ink-400 mt-0.5">principal + accrued</div>
             </th>
             <th class="px-3 py-2 border-b border-ink-200 text-right">
-              <span class="text-[10.5px] uppercase tracking-[0.08em] text-ink-500 font-semibold">Total invested</span>
+              <span class="text-[10.5px] uppercase tracking-[0.08em] text-ink-500 font-semibold">Total shares</span>
             </th>
             <th class="px-3 py-2 border-b border-ink-200"></th>
           </tr>
@@ -226,19 +257,32 @@ function sumDeltaClass(delta: number, newMoney: number): string {
               class="px-2 py-1.5 align-middle"
               :class="r.kind === 'open' ? 'bg-brand-soft/20' : ''"
             >
+              <!-- Primary input: SHARES (per the operator: "preferred
+                   tab on Rounds is meant to show shares, not investment").
+                   We compute amount = shares × share_price on commit so
+                   round_investors keeps cash as the source of truth.
+                   Rounds with no share_price fall back to $ editing
+                   inline; the prefix flips to "$" + a small hint. -->
               <label class="cell-edit block">
                 <NumberInput
                   variant="bare"
-                  prefix="$"
-                  :model-value="cellAmount(r.id, inv.id)"
+                  :prefix="ppsForRound(r.id) > 0 ? '' : '$'"
+                  :model-value="ppsForRound(r.id) > 0 ? cellShares(r.id, inv.id) || null : cellAmount(r.id, inv.id)"
                   placeholder="—"
                   input-class="num text-[13px] bg-transparent text-right"
-                  @update:model-value="(v) => setDraft(r.id, inv.id, v)"
+                  @update:model-value="(v) => setSharesDraft(r.id, inv.id, v)"
                   @blur="() => commitCell(r.id, inv.id)"
                   @keydown.enter="(e: KeyboardEvent) => (e.target as HTMLInputElement).blur()"
                 />
               </label>
-              <div v-if="cellShares(r.id, inv.id) > 0" class="text-[10px] text-ink-400 num text-right mt-0.5">{{ fmtShares(cellShares(r.id, inv.id)) }} sh</div>
+              <!-- Hint when the round has no share_price yet (cell fell
+                   back to $ editing because we can't derive shares
+                   without a price). Operator pops into the round's
+                   card to set it. -->
+              <div
+                v-if="ppsForRound(r.id) <= 0 && (cellAmount(r.id, inv.id) || 0) > 0"
+                class="text-[10px] text-amber-600 text-right mt-0.5 italic"
+              >set $/share to show shares</div>
             </td>
             <!-- CN total per investor. Read-only — CN data lives on the
                  Convertible-notes ledger; this column is a roll-up so
@@ -254,8 +298,14 @@ function sumDeltaClass(delta: number, newMoney: number): string {
               </template>
               <span v-else class="text-ink-300 text-[12px]">—</span>
             </td>
-            <td class="px-3 py-1.5 text-right font-semibold text-ink-900 text-[13px]">
-              {{ totalForInvestor(inv) > 0 ? fmtUSD(totalForInvestor(inv)) : '—' }}
+            <td class="px-3 py-1.5 text-right text-[13px]">
+              <template v-if="totalSharesForInvestor(inv) > 0">
+                <div class="num font-semibold text-ink-900">{{ fmtShares(totalSharesForInvestor(inv)) }}</div>
+              </template>
+              <template v-else-if="cnFor(inv.id)?.total">
+                <span class="text-[11px] text-amber-700 italic">CN only</span>
+              </template>
+              <span v-else class="text-ink-300">—</span>
             </td>
             <td class="px-2 py-1.5 text-center">
               <button
@@ -278,14 +328,20 @@ function sumDeltaClass(delta: number, newMoney: number): string {
               />
             </td>
             <td v-for="r in data.rounds" :key="r.id" class="px-2 py-1.5 align-middle" :class="r.kind === 'open' ? 'bg-brand-soft/20' : ''">
+              <!-- Add-investor row: same convention as the body cells.
+                   Enter shares; we convert × share_price → amount before
+                   the POST. When share_price is unset, fall back to
+                   raw $. -->
               <label v-if="newName.trim()" class="cell-edit block">
                 <NumberInput
                   variant="bare"
-                  prefix="$"
-                  :model-value="newAmounts[r.id] || null"
+                  :prefix="(r.share_price || 0) > 0 ? '' : '$'"
+                  :model-value="(r.share_price || 0) > 0
+                    ? ((newAmounts[r.id] || 0) / (r.share_price || 1)) || null
+                    : (newAmounts[r.id] || null)"
                   placeholder="—"
                   input-class="num text-[13px] bg-transparent text-right"
-                  @update:model-value="(v) => (newAmounts[r.id] = v || 0)"
+                  @update:model-value="(v) => (newAmounts[r.id] = (r.share_price || 0) > 0 ? ((v || 0) * (r.share_price || 0)) : (v || 0))"
                 />
               </label>
             </td>
@@ -305,39 +361,49 @@ function sumDeltaClass(delta: number, newMoney: number): string {
           </tr>
         </tbody>
         <tfoot class="num">
+          <!-- Allocated: shares per round. Reconciliation against
+               preferred_issued (Δ row below). -->
           <tr class="bg-ink-50/60 border-t border-ink-200">
             <td class="px-3 py-2 text-right pr-6 sticky left-0 z-10 bg-ink-50/95 text-[10.5px] uppercase tracking-[0.06em] text-ink-500 font-semibold">Allocated</td>
             <td
               v-for="r in data.rounds"
               :key="r.id"
               class="px-3 py-2 text-right font-semibold text-[13px]"
-              :class="[r.kind === 'open' ? 'bg-brand-soft/30' : '', sumDeltaClass(data.sums[r.id]?.delta ?? 0, r.new_money)]"
+              :class="[r.kind === 'open' ? 'bg-brand-soft/30' : '', sumDeltaClass(data.sums[r.id]?.delta_shares ?? 0, r.preferred_issued)]"
             >
-              {{ fmtUSD(data.sums[r.id]?.allocated ?? 0) }}
+              {{ fmtShares(data.sums[r.id]?.allocated_shares ?? 0) }}
             </td>
+            <!-- CN column stays in $ — convertible notes are paper
+                 money that hasn't converted to shares yet. -->
             <td class="px-3 py-2 text-right font-semibold text-amber-800 text-[13px] bg-amber-50/40">
               {{ data.cn_total ? fmtUSD(data.cn_total) : '—' }}
             </td>
             <td class="px-3 py-2" colspan="2"></td>
           </tr>
+          <!-- Target row: round.preferred_issued (the share count the
+               round expects). -->
           <tr class="text-[11.5px] text-ink-500 border-t border-ink-100">
-            <td class="px-3 py-1.5 text-right pr-6 sticky left-0 z-10 bg-white">New money on round</td>
-            <td v-for="r in data.rounds" :key="r.id" class="px-3 py-1.5 text-right" :class="r.kind === 'open' ? 'bg-brand-soft/20' : ''">{{ fmtUSD(r.new_money) }}</td>
+            <td class="px-3 py-1.5 text-right pr-6 sticky left-0 z-10 bg-white">Round expects</td>
+            <td v-for="r in data.rounds" :key="r.id" class="px-3 py-1.5 text-right" :class="r.kind === 'open' ? 'bg-brand-soft/20' : ''">
+              {{ fmtShares(r.preferred_issued || 0) }}
+            </td>
             <td class="px-3 py-1.5 bg-amber-50/20"></td>
             <td colspan="2"></td>
           </tr>
+          <!-- Δ row: shares delta. Reconciliation goes green when the
+               cell allocations sum to the round's preferred_issued. -->
           <tr class="text-[11.5px] border-t border-ink-100">
             <td class="px-3 py-1.5 text-right pr-6 sticky left-0 z-10 bg-white text-ink-500">Δ to allocate</td>
             <td
               v-for="r in data.rounds"
               :key="r.id"
               class="px-3 py-1.5 text-right"
-              :class="[r.kind === 'open' ? 'bg-brand-soft/20' : '', sumDeltaClass(data.sums[r.id]?.delta ?? 0, r.new_money)]"
+              :class="[r.kind === 'open' ? 'bg-brand-soft/20' : '', sumDeltaClass(data.sums[r.id]?.delta_shares ?? 0, r.preferred_issued)]"
             >
-              <span v-if="Math.abs(data.sums[r.id]?.delta ?? 0) < 1">✓ reconciled</span>
+              <span v-if="Math.abs(data.sums[r.id]?.delta_shares ?? 0) < 1">✓ reconciled</span>
               <span v-else class="inline-flex items-center gap-1">
                 <AlertTriangle :size="10" />
-                {{ fmtUSD(data.sums[r.id]?.delta ?? 0) }}
+                {{ fmtShares(data.sums[r.id]?.delta_shares ?? 0) }} sh
               </span>
             </td>
             <td class="px-3 py-1.5 bg-amber-50/20"></td>
@@ -347,7 +413,7 @@ function sumDeltaClass(delta: number, newMoney: number): string {
       </table>
     </div>
     <p v-if="data?.rounds.length" class="px-4 py-2 text-[11.5px] text-ink-500 bg-ink-50/50 border-t border-ink-100">
-      Shares per cell = $ ÷ round share price. Per-round Δ goes green when the allocations sum to the round's New money on the Rounds tab.
+      Cells show shares per investor per round. Δ goes green when allocated shares sum to the round's Preferred-issued line. CN column stays in $ — convertibles are paper money that hasn't priced into shares yet.
     </p>
   </div>
 </template>
