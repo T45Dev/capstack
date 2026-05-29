@@ -125,7 +125,7 @@ T45 Labs\t       250,000\t$1,000,000`
             <label class="block text-[12px] font-medium text-ink-700 mb-1">Paste TSV / spreadsheet rows</label>
             <textarea
               v-model="pasted"
-              class="w-full h-44 px-3 py-2 text-[12.5px] font-mono border border-ink-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand/30 num"
+              class="w-full h-44 px-3 py-2 text-[12.5px] border border-ink-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand/30 num"
               :placeholder="examplePlaceholder"
               spellcheck="false"
             />

@@ -11,11 +11,15 @@ body {
   font-feature-settings: 'cv02', 'cv03', 'cv04';
 }
 
-/* Monospace + tabular for every number on the page. */
+/* Numbers use the proportional UI sans (not a monospace) for
+   readability — IBM Plex Mono made 8 and 0 hard to tell apart. The
+   tabular-nums feature keeps digits a fixed width so columns of figures
+   still line up cleanly in tables. */
 .num {
-  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: 'Manrope', ui-sans-serif, system-ui, -apple-system, 'Inter', sans-serif;
   font-variant-numeric: tabular-nums lining-nums;
-  letter-spacing: -0.01em;
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  letter-spacing: 0;
 }
 
 button {
@@ -123,8 +127,9 @@ thead .sticky-col {
   background: transparent;
   outline: none;
   border: 0;
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-family: 'Manrope', ui-sans-serif, system-ui, -apple-system, 'Inter', sans-serif;
   font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
   font-size: 13px;
   color: #101828;
   padding: 0;
