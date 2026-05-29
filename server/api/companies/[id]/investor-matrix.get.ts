@@ -27,15 +27,29 @@ export default defineEventHandler((event) => {
     FROM round_investors WHERE company_id = ?
   `).all(id) as Array<{ id: string; round_id: string; stakeholder_id: string; amount: number; notes: string | null }>
 
+  // Preferred-investor filter: per the operator's rule, a "preferred
+  // investor" is anyone who isn't an option-holder. We exclude any
+  // stakeholder who has an outstanding grant from this matrix even if
+  // they also paid into a ledger (Carta records option exercises with
+  // cash, so without this filter Employee X would show up as a
+  // "preferred investor" too).
+  const optionHolderIds = new Set<string>(
+    (db().prepare(
+      `SELECT DISTINCT stakeholder_id FROM grants WHERE company_id = ? AND stakeholder_id IS NOT NULL`,
+    ).all(id) as Array<{ stakeholder_id: string }>).map(r => r.stakeholder_id),
+  )
+
   // Investors: every stakeholder that's referenced in allocations, plus
   // every stakeholder typed as 'Investor' on the company (so the matrix
-  // shows known investors even if they haven't been allocated yet).
+  // shows known investors even if they haven't been allocated yet),
+  // minus any option-holder.
   const involvedIds = new Set<string>(allocations.map(a => a.stakeholder_id))
-  const allInvestors = db().prepare(`
+  const rawInvestors = db().prepare(`
     SELECT id, name, type FROM stakeholders WHERE company_id = ?
       AND (type = 'Investor' OR id IN (${involvedIds.size ? Array.from(involvedIds).map(() => '?').join(',') : 'NULL'}))
     ORDER BY name COLLATE NOCASE
   `).all(id, ...Array.from(involvedIds)) as Array<{ id: string; name: string; type: string | null }>
+  const allInvestors = rawInvestors.filter(s => !optionHolderIds.has(s.id))
 
   // allocations[round_id][stakeholder_id]
   const matrix: Record<string, Record<string, { id: string; amount: number; shares: number; notes: string | null }>> = {}
