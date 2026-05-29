@@ -110,12 +110,13 @@ export default defineEventHandler(async (event) => {
     SELECT
       s.id, s.name, s.type, s.linked_to,
       COALESCE(SUM(h.shares), 0) AS held_shares,
-      COALESCE((SELECT SUM(g.quantity) FROM grants g WHERE g.stakeholder_id = s.id AND g.status = 'outstanding'), 0) AS option_shares
+      COALESCE((SELECT SUM(g.quantity) FROM grants g WHERE g.stakeholder_id = s.id AND g.status = 'outstanding'), 0) AS option_shares,
+      COALESCE((SELECT SUM(ri.amount)   FROM round_investors ri WHERE ri.stakeholder_id = s.id), 0) AS invested_dollars
     FROM stakeholders s
     LEFT JOIN holdings h ON h.stakeholder_id = s.id
     WHERE s.company_id = ?
     GROUP BY s.id, s.name, s.type, s.linked_to
-  `).all(id) as Array<{ id: string; name: string; type: string | null; linked_to: string | null; held_shares: number; option_shares: number }>
+  `).all(id) as Array<{ id: string; name: string; type: string | null; linked_to: string | null; held_shares: number; option_shares: number; invested_dollars: number }>
 
   const byId = new Map<string, typeof stakeholderRows[number]>()
   for (const r of stakeholderRows) byId.set(r.id, r)
@@ -138,6 +139,7 @@ export default defineEventHandler(async (event) => {
     heldShares: number
     optionShares: number
     cnShares: number
+    investedDollars: number  // sum of round_investors.amount across the cluster
     aliasIds: string[]
     aliasNames: string[]
     // Whether ANY contributing row (primary or alias) is an option
@@ -154,6 +156,7 @@ export default defineEventHandler(async (event) => {
         name: primary.name,
         type: primary.type || null,
         heldShares: 0, optionShares: 0, cnShares: 0,
+        investedDollars: 0,
         aliasIds: [], aliasNames: [], hasOptions: false,
       }
       accByPrimary.set(pid, acc)
@@ -167,6 +170,7 @@ export default defineEventHandler(async (event) => {
     acc.heldShares += r.held_shares
     acc.optionShares += r.option_shares
     acc.cnShares += cnSharesByStakeholder.get(r.id) || 0
+    acc.investedDollars += r.invested_dollars || 0
     if (r.option_shares > 0) acc.hasOptions = true
     if (r.id !== pid) {
       acc.aliasIds.push(r.id)
@@ -192,6 +196,15 @@ export default defineEventHandler(async (event) => {
       aliasIds: a.aliasIds,
       aliasNames: a.aliasNames,
       hasOptions: a.hasOptions,
+      // Cost-basis: sum of cash contributed across all rounds for this
+      // stakeholder cluster. Lets the dilution view show what each
+      // holder actually paid alongside the current notional value.
+      investedDollars: a.investedDollars,
+      // Weighted-average per-share entry price for the cluster — useful
+      // gut-check against the current PPS.
+      avgEntryPPS: a.heldShares > 0 && a.investedDollars > 0
+        ? a.investedDollars / a.heldShares
+        : null,
     }
   }).sort((a, b) => b.postShares - a.postShares)
 

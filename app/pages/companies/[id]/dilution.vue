@@ -161,6 +161,10 @@ interface DilRow {
   isFuture: boolean  // synthetic future-only rows (idea-grants aggregate)
   aliasNames: string[]  // linked stakeholders rolled into this row
   hasOptions: boolean
+  // Cost-basis from round_investors (cluster-summed for linked rows).
+  // Independent of current PPS — what they actually paid.
+  invested: number
+  avgEntryPPS: number | null
 }
 
 // "Include preferred" toggle. When unchecked, preferred-only rows (no
@@ -209,6 +213,8 @@ const rows = computed<DilRow[]>(() => {
       isFuture: false,
       aliasNames: Array.isArray(d.aliasNames) ? d.aliasNames : [],
       hasOptions: !!d.hasOptions,
+      invested: d.investedDollars || 0,
+      avgEntryPPS: d.avgEntryPPS ?? null,
     }
   })
 
@@ -236,6 +242,8 @@ const rows = computed<DilRow[]>(() => {
         isFuture: true,
         aliasNames: [],
         hasOptions: true,
+        invested: 0,
+        avgEntryPPS: null,
       })
     }
     // Idea grants → single synthetic row, anonymous bucket.
@@ -259,6 +267,8 @@ const rows = computed<DilRow[]>(() => {
         isFuture: true,
         aliasNames: [],
         hasOptions: true,
+        invested: 0,
+        avgEntryPPS: null,
       })
     }
   }
@@ -272,8 +282,10 @@ const rows = computed<DilRow[]>(() => {
 })
 
 // ---- Sortable + resizable columns via the shared composable ----
+// Bumped to v3 so the new Invested-$ column widths don't get
+// short-circuited by a v2 entry in localStorage.
 const table = useSortableTable({
-  key: 'capstack:dilution:v2',
+  key: 'capstack:dilution:v3',
   defaultSort: { key: 'deltaPct', dir: 'asc' },
   columns: [
     { key: 'name',         label: 'Stakeholder',  width: 240, sortable: true, align: 'left' },
@@ -283,6 +295,7 @@ const table = useSortableTable({
     { key: 'prePct',       label: 'Pre %',        width: 80,  sortable: true, align: 'right' },
     { key: 'postPct',      label: 'Post %',       width: 80,  sortable: true, align: 'right' },
     { key: 'deltaPct',     label: 'Δ %',          width: 80,  sortable: true, align: 'right' },
+    { key: 'invested',     label: 'Invested $',   width: 120, sortable: true, align: 'right' },
     { key: 'preValue',     label: 'Pre $',        width: 120, sortable: true, align: 'right' },
     { key: 'postValue',    label: 'Post $',       width: 120, sortable: true, align: 'right' },
     { key: 'deltaValue',   label: 'Δ $',          width: 120, sortable: true, align: 'right' },
@@ -302,6 +315,7 @@ const groupSpans = [
   { label: '', span: 1 },                       // Stakeholder
   { label: 'Shares', span: 3 },                 // Pre / Post / Δ shares
   { label: 'Ownership %', span: 3 },            // Pre / Post / Δ %
+  { label: 'Cost', span: 1 },                   // Invested $
   { label: 'Value ($)', span: 3 },              // Pre / Post / Δ $
 ]
 
@@ -430,8 +444,8 @@ async function onImported() {
                   class="relative px-3 py-1.5 border-b border-ink-300"
                   :class="[
                     col.align === 'right' ? 'text-right' : 'text-left',
-                    ci === 1 || ci === 4 || ci === 7 ? 'border-l' : '',
-                    ci === 2 || ci === 5 || ci === 8 ? 'text-brand-700' : '',
+                    ci === 1 || ci === 4 || ci === 7 || ci === 8 ? 'border-l' : '',
+                    ci === 2 || ci === 5 || ci === 9 ? 'text-brand-700' : '',
                   ]"
               >
                 <button
@@ -470,6 +484,12 @@ async function onImported() {
               <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200">{{ fmtPct(r.prePct, 2) }}</td>
               <td class="px-3 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200">{{ fmtPct(r.postPct, 2) }}</td>
               <td class="px-3 py-1.5 text-right font-semibold border-b border-ink-200" :class="deltaColor(r.deltaPct)">{{ fmtDeltaPct(r.deltaPct) }}</td>
+
+              <!-- ---- Cost-basis (Invested $) ---- -->
+              <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200"
+                  :title="r.avgEntryPPS ? `Avg entry price ~$${r.avgEntryPPS.toFixed(4)}/sh` : ''">
+                {{ r.invested > 0 ? fmtUSD(r.invested) : '—' }}
+              </td>
 
               <!-- ---- Value ($) group ---- -->
               <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200">{{ pps > 0 ? fmtUSD(r.preValue) : '—' }}</td>
