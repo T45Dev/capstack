@@ -102,31 +102,109 @@ export default defineEventHandler(async (event) => {
     cnSharesByStakeholder.set(shId, (cnSharesByStakeholder.get(shId) || 0) + detail.shares)
   }
 
-  // Per-stakeholder dilution
+  // Per-stakeholder dilution. linked_to lets the operator merge two
+  // stakeholder rows into one (e.g., "Ingenuity Medical LLC" → "Marwan
+  // Berrada"); aliases roll up under their primary so the dilution
+  // table shows one row per economic holder.
   const stakeholderRows = db().prepare(`
     SELECT
-      s.id, s.name, s.type,
+      s.id, s.name, s.type, s.linked_to,
       COALESCE(SUM(h.shares), 0) AS held_shares,
-      COALESCE((SELECT SUM(g.quantity) FROM grants g WHERE g.stakeholder_id = s.id AND g.status = 'outstanding'), 0) AS option_shares
+      COALESCE((SELECT SUM(g.quantity) FROM grants g WHERE g.stakeholder_id = s.id AND g.status = 'outstanding'), 0) AS option_shares,
+      COALESCE((SELECT SUM(ri.amount)   FROM round_investors ri WHERE ri.stakeholder_id = s.id), 0) AS invested_dollars
     FROM stakeholders s
     LEFT JOIN holdings h ON h.stakeholder_id = s.id
     WHERE s.company_id = ?
-    GROUP BY s.id, s.name, s.type
-  `).all(id) as any[]
+    GROUP BY s.id, s.name, s.type, s.linked_to
+  `).all(id) as Array<{ id: string; name: string; type: string | null; linked_to: string | null; held_shares: number; option_shares: number; invested_dollars: number }>
 
-  const dilution = stakeholderRows.map(r => {
-    const preTotal = r.held_shares + r.option_shares
-    const cnShares = cnSharesByStakeholder.get(r.id) || 0
-    const postTotal = preTotal + cnShares
+  const byId = new Map<string, typeof stakeholderRows[number]>()
+  for (const r of stakeholderRows) byId.set(r.id, r)
+  // Walk linked_to up to a NULL terminator (cap at 5 hops).
+  function primaryIdFor(r: typeof stakeholderRows[number]): string {
+    let cur = r
+    let depth = 0
+    while (cur.linked_to && depth < 5) {
+      const next = byId.get(cur.linked_to)
+      if (!next) break
+      cur = next; depth++
+    }
+    return cur.id
+  }
+
+  interface DilAcc {
+    stakeholderId: string
+    name: string
+    type: string | null
+    heldShares: number
+    optionShares: number
+    cnShares: number
+    investedDollars: number  // sum of round_investors.amount across the cluster
+    aliasIds: string[]
+    aliasNames: string[]
+    // Whether ANY contributing row (primary or alias) is an option
+    // holder. Lets the dilution UI honor a "options-only" filter even
+    // when the primary is investor-typed but linked to an employee.
+    hasOptions: boolean
+  }
+  const accByPrimary = new Map<string, DilAcc>()
+  function ensure(pid: string, primary: typeof stakeholderRows[number]): DilAcc {
+    let acc = accByPrimary.get(pid)
+    if (!acc) {
+      acc = {
+        stakeholderId: pid,
+        name: primary.name,
+        type: primary.type || null,
+        heldShares: 0, optionShares: 0, cnShares: 0,
+        investedDollars: 0,
+        aliasIds: [], aliasNames: [], hasOptions: false,
+      }
+      accByPrimary.set(pid, acc)
+    }
+    return acc
+  }
+  for (const r of stakeholderRows) {
+    const pid = primaryIdFor(r)
+    const primary = byId.get(pid) || r
+    const acc = ensure(pid, primary)
+    acc.heldShares += r.held_shares
+    acc.optionShares += r.option_shares
+    acc.cnShares += cnSharesByStakeholder.get(r.id) || 0
+    acc.investedDollars += r.invested_dollars || 0
+    if (r.option_shares > 0) acc.hasOptions = true
+    if (r.id !== pid) {
+      acc.aliasIds.push(r.id)
+      acc.aliasNames.push(r.name)
+    }
+  }
+
+  const dilution = [...accByPrimary.values()].map(a => {
+    const preTotal = a.heldShares + a.optionShares
+    const postTotal = preTotal + a.cnShares
     return {
-      stakeholderId: r.id,
-      name: r.name,
-      type: r.type || null,
+      stakeholderId: a.stakeholderId,
+      name: a.name,
+      type: a.type,
       preShares: preTotal,
-      cnShares,
+      cnShares: a.cnShares,
       postShares: postTotal,
       prePct: round.preRoundFDS > 0 ? preTotal / round.preRoundFDS : 0,
       postPct: round.postRoundFDS > 0 ? postTotal / round.postRoundFDS : 0,
+      // Linking metadata so the UI can show "(includes Acme LLC)" or
+      // similar, and the preferred-filter can keep linked rows visible
+      // when any contributor holds options.
+      aliasIds: a.aliasIds,
+      aliasNames: a.aliasNames,
+      hasOptions: a.hasOptions,
+      // Cost-basis: sum of cash contributed across all rounds for this
+      // stakeholder cluster. Lets the dilution view show what each
+      // holder actually paid alongside the current notional value.
+      investedDollars: a.investedDollars,
+      // Weighted-average per-share entry price for the cluster — useful
+      // gut-check against the current PPS.
+      avgEntryPPS: a.heldShares > 0 && a.investedDollars > 0
+        ? a.investedDollars / a.heldShares
+        : null,
     }
   }).sort((a, b) => b.postShares - a.postShares)
 

@@ -102,8 +102,9 @@ function exportCsv() { /* No-op on the simplified layout. Kept on the page heade
       <NuxtLink :to="`/companies/${id}/import`"><UiButton variant="primary"><Upload :size="14" /> Import Carta export</UiButton></NuxtLink>
     </UiEmpty>
 
-    <!-- Financings tab: Previous-Round aggregate + Open-Round modeled card. -->
-    <div v-show="activeTab === 'financings'" class="space-y-4">
+    <!-- Rounds tab: Previous-Round aggregate + Open-Round modeled card,
+         side-by-side on wide screens, stacked on narrow. -->
+    <div v-show="activeTab === 'financings'" class="grid lg:grid-cols-2 gap-4">
       <PreviousRoundCard :company-id="id" @update:saving-count="(n: number) => prevSaving = n" />
       <OpenRoundCard :company-id="id" @update:saving-count="(n: number) => openSaving = n" @refreshed="refreshRoundSummary" />
     </div>

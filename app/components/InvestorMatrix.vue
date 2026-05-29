@@ -163,7 +163,7 @@ function sumDeltaClass(delta: number, newMoney: number): string {
 <template>
   <div class="border border-ink-200 rounded-lg bg-white overflow-hidden shadow-[0_1px_0_rgba(16,24,40,0.04)]">
     <div v-if="!(data?.rounds.length)" class="px-4 py-10 text-center text-sm text-ink-500">
-      Add a round on the Financings tab to start attributing investors.
+      Add a round on the Rounds tab to start attributing investors.
     </div>
     <div v-else class="overflow-x-auto">
       <table class="border-separate w-full" :style="{ borderSpacing: 0 }">
@@ -306,7 +306,7 @@ function sumDeltaClass(delta: number, newMoney: number): string {
       </table>
     </div>
     <p v-if="data?.rounds.length" class="px-4 py-2 text-[11.5px] text-ink-500 bg-ink-50/50 border-t border-ink-100">
-      Shares per cell = $ ÷ round share price. Per-round Δ goes green when the allocations sum to the round's New money on the Financings tab.
+      Shares per cell = $ ÷ round share price. Per-round Δ goes green when the allocations sum to the round's New money on the Rounds tab.
     </p>
   </div>
 </template>

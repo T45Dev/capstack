@@ -159,7 +159,27 @@ interface DilRow {
   deltaValue: number
   isNewRound: boolean
   isFuture: boolean  // synthetic future-only rows (idea-grants aggregate)
+  aliasNames: string[]  // linked stakeholders rolled into this row
+  hasOptions: boolean
+  // Cost-basis from round_investors (cluster-summed for linked rows).
+  // Independent of current PPS — what they actually paid.
+  invested: number
+  avgEntryPPS: number | null
 }
+
+// "Include preferred" toggle. When unchecked, preferred-only rows (no
+// options) drop out of the table. Linked rows where ANY contributor
+// holds options stay visible regardless of the toggle — that was the
+// operator's explicit rule.
+const includePreferred = ref(true)
+const PREF_STORAGE = 'capstack:dilution:includePreferred'
+onMounted(() => {
+  try { const v = localStorage.getItem(PREF_STORAGE); if (v !== null) includePreferred.value = v === 'true' } catch { /* ignore */ }
+})
+watch(includePreferred, v => {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem(PREF_STORAGE, String(v)) } catch { /* ignore */ }
+})
 
 const rows = computed<DilRow[]>(() => {
   const list = (compute.value?.dilution || []) as any[]
@@ -191,6 +211,10 @@ const rows = computed<DilRow[]>(() => {
       deltaValue: postValue - preValue,
       isNewRound: String(d.stakeholderId).startsWith('new:') || String(d.stakeholderId).startsWith('idea:'),
       isFuture: false,
+      aliasNames: Array.isArray(d.aliasNames) ? d.aliasNames : [],
+      hasOptions: !!d.hasOptions,
+      invested: d.investedDollars || 0,
+      avgEntryPPS: d.avgEntryPPS ?? null,
     }
   })
 
@@ -216,6 +240,10 @@ const rows = computed<DilRow[]>(() => {
         deltaValue: postValue,
         isNewRound: true,
         isFuture: true,
+        aliasNames: [],
+        hasOptions: true,
+        invested: 0,
+        avgEntryPPS: null,
       })
     }
     // Idea grants → single synthetic row, anonymous bucket.
@@ -237,15 +265,27 @@ const rows = computed<DilRow[]>(() => {
         deltaValue: postValue,
         isNewRound: true,
         isFuture: true,
+        aliasNames: [],
+        hasOptions: true,
+        invested: 0,
+        avgEntryPPS: null,
       })
     }
+  }
+  // Apply the "Include preferred" filter. Row drops out only when
+  // there's no options anywhere in this stakeholder (or its linked
+  // aliases) AND the toggle is off. Future/new-round rows are kept.
+  if (!includePreferred.value) {
+    return out.filter(r => r.hasOptions || r.isFuture || r.isNewRound)
   }
   return out
 })
 
 // ---- Sortable + resizable columns via the shared composable ----
+// Bumped to v3 so the new Invested-$ column widths don't get
+// short-circuited by a v2 entry in localStorage.
 const table = useSortableTable({
-  key: 'capstack:dilution:v2',
+  key: 'capstack:dilution:v3',
   defaultSort: { key: 'deltaPct', dir: 'asc' },
   columns: [
     { key: 'name',         label: 'Stakeholder',  width: 240, sortable: true, align: 'left' },
@@ -255,6 +295,7 @@ const table = useSortableTable({
     { key: 'prePct',       label: 'Pre %',        width: 80,  sortable: true, align: 'right' },
     { key: 'postPct',      label: 'Post %',       width: 80,  sortable: true, align: 'right' },
     { key: 'deltaPct',     label: 'Δ %',          width: 80,  sortable: true, align: 'right' },
+    { key: 'invested',     label: 'Invested $',   width: 120, sortable: true, align: 'right' },
     { key: 'preValue',     label: 'Pre $',        width: 120, sortable: true, align: 'right' },
     { key: 'postValue',    label: 'Post $',       width: 120, sortable: true, align: 'right' },
     { key: 'deltaValue',   label: 'Δ $',          width: 120, sortable: true, align: 'right' },
@@ -274,6 +315,7 @@ const groupSpans = [
   { label: '', span: 1 },                       // Stakeholder
   { label: 'Shares', span: 3 },                 // Pre / Post / Δ shares
   { label: 'Ownership %', span: 3 },            // Pre / Post / Δ %
+  { label: 'Cost', span: 1 },                   // Invested $
   { label: 'Value ($)', span: 3 },              // Pre / Post / Δ $
 ]
 
@@ -328,6 +370,16 @@ async function onImported() {
             <Upload :size="12" />
             Import preferred holders
           </button>
+
+          <!-- Toggle: include preferred-only holders. When off, the
+               table hides rows whose shares come solely from preferred
+               holdings (no options). A linked alias whose primary
+               holds options stays visible regardless — see compute.post
+               for the hasOptions roll-up. -->
+          <label class="inline-flex items-center gap-2 cursor-pointer select-none text-xs text-ink-700 bg-white border border-ink-300 rounded-md px-3 py-1.5 hover:border-ink-400">
+            <input type="checkbox" v-model="includePreferred" class="brand-brand-500" />
+            <span>Include preferred holders</span>
+          </label>
 
           <!-- Toggle: include proposed + idea grants in the post side.
                Per the operator's spec, future not-yet-issued shares
@@ -392,8 +444,8 @@ async function onImported() {
                   class="relative px-3 py-1.5 border-b border-ink-300"
                   :class="[
                     col.align === 'right' ? 'text-right' : 'text-left',
-                    ci === 1 || ci === 4 || ci === 7 ? 'border-l' : '',
-                    ci === 2 || ci === 5 || ci === 8 ? 'text-brand-700' : '',
+                    ci === 1 || ci === 4 || ci === 7 || ci === 8 ? 'border-l' : '',
+                    ci === 2 || ci === 5 || ci === 9 ? 'text-brand-700' : '',
                   ]"
               >
                 <button
@@ -412,10 +464,15 @@ async function onImported() {
           <tbody>
             <tr v-for="r in sortedRows" :key="r.stakeholderId" class="hover:bg-brand-50/40">
               <td class="px-3 py-1.5 border-b border-ink-200">
-                <span class="text-ink-900 font-medium" :title="r.name">{{ r.name }}</span>
+                <span class="text-ink-900 font-medium" :title="r.aliasNames.length ? `Includes: ${r.aliasNames.join(', ')}` : r.name">{{ r.name }}</span>
                 <span v-if="r.type" class="ml-1.5 text-[9px] uppercase tracking-wide text-ink-500 bg-ink-100 border border-ink-200 px-1 py-0.5 rounded align-middle">{{ r.type }}</span>
                 <span v-if="r.isFuture" class="ml-1.5 text-[9px] uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded align-middle">future</span>
                 <span v-else-if="r.isNewRound" class="ml-1.5 text-[9px] uppercase tracking-wide text-brand-700 bg-brand-50 border border-brand-200 px-1 py-0.5 rounded align-middle">new</span>
+                <span
+                  v-if="r.aliasNames.length"
+                  class="ml-1.5 text-[9px] uppercase tracking-wide text-brand-edge bg-brand-soft border border-brand-200 px-1 py-0.5 rounded align-middle"
+                  :title="`Rolls up: ${r.aliasNames.join(', ')}`"
+                >+{{ r.aliasNames.length }} linked</span>
               </td>
 
               <!-- ---- Shares group ---- -->
@@ -427,6 +484,12 @@ async function onImported() {
               <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200">{{ fmtPct(r.prePct, 2) }}</td>
               <td class="px-3 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200">{{ fmtPct(r.postPct, 2) }}</td>
               <td class="px-3 py-1.5 text-right font-semibold border-b border-ink-200" :class="deltaColor(r.deltaPct)">{{ fmtDeltaPct(r.deltaPct) }}</td>
+
+              <!-- ---- Cost-basis (Invested $) ---- -->
+              <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200"
+                  :title="r.avgEntryPPS ? `Avg entry price ~$${r.avgEntryPPS.toFixed(4)}/sh` : ''">
+                {{ r.invested > 0 ? fmtUSD(r.invested) : '—' }}
+              </td>
 
               <!-- ---- Value ($) group ---- -->
               <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200">{{ pps > 0 ? fmtUSD(r.preValue) : '—' }}</td>

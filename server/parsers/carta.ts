@@ -49,6 +49,15 @@ export interface ParsedGrant {
   expiredDate?: string | null
 }
 
+// Per-investor contribution to a round, captured from a ledger sheet's
+// individual rows. Used to seed round_investors so the Preferred
+// Investor matrix on the Rounds page is populated straight from Carta.
+export interface ParsedRoundInvestor {
+  stakeholderName: string
+  cashContributed: number
+  sharesIssued: number
+}
+
 export interface ParsedRound {
   code: string                       // "CS", "SS", "SA1", "PB1", ...
   name?: string | null               // friendly display from sheet title (e.g. "Series A-1")
@@ -63,6 +72,9 @@ export interface ParsedRound {
                                      // supplied separately by CN attribution (destination = this code),
                                      // so a round stores cashShares as preferred_issued to avoid
                                      // double-counting the converted portion.
+  investors: ParsedRoundInvestor[]   // per-stakeholder rows from the ledger sheet — feeds
+                                     // round_investors so the Preferred Investor matrix is
+                                     // populated straight from a Carta import.
 }
 
 export interface ParsedConvertible {
@@ -228,6 +240,11 @@ function parseLedgerSheet(sheet: import('exceljs').Worksheet, code: string, warn
   const cDebt      = findCol(/^debt\s*canceled$/i)
   const cBoard     = findCol(/^board\s*approval\s*date$/i)
   const cIssueDate = findCol(/^issue\s*date$/i)
+  // Stakeholder name column on each ledger row — drives round_investors.
+  // Carta labels vary slightly across versions; cover the common shapes.
+  const cStakeholder = findCol(
+    /^stakeholder$/i, /^stakeholder\s*name$/i, /^holder$/i, /^name$/i, /^investor$/i,
+  )
   if (cQty < 0) {
     warnings.push(`"${sheet.name}": no Quantity Issued column found — skipping.`)
     return null
@@ -259,6 +276,11 @@ function parseLedgerSheet(sheet: import('exceljs').Worksheet, code: string, warn
   const trackMin = (cur: string | null, next: string | null) =>
     next && (!cur || next < cur) ? next : cur
 
+  // Per-investor accumulator: same stakeholder across multiple ledger
+  // rows (rare, but happens for tranched closings) sums into one
+  // round_investors row downstream.
+  const investorMap = new Map<string, ParsedRoundInvestor>()
+
   for (let r = headerRow + 1; r <= sheet.rowCount; r++) {
     const row = sheet.getRow(r)
     const qty = cQty > 0 ? asNumber(row.getCell(cQty).value) : 0
@@ -268,10 +290,11 @@ function parseLedgerSheet(sheet: import('exceljs').Worksheet, code: string, warn
       const p = asNumber(row.getCell(cIssue).value)
       if (p > 0) sharePrice = p
     }
+    let rowCash = 0
     if (cCash > 0) {
-      const cash = asNumber(row.getCell(cCash).value)
-      newMoney += cash
-      if (cash > 0) cashShares += qty   // new-money shares (vs note-converted)
+      rowCash = asNumber(row.getCell(cCash).value) || 0
+      newMoney += rowCash
+      if (rowCash > 0) cashShares += qty   // new-money shares (vs note-converted)
     }
     if (cDebt > 0)  debtCanceled += asNumber(row.getCell(cDebt).value)
     if (cBoard > 0)     maxBoard = trackMax(maxBoard, asDate(row.getCell(cBoard).value))
@@ -279,6 +302,18 @@ function parseLedgerSheet(sheet: import('exceljs').Worksheet, code: string, warn
       const d = asDate(row.getCell(cIssueDate).value)
       maxIssue = trackMax(maxIssue, d)
       minIssue = trackMin(minIssue, d)
+    }
+    // Per-investor: accumulate by stakeholder name. Skip rows with no
+    // stakeholder column or empty name (defensive — some sheets put
+    // sub-total rows at the bottom with no name).
+    if (cStakeholder > 0) {
+      const name = asString(row.getCell(cStakeholder).value).trim()
+      if (name) {
+        const cur = investorMap.get(name) || { stakeholderName: name, cashContributed: 0, sharesIssued: 0 }
+        cur.cashContributed += rowCash
+        cur.sharesIssued += qty
+        investorMap.set(name, cur)
+      }
     }
   }
   if (sharesIssued <= 0) return null
@@ -307,6 +342,7 @@ function parseLedgerSheet(sheet: import('exceljs').Worksheet, code: string, warn
     debtCanceled,
     sharesIssued,
     cashShares,
+    investors: [...investorMap.values()],
   }
 }
 
@@ -494,10 +530,19 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
       break
     }
   }
-  if (headerRow < 0) {
-    warnings.push(`Could not locate header row in "${detailed.name}".`)
-    return result
+  // Skipping the Detailed Cap Table when its header doesn't parse used
+  // to short-circuit the whole parser, dropping the option-plan sheet
+  // and convertibles with it. That hid real data when Carta exports
+  // varied. Now we warn and continue — the cap-table section just
+  // contributes no stakeholders / holdings / share_classes, but the
+  // ledger sheets above and the Plan / CN sheets below still run.
+  const skipDetailed = headerRow < 0
+  if (skipDetailed) {
+    warnings.push(`Could not locate header row in "${detailed.name}" — skipping cap-table section, ledger + plan sheets still parsed.`)
   }
+  // Branch the cap-table-specific code so it runs only when headerRow
+  // resolved; the rest of parseCartaXlsx executes either way.
+  if (!skipDetailed) {
 
   const header = detailed.getRow(headerRow).values as any[]
   // Build column map: name -> col index (1-based)
@@ -655,6 +700,7 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
       }
     }
   }
+  } // end if (!skipDetailed)
 
   // ----- Convertible Notes -----
   // Carta exports vary the sheet name across templates: "Convertible Notes",
@@ -812,6 +858,7 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
     let planHeaderRow = -1
     const headerSigs = [
       /^(stakeholder|optionee|holder|grantee|recipient|employee)( ?name)?$/i,
+      /^name$/i,  // bare "Name" header — some Carta variants use it
       /^(quantity|qty|shares?)( ?(issued|outstanding|granted))?$/i,
       /^(strike|exercise)( ?price)?$/i,
       /^(issue|award|grant) ?date$/i,
@@ -1040,12 +1087,25 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
           //      row points at a certificate ID (e.g. CS-100), look up
           //      that certificate's Issue Date in the ledger map. Carta
           //      creates the destination cert ON the exercise date, so
-          //      its Issue Date IS the exercise date.
+          //      its Issue Date IS the exercise date. Partial exercises
+          //      can produce multiple certs in one row (separated by
+          //      comma, semicolon, slash, " and ", etc.); we resolve
+          //      each one and take the EARLIEST date — the first
+          //      exercise from this grant.
           let lastExercisedDate: string | null = cExerciseDate > 0 ? asDate(row.getCell(cExerciseDate).value) : null
-          const destination = cDestination > 0 ? asString(row.getCell(cDestination).value).toUpperCase().replace(/\s+/g, '') : ''
-          if (!lastExercisedDate && destination) {
-            const fromLedger = ledgerCertDates.get(destination)
-            if (fromLedger) lastExercisedDate = fromLedger
+          const rawDest = cDestination > 0 ? asString(row.getCell(cDestination).value) : ''
+          if (!lastExercisedDate && rawDest) {
+            const tokens = rawDest
+              .split(/[,;/&\n]|\s+and\s+/i)
+              .map(t => t.trim().toUpperCase().replace(/\s+/g, ''))
+              .filter(Boolean)
+            let earliest: string | null = null
+            for (const tok of tokens) {
+              const d = ledgerCertDates.get(tok)
+              if (!d) continue
+              if (!earliest || d < earliest) earliest = d
+            }
+            if (earliest) lastExercisedDate = earliest
           }
           result.grants.push({
             recipientName: name,

@@ -307,7 +307,7 @@ const ownership = computed(() => {
           <input
             v-model="name"
             type="text"
-            class="w-full px-2 py-1.5 text-sm border border-ink-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand/30"
+            class="w-full text-left px-2 py-1.5 text-sm border border-ink-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand/30"
             placeholder="Series B"
           />
         </div>
