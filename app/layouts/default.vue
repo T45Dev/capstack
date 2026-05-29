@@ -75,7 +75,7 @@ function toggleNav() { navCollapsed.value = !navCollapsed.value }
 // the legacy filenames (e.g. /grants is still /grants on disk, but labelled
 // "Option Grants" everywhere in the UI).
 const tabs = computed(() => companyId.value ? [
-  { to: `/companies/${companyId.value}/cap-table`, label: 'Financings',         icon: FileSpreadsheet },
+  { to: `/companies/${companyId.value}/cap-table`, label: 'Rounds',             icon: FileSpreadsheet },
   { to: `/companies/${companyId.value}/grants`,    label: 'Option Grants',      icon: Award },
   { to: `/companies/${companyId.value}/dilution`,  label: 'Overall Dilution',   icon: GitCompare },
   { to: `/companies/${companyId.value}/pool`,      label: 'Option Pool Impact', icon: TrendingDown },

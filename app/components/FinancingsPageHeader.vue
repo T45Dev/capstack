@@ -26,7 +26,7 @@ const emit = defineEmits<{
 }>()
 
 const tabs: Array<{ key: TabKey; label: string }> = [
-  { key: 'financings', label: 'Financings' },
+  { key: 'financings', label: 'Rounds' },
   { key: 'investors',  label: 'Preferred investors' },
 ]
 </script>
@@ -37,13 +37,13 @@ const tabs: Array<{ key: TabKey; label: string }> = [
     <div class="flex items-center gap-1.5 text-[12px] text-ink-500 mb-2">
       <span>Cap-table model</span>
       <span class="text-ink-300">/</span>
-      <span class="text-ink-700 font-medium">Financings</span>
+      <span class="text-ink-700 font-medium">Rounds</span>
     </div>
 
     <div class="flex items-end justify-between gap-6 flex-wrap pb-3">
       <div class="min-w-0">
         <div class="flex items-center gap-3 flex-wrap">
-          <h1 class="text-[22px] font-semibold text-ink-900 tracking-tight">Financings</h1>
+          <h1 class="text-[22px] font-semibold text-ink-900 tracking-tight">Rounds</h1>
           <span
             v-if="openRoundName"
             class="inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full bg-brand-soft text-brand-edge font-medium"

@@ -129,7 +129,7 @@ const sheetList = computed(() => {
             Drop a Carta pro-forma <code class="text-ink-700 bg-ink-100 px-1 py-px rounded text-[12px] num">.xlsx</code>. We'll pull in
             <span class="text-ink-700 font-medium">option grants</span>,
             <span class="text-ink-700 font-medium">the people who hold them</span>, and
-            <span class="text-ink-700 font-medium">the option-pool size</span>. Financings, share classes, holdings, and convertible notes stay manual on the Financings page.
+            <span class="text-ink-700 font-medium">the option-pool size</span>. Rounds, share classes, holdings, and convertible notes stay manual on the Rounds page.
           </p>
         </div>
         <NuxtLink :to="`/companies/${id}/cap-table`">
@@ -298,7 +298,7 @@ const sheetList = computed(() => {
           <h2 class="text-[13px] font-semibold text-ink-900">{{ result.ok ? 'Import complete' : 'Import finished with issues' }}</h2>
         </div>
         <UiButton variant="primary" size="sm" @click="done">
-          Go to Financings <ArrowRight :size="13" />
+          Go to Rounds <ArrowRight :size="13" />
         </UiButton>
       </header>
 
