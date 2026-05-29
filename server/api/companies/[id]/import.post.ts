@@ -128,15 +128,22 @@ export default defineEventHandler(async (event) => {
     if (parsed.rounds.length) {
       const insSCfromRound = db().prepare(`
         INSERT INTO share_classes (id, company_id, code, name, kind, seniority, issue_price)
-        VALUES (?, ?, ?, ?, ?, 0, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `)
-      for (const round of parsed.rounds) {
-        if (shareClassIdByCode.has(round.code)) continue
+      // Sort by close_date so seniority reflects the cap-stack
+      // chronology (CS → SS → SA1 → SA2 → PB1 ...); the Shareholders
+      // page reads this order when laying out per-class columns.
+      const sortedForSeniority = [...parsed.rounds].sort((a, b) =>
+        (a.closeDate || '') < (b.closeDate || '') ? -1
+        : (a.closeDate || '') > (b.closeDate || '') ? 1 : 0)
+      for (let i = 0; i < sortedForSeniority.length; i++) {
+        const round = sortedForSeniority[i]
+        if (!round || shareClassIdByCode.has(round.code)) continue
         const scId = newId('sc')
         const kind = round.kind === 'formation' ? 'common' : 'preferred'
         const name = round.name || round.code
         try {
-          insSCfromRound.run(scId, id, round.code, name, kind, round.sharePrice ?? null)
+          insSCfromRound.run(scId, id, round.code, name, kind, i, round.sharePrice ?? null)
           shareClassIdByCode.set(round.code, scId)
         } catch (err: any) {
           parsed.warnings.push(`Couldn't synthesize share class for round "${round.code}": ${err?.message || err}`)
