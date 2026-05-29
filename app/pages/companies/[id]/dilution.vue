@@ -49,16 +49,27 @@ const { data: ideas } = await useFetch<any[]>(
   { watch: [id], default: () => [] },
 )
 
-const openRound = computed(() => roundSummary.value?.rounds.find(r => r.kind === 'open') || null)
-const openRoundName = computed(() => openRound.value?.name || openRound.value?.code || 'open round')
-const previousRound = computed(() => {
-  const rounds = roundSummary.value?.rounds || []
-  const openIdx = rounds.findIndex(r => r.kind === 'open')
-  if (openIdx <= 0) return null
-  return rounds[openIdx - 1] || null
-})
+// Previous-Round aggregate — holds the fully-diluted total for the
+// state before the current round. Drives the dilution PRE denominator.
+const { data: aggregate } = await useFetch<{ total_shares_fds: number | null }>(
+  () => `/api/companies/${id.value}/aggregate-round`,
+  { watch: [id], default: () => ({ total_shares_fds: null } as any) },
+)
 
-const pps = computed(() => openRound.value?.share_price || (compute.value?.round?.pricePerShare as number) || 0)
+// Non-formation rounds in timeline order (the API sorts open rounds last).
+const timelineRounds = computed(() => (roundSummary.value?.rounds || []).filter(r => r.kind !== 'formation'))
+
+// Current round being modeled — the open round if one's flagged, else
+// the latest round. Mirrors the Financings page's Open Round card, so a
+// round that's been marked "closed" still models pre vs post.
+const currentRound = computed(() => {
+  const rs = timelineRounds.value
+  if (!rs.length) return null
+  return rs.find(r => r.kind === 'open') || rs[rs.length - 1] || null
+})
+const currentRoundName = computed(() => currentRound.value?.name || currentRound.value?.code || 'current round')
+
+const pps = computed(() => currentRound.value?.share_price || (compute.value?.round?.pricePerShare as number) || 0)
 
 // Toggle: include proposed + ideas in post-side math. Persists per
 // company across reloads. The localStorage read happens in onMounted
@@ -112,14 +123,26 @@ const proposedTotal = computed(() => {
   for (const p of proposedByStakeholder.value.values()) total += p.shares
   return total
 })
-const preFDS = computed(() => previousRound.value?.total_shares_fds || 0)
-// PostFDS is STATIC — it's the open round's total_shares_fds, which
-// already includes the option pool authorization. Proposed grants
-// and idea grants don't grow the denominator; they just attribute
-// some of the already-counted Available pool capacity to specific
-// holders. (Sum of postShares + remaining unattributed Available =
-// postFDS.)
-const postFDS = computed(() => openRound.value?.total_shares_fds || 0)
+// PRE FDS = the Previous-Round aggregate's fully-diluted total (the
+// state before the current round). If earlier closed rounds are still
+// sitting in the rounds table, add their cumulative FDS on top of the
+// aggregate base.
+const preFDS = computed(() => {
+  const base = aggregate.value?.total_shares_fds || 0
+  const rs = timelineRounds.value
+  const idx = currentRound.value ? rs.indexOf(currentRound.value) : -1
+  const prev = idx > 0 ? rs[idx - 1] : null
+  return base + (prev?.total_shares_fds || 0)
+})
+// POST FDS = pre + the current round's new fully-diluted shares.
+// round-summary's total_shares_fds is cumulative across the rounds
+// table, so aggregate base + the current round's cumulative gives the
+// post-close total. Static denominator — proposed/idea grants attribute
+// already-counted pool capacity rather than growing it.
+const postFDS = computed(() => {
+  const base = aggregate.value?.total_shares_fds || 0
+  return base + (currentRound.value?.total_shares_fds || 0)
+})
 
 interface DilRow {
   stakeholderId: string
@@ -289,8 +312,8 @@ async function onImported() {
         <div>
           <h1 class="text-xl font-semibold tracking-tight text-ink-900">Overall Dilution</h1>
           <p class="text-sm text-ink-600 mt-1">
-            Comparing <span class="font-medium text-ink-800">pre-{{ openRoundName }}</span> vs.
-            <span class="font-medium text-brand-700">post-{{ openRoundName }}</span>.
+            Comparing <span class="font-medium text-ink-800">pre-{{ currentRoundName }}</span> vs.
+            <span class="font-medium text-brand-700">post-{{ currentRoundName }}</span>.
             Δ = post − pre; red = dilution, green = growth.
           </p>
         </div>
@@ -318,18 +341,20 @@ async function onImported() {
           </label>
         </div>
       </div>
-      <div v-if="openRound" class="mt-2 text-[11px] num text-ink-500 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <div v-if="currentRound" class="mt-2 text-[11px] num text-ink-500 flex flex-wrap items-center gap-x-3 gap-y-1">
         <span>
           <span class="uppercase tracking-wider">Pre FDS</span>
-          <span class="ml-1 text-ink-700">{{ fmtShares(preFDS) }}</span>
-          <span v-if="previousRound" class="ml-0.5 text-ink-400">({{ previousRound.name || previousRound.code }})</span>
-          <span v-else class="ml-0.5 text-amber-700">(no round before open — pre% will be 0)</span>
+          <template v-if="preFDS > 0">
+            <span class="ml-1 text-ink-700">{{ fmtShares(preFDS) }}</span>
+            <span class="ml-0.5 text-ink-400">(Previous Round)</span>
+          </template>
+          <span v-else class="ml-1 text-amber-700">0 — set Total FDS on the Previous Round card</span>
         </span>
         <span class="text-ink-300">·</span>
         <span>
           <span class="uppercase tracking-wider">Post FDS</span>
           <span class="ml-1 text-ink-700">{{ fmtShares(postFDS) }}</span>
-          <span class="ml-0.5 text-ink-400">({{ openRound.name || openRound.code }})</span>
+          <span class="ml-0.5 text-ink-400">({{ currentRoundName }})</span>
         </span>
         <span v-if="pps > 0" class="text-ink-300">·</span>
         <span v-if="pps > 0">
@@ -338,14 +363,14 @@ async function onImported() {
         </span>
       </div>
       <div v-else class="mt-2 text-[11px] text-amber-700">
-        No round is flagged as "Open" on the Financings page — set one to model dilution against it.
+        No round to model yet — add one on the Financings page to compare pre vs post.
       </div>
     </div>
 
     <!-- Table: sortable + resizable columns, 3 grouped column groups. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card flex flex-col min-h-0 flex-1 overflow-hidden">
       <div v-if="!sortedRows.length" class="px-4 py-12 text-center text-sm text-ink-500">
-        No data yet — set a round to "Open" on the Financings page to model dilution against it.
+        No data yet — add a round on the Financings page and import or enter holders to model dilution.
       </div>
       <div v-else class="overflow-auto min-h-0 flex-1">
         <table class="text-[13px] num border-separate" style="border-spacing: 0;">
