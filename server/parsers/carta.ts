@@ -205,7 +205,7 @@ function isOptionPlanSheet(ws: import('exceljs').Worksheet): boolean {
 // Pull (CODE) out of "Series Seed Preferred (SS) Stock"
 function extractCode(name: string, fallback: string): string {
   const m = /\(([A-Z][A-Z0-9-]{0,8})\)/.exec(name)
-  return m ? m[1] : fallback
+  return m?.[1] ?? fallback
 }
 
 // Parse one per-class "<CODE> Ledger" sheet. Carta puts a banner in rows 2-3,
@@ -525,7 +525,21 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
   for (let r = 1; r <= Math.min(detailed.rowCount, 20); r++) {
     const cells = detailed.getRow(r).values as any[]
     const flat = cells.map(v => asString(v).toLowerCase()).join('|')
-    if (flat.includes('name') && (flat.includes('common') || flat.includes('preferred') || flat.includes('series'))) {
+    // The header row names a holder column AND carries at least one
+    // recognizable data column. The old rule demanded the literal token
+    // "name" PLUS a share-class keyword in the same row; stripped-down
+    // exports that label the holder column "Stakeholder" (no "name"), or
+    // that don't spell out common/preferred/series in the header, slipped
+    // past it and the whole cap-table section got skipped (holdings then
+    // fell back to round_investors synthesis, losing per-class detail).
+    // Accept stakeholder/holder as the holder signal, and the structural
+    // columns (Stakeholder ID / Outstanding / Fully Diluted) as the data
+    // signal, so those exports parse too. The pairing keeps metadata rows
+    // (a bare "Company Name" line) from matching.
+    const hasHolder = flat.includes('name') || flat.includes('stakeholder') || flat.includes('holder')
+    const hasClassKw = flat.includes('common') || flat.includes('preferred') || flat.includes('series') || flat.includes('seed')
+    const hasStructural = flat.includes('stakeholder id') || flat.includes('outstanding shares') || flat.includes('fully diluted') || flat.includes('shares held')
+    if (hasHolder && (hasClassKw || hasStructural)) {
       headerRow = r
       break
     }
@@ -554,7 +568,13 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
   }
 
   // Detect share-class columns (skip 1:1 Conversion Ratio variants — they duplicate the base column)
+  // Holder column. Prefer an exact "Name"; fall back to "Stakeholder" /
+  // "Stakeholder Name" / "Holder" so exports that don't use the literal
+  // "Name" header still resolve a holder column. The patterns are anchored
+  // so "Stakeholder ID" is never mistaken for the name column.
   const nameCol = cols.find(c => /^name$/i.test(c.label))
+              || cols.find(c => /^stakeholder(\s*name)?$/i.test(c.label))
+              || cols.find(c => /^holder(\s*name)?$/i.test(c.label))
   const stakeholderIdCol = cols.find(c => /stakeholder\s*id/i.test(c.label))
   const optsCol = cols.find(c => /options?\s+and\s+rsu/i.test(c.label) && /outstanding/i.test(c.label))
   const outstandingSharesCol = cols.find(c => /^outstanding\s+shares$/i.test(c.label))
