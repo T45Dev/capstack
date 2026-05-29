@@ -4,16 +4,19 @@
 // are sortable and resizable; widths + sort direction persist in
 // localStorage via useSortableTable.
 //
-// Denominators (TWO, so dilution is visible):
-//   - pre%  = stakeholder shares ÷ FDS through the round BEFORE the
-//             current one (aggregate base + prior round's cumulative
-//             total_shares_fds)
-//   - post% = stakeholder shares ÷ FDS through the current round
-//             (aggregate base + current round's cumulative total_shares_fds)
-// A holder whose share count doesn't change is STILL diluted: the
-// numerator is the same but the denominator grows, so pre% > post%.
-// That's the point — dilution comes from the denominator, not from
-// the holder needing to lose/gain shares.
+// Denominators (TWO, so dilution is visible) — these MIRROR the
+// Financings page cards exactly (the operator's source of truth):
+//   - pre%  = shares ÷ PRE FDS  = the Previous-Round aggregate's Total
+//             FDS (everything before the open round; PreviousRoundCard).
+//   - post% = shares ÷ POST FDS = that base + the open round's OWN new
+//             shares + option pool + notes converted (OpenRoundCard's
+//             "Total FDS post").
+// A holder whose share count doesn't change is STILL diluted: same
+// numerator, bigger denominator → pre% > post%. Dilution comes from the
+// denominator growing, not from the holder gaining/losing shares.
+// NB: do NOT use round-summary's cumulative total_shares_fds as the
+// denominator — it accumulates the rounds table from 0, so adding it to
+// the aggregate base double-counts all prior history.
 //
 // Toggle: "Include proposed + ideas in post" rolls not-yet-issued
 // grants (status='proposed' from the Grants page) and pool Ideas
@@ -40,6 +43,9 @@ const { data: roundSummary } = await useFetch<{
     kind: string
     total_shares_fds: number
     share_price: number | null
+    new_money: number | null
+    option_pool_issued: number | null
+    notes_converted: number | null
   }>
 }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
 // Proposed grants live on the grants endpoint (status='proposed').
@@ -131,23 +137,23 @@ const proposedTotal = computed(() => {
   for (const p of proposedByStakeholder.value.values()) total += p.shares
   return total
 })
-// Two denominators so dilution shows. PRE FDS = fully-diluted total
-// through the round BEFORE the current one: aggregate base (Previous-
-// Round card's Total FDS) + the prior round's cumulative total_shares_fds.
-const preFDS = computed(() => {
-  const base = aggregate.value?.total_shares_fds || 0
-  const rs = timelineRounds.value
-  const idx = currentRound.value ? rs.indexOf(currentRound.value) : -1
-  const prev = idx > 0 ? rs[idx - 1] : null
-  return base + (prev?.total_shares_fds || 0)
-})
-// POST FDS = aggregate base + the current round's cumulative
-// total_shares_fds. Bigger than preFDS by this round's new shares, so a
-// holder with the same numerator dilutes pre→post. Proposed/idea grants
-// do NOT grow it (they draw from pool capacity already counted here).
+// PRE FDS = the Previous-Round aggregate's Total FDS (everything before
+// the open round). Matches PreviousRoundCard.
+const preFDS = computed(() => aggregate.value?.total_shares_fds || 0)
+// POST FDS = aggregate base + the open round's OWN incremental shares:
+// new preferred (new_money / share_price) + option pool issued + notes
+// converted. This replicates OpenRoundCard.totalSharesFdsPost so the two
+// pages agree. (round-summary's total_shares_fds is cumulative-from-0 and
+// would double-count the base, which is the bug we're fixing.) Proposed/
+// idea grants do NOT grow this — they augment the POST numerator only.
 const postFDS = computed(() => {
   const base = aggregate.value?.total_shares_fds || 0
-  return base + (currentRound.value?.total_shares_fds || 0)
+  const r = currentRound.value
+  if (!r) return base
+  const issued = (r.new_money && r.share_price) ? Math.floor(r.new_money / r.share_price) : 0
+  const pool = r.option_pool_issued || 0
+  const notes = r.notes_converted || 0
+  return base + issued + pool + notes
 })
 
 interface DilRow {
