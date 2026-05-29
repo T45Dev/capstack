@@ -17,15 +17,26 @@ export default defineEventHandler(async (event) => {
     // liq pref terms — drive exit waterfall
     'liq_pref_multiple', 'participation', 'participation_cap', 'pref_tier',
   ]
+  // Columns with NOT NULL DEFAULT 0 in the rounds schema. The card sends
+  // its full body on Save; an "unfilled" number field arrives as null,
+  // and naively writing null would violate the constraint and fail the
+  // whole PATCH. Coerce these to 0 when the body explicitly nulls them.
+  const numericNotNull = new Set([
+    'new_money', 'debt_canceled', 'option_pool_issued',
+    'preferred_issued', 'common', 'liq_pref_multiple',
+    'pref_tier', 'seniority',
+  ])
   const updates: string[] = []
   const params: any[] = []
   for (const f of fields) {
     if (f in body) {
       updates.push(`${f} = ?`)
+      let v = body[f]
       // Normalize empty strings on text fields to null so a cleared input
       // doesn't leave a literal "" behind.
-      const v = body[f]
-      params.push(v === '' ? null : v)
+      if (v === '') v = null
+      if (v == null && numericNotNull.has(f)) v = 0
+      params.push(v)
     }
   }
   if (!updates.length) return db().prepare('SELECT * FROM rounds WHERE id = ?').get(id)

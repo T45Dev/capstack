@@ -7,7 +7,7 @@
 // (or hits ⌘S) to commit all changes in a single PATCH. Status toggle,
 // delete, and "Start an open round" still commit immediately — they're
 // discrete actions, not field edits.
-import { Sparkles, Plus, Calculator, Trash2, Save, Undo2, Check } from 'lucide-vue-next'
+import { Sparkles, Plus, Trash2, Save, Undo2, Check } from 'lucide-vue-next'
 import { fmtShares, fmtUSD } from '~/utils/format'
 
 interface Props { companyId: string }
@@ -31,8 +31,6 @@ interface OpenRound {
 
 interface Aggregate {
   total_shares_fds: number | null
-  option_pool_total: number | null
-  pool_attributed: number
 }
 
 const { data: roundSummary, refresh: refreshRound } = await useFetch<{ rounds: any[] }>(() => `/api/companies/${props.companyId}/round-summary`, { watch: [() => props.companyId] })
@@ -236,12 +234,6 @@ const totalSharesFdsPost = computed(() => {
   if (!base && !issued && !pool) return null
   return base + issued + pool
 })
-const poolAvailablePost = computed(() => {
-  const total = (agg.value?.option_pool_total ?? 0) + (optionPoolIssued.value ?? 0)
-  const attributed = agg.value?.pool_attributed ?? 0
-  if (!total && !attributed) return null
-  return total - attributed
-})
 const ownership = computed(() => {
   if (!newShares.value || !totalSharesFdsPost.value) return null
   return newShares.value / totalSharesFdsPost.value
@@ -347,7 +339,7 @@ const ownership = computed(() => {
 
       <!-- Derived footer: live cap-table impact of the round's terms.
            Shown whether the round is open or closed. -->
-      <div class="px-5 py-3 border-t border-ink-100 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-[12px]" :class="isOpen ? 'bg-brand-soft/40' : 'bg-ink-50/50'">
+      <div class="px-5 py-3 border-t border-ink-100 grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-2 text-[12px]" :class="isOpen ? 'bg-brand-soft/40' : 'bg-ink-50/50'">
         <div>
           <div class="text-[10px] uppercase tracking-[0.06em] text-ink-500 font-medium">Post-money</div>
           <div class="num font-semibold text-ink-900">{{ postMoney != null ? fmtUSD(postMoney) : '—' }}</div>
@@ -359,10 +351,6 @@ const ownership = computed(() => {
         <div>
           <div class="text-[10px] uppercase tracking-[0.06em] text-ink-500 font-medium">Total FDS <span class="text-ink-400 font-normal normal-case tracking-normal">post</span></div>
           <div class="num font-semibold text-ink-900">{{ totalSharesFdsPost != null ? fmtShares(totalSharesFdsPost) : '—' }}</div>
-        </div>
-        <div>
-          <div class="text-[10px] uppercase tracking-[0.06em] text-ink-500 font-medium flex items-center gap-1"><Calculator :size="10" /> Pool available <span class="text-ink-400 font-normal normal-case tracking-normal">post</span></div>
-          <div class="num font-semibold" :class="(poolAvailablePost ?? 0) < 0 ? 'text-red-700' : 'text-ok'">{{ poolAvailablePost != null ? fmtShares(poolAvailablePost) : '—' }}</div>
         </div>
       </div>
 
