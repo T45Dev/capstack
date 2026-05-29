@@ -14,12 +14,13 @@ export default defineEventHandler((event) => {
   if (!id) throw createError({ statusCode: 400, message: 'id required' })
 
   const rounds = db().prepare(`
-    SELECT id, code, name, kind, close_date, share_price, new_money, seniority
+    SELECT id, code, name, kind, close_date, share_price, new_money, preferred_issued, seniority
     FROM rounds WHERE company_id = ?
     ORDER BY kind = 'open' ASC, COALESCE(close_date, '9999-99-99') ASC, seniority ASC
   `).all(id) as Array<{
     id: string; code: string; name: string | null; kind: 'formation' | 'closed' | 'open';
-    close_date: string | null; share_price: number | null; new_money: number; seniority: number;
+    close_date: string | null; share_price: number | null; new_money: number;
+    preferred_issued: number; seniority: number;
   }>
 
   const allocations = db().prepare(`
@@ -100,11 +101,25 @@ export default defineEventHandler((event) => {
     }
   }
 
-  // Sum per round; reconcile against rounds.new_money.
-  const sums: Record<string, { allocated: number; new_money: number; delta: number }> = {}
+  // Sum per round in BOTH currencies. The matrix is shares-first, so
+  // the UI reconciles allocated_shares vs preferred_issued; we still
+  // expose the $ sums so the cell tooltip can show "$X allocated of
+  // $Y new money" for operators with the dollar habit.
+  const sums: Record<string, {
+    allocated: number; new_money: number; delta: number;
+    allocated_shares: number; preferred_issued: number; delta_shares: number;
+  }> = {}
   for (const r of rounds) {
     const allocated = Object.values(matrix[r.id] || {}).reduce((s, v) => s + (v.amount || 0), 0)
-    sums[r.id] = { allocated, new_money: r.new_money || 0, delta: allocated - (r.new_money || 0) }
+    const allocatedShares = Object.values(matrix[r.id] || {}).reduce((s, v) => s + (v.shares || 0), 0)
+    sums[r.id] = {
+      allocated,
+      new_money: r.new_money || 0,
+      delta: allocated - (r.new_money || 0),
+      allocated_shares: allocatedShares,
+      preferred_issued: r.preferred_issued || 0,
+      delta_shares: allocatedShares - (r.preferred_issued || 0),
+    }
   }
 
   // Per-stakeholder CN totals to surface as an extra column in the
@@ -120,7 +135,8 @@ export default defineEventHandler((event) => {
   return {
     rounds: rounds.map(r => ({
       id: r.id, code: r.code, name: r.name, kind: r.kind,
-      close_date: r.close_date, share_price: r.share_price, new_money: r.new_money,
+      close_date: r.close_date, share_price: r.share_price,
+      new_money: r.new_money, preferred_issued: r.preferred_issued,
     })),
     investors: allInvestors,
     matrix,
