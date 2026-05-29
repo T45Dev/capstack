@@ -306,6 +306,13 @@ function migrate(d: Database.Database): void {
   ensureColumn('convertibles', 'financing_stage_code', 'TEXT')
   ensureColumn('companies', 'starting_round', 'TEXT')
   ensureColumn('companies', 'starting_round_date', 'TEXT')
+  // Stakeholder linking: an alias row's linked_to points at the
+  // canonical "primary" stakeholder. Same company. NULL = standalone.
+  // The Shareholders page lets the operator merge duplicates that
+  // Carta sometimes splits ("Ingenuity Medical LLC" vs. "Marwan
+  // Berrada"); aggregations roll the alias's shares up under the
+  // primary's row.
+  ensureColumn('stakeholders', 'linked_to', 'TEXT')
   // Stamped on the first successful Carta import. The import UI uses it
   // to decide between "Welcome" and "Re-import" framing; nothing else
   // gates on it now that the setup wizard is gone.

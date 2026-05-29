@@ -159,7 +159,23 @@ interface DilRow {
   deltaValue: number
   isNewRound: boolean
   isFuture: boolean  // synthetic future-only rows (idea-grants aggregate)
+  aliasNames: string[]  // linked stakeholders rolled into this row
+  hasOptions: boolean
 }
+
+// "Include preferred" toggle. When unchecked, preferred-only rows (no
+// options) drop out of the table. Linked rows where ANY contributor
+// holds options stay visible regardless of the toggle — that was the
+// operator's explicit rule.
+const includePreferred = ref(true)
+const PREF_STORAGE = 'capstack:dilution:includePreferred'
+onMounted(() => {
+  try { const v = localStorage.getItem(PREF_STORAGE); if (v !== null) includePreferred.value = v === 'true' } catch { /* ignore */ }
+})
+watch(includePreferred, v => {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem(PREF_STORAGE, String(v)) } catch { /* ignore */ }
+})
 
 const rows = computed<DilRow[]>(() => {
   const list = (compute.value?.dilution || []) as any[]
@@ -191,6 +207,8 @@ const rows = computed<DilRow[]>(() => {
       deltaValue: postValue - preValue,
       isNewRound: String(d.stakeholderId).startsWith('new:') || String(d.stakeholderId).startsWith('idea:'),
       isFuture: false,
+      aliasNames: Array.isArray(d.aliasNames) ? d.aliasNames : [],
+      hasOptions: !!d.hasOptions,
     }
   })
 
@@ -216,6 +234,8 @@ const rows = computed<DilRow[]>(() => {
         deltaValue: postValue,
         isNewRound: true,
         isFuture: true,
+        aliasNames: [],
+        hasOptions: true,
       })
     }
     // Idea grants → single synthetic row, anonymous bucket.
@@ -237,8 +257,16 @@ const rows = computed<DilRow[]>(() => {
         deltaValue: postValue,
         isNewRound: true,
         isFuture: true,
+        aliasNames: [],
+        hasOptions: true,
       })
     }
+  }
+  // Apply the "Include preferred" filter. Row drops out only when
+  // there's no options anywhere in this stakeholder (or its linked
+  // aliases) AND the toggle is off. Future/new-round rows are kept.
+  if (!includePreferred.value) {
+    return out.filter(r => r.hasOptions || r.isFuture || r.isNewRound)
   }
   return out
 })
@@ -329,6 +357,16 @@ async function onImported() {
             Import preferred holders
           </button>
 
+          <!-- Toggle: include preferred-only holders. When off, the
+               table hides rows whose shares come solely from preferred
+               holdings (no options). A linked alias whose primary
+               holds options stays visible regardless — see compute.post
+               for the hasOptions roll-up. -->
+          <label class="inline-flex items-center gap-2 cursor-pointer select-none text-xs text-ink-700 bg-white border border-ink-300 rounded-md px-3 py-1.5 hover:border-ink-400">
+            <input type="checkbox" v-model="includePreferred" class="brand-brand-500" />
+            <span>Include preferred holders</span>
+          </label>
+
           <!-- Toggle: include proposed + idea grants in the post side.
                Per the operator's spec, future not-yet-issued shares
                should fall under "post" (never "pre"). -->
@@ -412,10 +450,15 @@ async function onImported() {
           <tbody>
             <tr v-for="r in sortedRows" :key="r.stakeholderId" class="hover:bg-brand-50/40">
               <td class="px-3 py-1.5 border-b border-ink-200">
-                <span class="text-ink-900 font-medium" :title="r.name">{{ r.name }}</span>
+                <span class="text-ink-900 font-medium" :title="r.aliasNames.length ? `Includes: ${r.aliasNames.join(', ')}` : r.name">{{ r.name }}</span>
                 <span v-if="r.type" class="ml-1.5 text-[9px] uppercase tracking-wide text-ink-500 bg-ink-100 border border-ink-200 px-1 py-0.5 rounded align-middle">{{ r.type }}</span>
                 <span v-if="r.isFuture" class="ml-1.5 text-[9px] uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded align-middle">future</span>
                 <span v-else-if="r.isNewRound" class="ml-1.5 text-[9px] uppercase tracking-wide text-brand-700 bg-brand-50 border border-brand-200 px-1 py-0.5 rounded align-middle">new</span>
+                <span
+                  v-if="r.aliasNames.length"
+                  class="ml-1.5 text-[9px] uppercase tracking-wide text-brand-edge bg-brand-soft border border-brand-200 px-1 py-0.5 rounded align-middle"
+                  :title="`Rolls up: ${r.aliasNames.join(', ')}`"
+                >+{{ r.aliasNames.length }} linked</span>
               </td>
 
               <!-- ---- Shares group ---- -->

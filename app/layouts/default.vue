@@ -5,7 +5,7 @@
 // The page-level header (breadcrumb, H1, status pill, action buttons) is
 // owned by each page — see FinancingsPageHeader for the Financings page.
 import {
-  FileSpreadsheet, Award, GitCompare, TrendingDown,
+  FileSpreadsheet, Users, Award, GitCompare, TrendingDown,
   FlaskConical, Upload, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-vue-next'
 const route = useRoute()
@@ -75,11 +75,12 @@ function toggleNav() { navCollapsed.value = !navCollapsed.value }
 // the legacy filenames (e.g. /grants is still /grants on disk, but labelled
 // "Option Grants" everywhere in the UI).
 const tabs = computed(() => companyId.value ? [
-  { to: `/companies/${companyId.value}/cap-table`, label: 'Rounds',             icon: FileSpreadsheet },
-  { to: `/companies/${companyId.value}/grants`,    label: 'Option Grants',      icon: Award },
-  { to: `/companies/${companyId.value}/dilution`,  label: 'Overall Dilution',   icon: GitCompare },
-  { to: `/companies/${companyId.value}/pool`,      label: 'Option Pool Impact', icon: TrendingDown },
-  { to: `/companies/${companyId.value}/scenarios`, label: 'Exit Scenarios',     icon: FlaskConical },
+  { to: `/companies/${companyId.value}/cap-table`,    label: 'Rounds',             icon: FileSpreadsheet },
+  { to: `/companies/${companyId.value}/shareholders`, label: 'Shareholders',       icon: Users },
+  { to: `/companies/${companyId.value}/grants`,       label: 'Option Grants',      icon: Award },
+  { to: `/companies/${companyId.value}/dilution`,     label: 'Overall Dilution',   icon: GitCompare },
+  { to: `/companies/${companyId.value}/pool`,         label: 'Option Pool Impact', icon: TrendingDown },
+  { to: `/companies/${companyId.value}/scenarios`,    label: 'Exit Scenarios',     icon: FlaskConical },
 ] : [])
 
 const importHref = computed(() => companyId.value ? `/companies/${companyId.value}/import` : null)
