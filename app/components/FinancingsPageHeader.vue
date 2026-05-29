@@ -6,7 +6,7 @@
 // Pre-baseline picker lives in AppTopBar (serves every per-company page).
 import { Plus, Upload, Download, Camera } from 'lucide-vue-next'
 
-export type TabKey = 'financings' | 'notes' | 'investors'
+export type TabKey = 'financings' | 'investors'
 
 interface Props {
   openRoundName: string | null
@@ -27,7 +27,6 @@ const emit = defineEmits<{
 
 const tabs: Array<{ key: TabKey; label: string }> = [
   { key: 'financings', label: 'Financings' },
-  { key: 'notes',      label: 'Convertible notes' },
   { key: 'investors',  label: 'Preferred investors' },
 ]
 </script>
@@ -63,8 +62,8 @@ const tabs: Array<{ key: TabKey; label: string }> = [
           <span v-else-if="lastSavedAgo" class="text-[12px] text-ink-500">· Auto-saved {{ lastSavedAgo }}</span>
         </div>
         <p class="text-[13px] text-ink-500 mt-1 max-w-2xl">
-          Per-round equity inputs and derived cap-stack math. Convertible-note
-          attribution per round; ledger lives in the Convertible notes tab.
+          Previous-round aggregate and the open round you're modeling.
+          All financings, share classes, and convertibles are manually entered.
         </p>
       </div>
 

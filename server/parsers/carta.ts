@@ -962,10 +962,16 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
       // sheet. This is the single most useful warning when the parser
       // produces 0 grants — the operator can read it and see at a glance
       // which column went unmatched.
+      const colLetter = (idx: number) => {
+        // Excel-style letter for 1-indexed columns: 1→A, 26→Z, 27→AA, 28→AB…
+        let n = idx, s = ''
+        while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26) }
+        return s || '?'
+      }
       const colReport = (n: string, idx: number) => {
         if (idx <= 0) return `${n}=NOT FOUND`
         const hdr = (planSheet.getRow(planHeaderRow).values as any[])[idx]
-        return `${n}=col ${String.fromCharCode(64 + Math.min(idx, 26))} ("${asString(hdr)}")`
+        return `${n}=col ${colLetter(idx)} ("${asString(hdr)}")`
       }
       warnings.push(
         `"${planSheet.name}" columns: `
@@ -974,6 +980,9 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
           colReport('qty_issued', cQtyIssued),
           colReport('qty_outstanding', cQtyOutstanding),
           colReport('qty_generic', cQtyGeneric),
+          colReport('qty_exercised', cQtyExercised),
+          colReport('qty_cancelled', cQtyCancelled),
+          colReport('qty_expired', cQtyExpired),
           colReport('strike', cStrike),
           colReport('issue_date', cIssueDate),
           colReport('vest_start', cVestStart),
@@ -999,6 +1008,13 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
           const qtyIssued = cQtyIssued > 0 ? asNumber(row.getCell(cQtyIssued).value) : 0
           const qtyOutstanding = cQtyOutstanding > 0 ? asNumber(row.getCell(cQtyOutstanding).value) : 0
           const qtyGeneric = cQtyGeneric > 0 ? asNumber(row.getCell(cQtyGeneric).value) : 0
+          // Read audit counts up-front so the "skip empty row" check below
+          // can keep fully-out-of-play grants (outstanding=0 but exercised
+          // or cancelled > 0). Those grants still subtract from the option
+          // pool — exercised shares move to common, cancelled shares return.
+          const qtyExercised = cQtyExercised > 0 ? asNumber(row.getCell(cQtyExercised).value) : 0
+          const qtyCancelled = cQtyCancelled > 0 ? asNumber(row.getCell(cQtyCancelled).value) : 0
+          const qtyExpiredVal = cQtyExpired > 0 ? asNumber(row.getCell(cQtyExpired).value) : 0
           // Use the Quantity Outstanding column's value even when it's 0:
           // a fully exercised/cancelled grant has 0 outstanding and its shares
           // now live in common, so falling back to Issued would double-count
@@ -1006,7 +1022,7 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
           const quantity = cQtyOutstanding > 0 ? qtyOutstanding
                          : qtyIssued > 0 ? qtyIssued
                          : qtyGeneric
-          if (quantity <= 0) { skippedNoQty++; continue }
+          if (quantity <= 0 && qtyExercised <= 0 && qtyCancelled <= 0 && qtyExpiredVal <= 0) { skippedNoQty++; continue }
 
           const scheduleText = cVestSchedule > 0 ? asString(row.getCell(cVestSchedule).value) : ''
           const { months, cliff } = parseVestingSchedule(scheduleText)
@@ -1041,9 +1057,9 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
             cliffMonths: cliff,
             awardType: cAwardType > 0 ? (asString(row.getCell(cAwardType).value) || null) : null,
             quantityIssued: qtyIssued > 0 ? Math.floor(qtyIssued) : null,
-            quantityExercised: cQtyExercised > 0 ? Math.floor(asNumber(row.getCell(cQtyExercised).value)) || null : null,
-            quantityForfeited: cQtyCancelled > 0 ? Math.floor(asNumber(row.getCell(cQtyCancelled).value)) || null : null,
-            quantityExpired: cQtyExpired > 0 ? Math.floor(asNumber(row.getCell(cQtyExpired).value)) || null : null,
+            quantityExercised: qtyExercised > 0 ? Math.floor(qtyExercised) : null,
+            quantityForfeited: qtyCancelled > 0 ? Math.floor(qtyCancelled) : null,
+            quantityExpired: qtyExpiredVal > 0 ? Math.floor(qtyExpiredVal) : null,
             acceleration,
             lastExercisedDate,
             // Termination Date is a useful fallback when the export doesn't

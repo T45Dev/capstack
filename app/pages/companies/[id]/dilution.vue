@@ -15,14 +15,14 @@
 //             (+ proposed + ideas if toggled)
 //   - pre%  = stakeholder shares ÷ (round IMMEDIATELY BEFORE open)'s
 //             total_shares_fds
-import { ArrowUp, ArrowDown } from 'lucide-vue-next'
+import { ArrowUp, ArrowDown, Upload } from 'lucide-vue-next'
 import { fmtUSD, fmtPct, fmtShares } from '~/utils/format'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
 
 const computeBody = computed(() => ({}))
-const { data: compute } = await useFetch(() => `/api/companies/${id.value}/compute`, {
+const { data: compute, refresh: refreshCompute } = await useFetch(() => `/api/companies/${id.value}/compute`, {
   method: 'POST',
   body: computeBody,
   watch: [id],
@@ -273,6 +273,12 @@ function fmtDeltaUSD(n: number): string {
   if (Math.abs(n) < 1) return '$0'
   return (n > 0 ? '+' : '') + fmtUSD(n)
 }
+
+// ---- Import modal for preferred shareholders ----
+const importOpen = ref(false)
+async function onImported() {
+  await refreshCompute()
+}
 </script>
 
 <template>
@@ -288,16 +294,29 @@ function fmtDeltaUSD(n: number): string {
             Δ = post − pre; red = dilution, green = growth.
           </p>
         </div>
-        <!-- Toggle: include proposed + idea grants in the post side.
-             Per the operator's spec, future not-yet-issued shares
-             should fall under "post" (never "pre"). -->
-        <label class="inline-flex items-center gap-2 cursor-pointer select-none text-xs text-ink-700 bg-white border border-ink-300 rounded-md px-3 py-1.5 hover:border-ink-400">
-          <input type="checkbox" v-model="includeFuture" class="brand-brand-500" />
-          <span>Include proposed + ideas in post</span>
-          <span class="text-[10px] text-ink-400 num">
-            ({{ fmtShares(proposedTotal) }} prop · {{ fmtShares(ideaConsumingShares) }} ideas)
-          </span>
-        </label>
+        <div class="flex items-center gap-2 flex-wrap">
+          <!-- Bulk-import preferred holders so they tie into the pre-side
+               of the dilution view (via stakeholders + holdings). -->
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 text-xs text-ink-700 bg-white border border-ink-300 rounded-md px-3 py-1.5 hover:border-ink-400 hover:bg-ink-50"
+            @click="importOpen = true"
+          >
+            <Upload :size="12" />
+            Import preferred holders
+          </button>
+
+          <!-- Toggle: include proposed + idea grants in the post side.
+               Per the operator's spec, future not-yet-issued shares
+               should fall under "post" (never "pre"). -->
+          <label class="inline-flex items-center gap-2 cursor-pointer select-none text-xs text-ink-700 bg-white border border-ink-300 rounded-md px-3 py-1.5 hover:border-ink-400">
+            <input type="checkbox" v-model="includeFuture" class="brand-brand-500" />
+            <span>Include proposed + ideas in post</span>
+            <span class="text-[10px] text-ink-400 num">
+              ({{ fmtShares(proposedTotal) }} prop · {{ fmtShares(ideaConsumingShares) }} ideas)
+            </span>
+          </label>
+        </div>
       </div>
       <div v-if="openRound" class="mt-2 text-[11px] num text-ink-500 flex flex-wrap items-center gap-x-3 gap-y-1">
         <span>
@@ -393,5 +412,12 @@ function fmtDeltaUSD(n: number): string {
         </table>
       </div>
     </div>
+
+    <ImportPreferredHoldersModal
+      :company-id="id"
+      :open="importOpen"
+      @close="importOpen = false"
+      @imported="onImported"
+    />
   </div>
 </template>
