@@ -4,17 +4,19 @@
 // are sortable and resizable; widths + sort direction persist in
 // localStorage via useSortableTable.
 //
-// Toggle: "Include proposed + ideas in post" rolls in not-yet-issued
-// grants (status='proposed' from the Grants page) and pool Ideas
-// (anonymous future grants from the Pool Impact page) on the POST
-// side only. Pre stays as-is. Both the per-stakeholder postShares
-// and the postFDS denominator are augmented when toggled.
+// Denominator (operator's model): ONE fully-diluted basis — the
+// post-round total (aggregate base + the current round's cumulative
+// total_shares_fds). BOTH Pre % and Post % divide by it, so a holder
+// only moves pre→post when their OWN share count changes (CN
+// conversions, proposed grants); the denominator does not grow
+// round-over-round. It also does NOT grow with proposed/idea grants —
+// those draw from option-pool capacity already inside total_shares_fds.
 //
-// Denominators (per user spec):
-//   - post% = stakeholder shares ÷ open round's total_shares_fds
-//             (+ proposed + ideas if toggled)
-//   - pre%  = stakeholder shares ÷ (round IMMEDIATELY BEFORE open)'s
-//             total_shares_fds
+// Toggle: "Include proposed + ideas in post" rolls not-yet-issued
+// grants (status='proposed' from the Grants page) and pool Ideas
+// (anonymous future grants from the Pool Impact page) into the POST
+// NUMERATOR only — per-stakeholder postShares, plus a synthetic
+// "Future ideas" row. Pre and the denominator are untouched.
 import { ArrowUp, ArrowDown, Upload } from 'lucide-vue-next'
 import { fmtUSD, fmtPct, fmtShares } from '~/utils/format'
 
@@ -117,32 +119,27 @@ const ideaCount = computed(() =>
   (ideas.value || []).filter((ie: any) => ie.type === 'grant' || ie.type === 'reserve').length,
 )
 
-// Augment postFDS denominator with future shares when the toggle is on.
+// Total proposed shares — for the header chip and per-stakeholder
+// numerator augmentation when the toggle is on. These do NOT grow the
+// denominator (they draw from pool capacity already in total_shares_fds).
 const proposedTotal = computed(() => {
   let total = 0
   for (const p of proposedByStakeholder.value.values()) total += p.shares
   return total
 })
-// PRE FDS = the Previous-Round aggregate's fully-diluted total (the
-// state before the current round). If earlier closed rounds are still
-// sitting in the rounds table, add their cumulative FDS on top of the
-// aggregate base.
-const preFDS = computed(() => {
-  const base = aggregate.value?.total_shares_fds || 0
-  const rs = timelineRounds.value
-  const idx = currentRound.value ? rs.indexOf(currentRound.value) : -1
-  const prev = idx > 0 ? rs[idx - 1] : null
-  return base + (prev?.total_shares_fds || 0)
-})
-// POST FDS = pre + the current round's new fully-diluted shares.
-// round-summary's total_shares_fds is cumulative across the rounds
-// table, so aggregate base + the current round's cumulative gives the
-// post-close total. Static denominator — proposed/idea grants attribute
-// already-counted pool capacity rather than growing it.
-const postFDS = computed(() => {
+// Single fully-diluted basis = the post-round total: aggregate base
+// (Previous-Round card's Total FDS) + the current round's cumulative
+// total_shares_fds. Per the operator's model BOTH Pre % and Post %
+// divide by this same number, so the only pre→post movement comes from
+// a holder's own share changes (CN conversions, proposed grants), not a
+// moving denominator. (Previously Pre % used the prior round's FDS to
+// isolate this round's dilution event — dropped per the operator.)
+const fdsBasis = computed(() => {
   const base = aggregate.value?.total_shares_fds || 0
   return base + (currentRound.value?.total_shares_fds || 0)
 })
+const preFDS = computed(() => fdsBasis.value)
+const postFDS = computed(() => fdsBasis.value)
 
 interface DilRow {
   stakeholderId: string
@@ -354,9 +351,10 @@ async function onImported() {
         <div>
           <h1 class="text-xl font-semibold tracking-tight text-ink-900">Overall Dilution</h1>
           <p class="text-sm text-ink-600 mt-1">
-            Comparing <span class="font-medium text-ink-800">pre-{{ currentRoundName }}</span> vs.
-            <span class="font-medium text-brand-700">post-{{ currentRoundName }}</span>.
-            Δ = post − pre; red = dilution, green = growth.
+            Every holder as a slice of one fully-diluted
+            <span class="font-medium text-brand-700">post-{{ currentRoundName }}</span> basis.
+            Δ = post − pre tracks each holder's own share changes (note conversions, new grants);
+            green = gain, red = drop.
           </p>
         </div>
         <div class="flex items-center gap-2 flex-wrap">
@@ -395,18 +393,12 @@ async function onImported() {
       </div>
       <div v-if="currentRound" class="mt-2 text-[11px] num text-ink-500 flex flex-wrap items-center gap-x-3 gap-y-1">
         <span>
-          <span class="uppercase tracking-wider">Pre FDS</span>
-          <template v-if="preFDS > 0">
-            <span class="ml-1 text-ink-700">{{ fmtShares(preFDS) }}</span>
-            <span class="ml-0.5 text-ink-400">(Previous Round)</span>
+          <span class="uppercase tracking-wider">FDS basis</span>
+          <template v-if="postFDS > 0">
+            <span class="ml-1 text-ink-700">{{ fmtShares(postFDS) }}</span>
+            <span class="ml-0.5 text-ink-400">(post-{{ currentRoundName }} — pre & post share this)</span>
           </template>
           <span v-else class="ml-1 text-amber-700">0 — set Total FDS on the Previous Round card</span>
-        </span>
-        <span class="text-ink-300">·</span>
-        <span>
-          <span class="uppercase tracking-wider">Post FDS</span>
-          <span class="ml-1 text-ink-700">{{ fmtShares(postFDS) }}</span>
-          <span class="ml-0.5 text-ink-400">({{ currentRoundName }})</span>
         </span>
         <span v-if="pps > 0" class="text-ink-300">·</span>
         <span v-if="pps > 0">
