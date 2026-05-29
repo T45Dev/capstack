@@ -143,8 +143,9 @@ export function computeRound(a: RoundInputs): RoundResult {
     cnConvertedDollars += total
     if (pricePerShare <= 0) continue
 
-    const candidates: Array<{ label: 'round' | 'discount' | 'cap'; price: number }> = []
-    candidates.push({ label: 'round', price: pricePerShare })
+    const candidates: Array<{ label: 'round' | 'discount' | 'cap'; price: number }> = [
+      { label: 'round', price: pricePerShare },
+    ]
     if (cn.conversionDiscount > 0) {
       candidates.push({ label: 'discount', price: pricePerShare * (1 - cn.conversionDiscount) })
     }
@@ -152,15 +153,17 @@ export function computeRound(a: RoundInputs): RoundResult {
       candidates.push({ label: 'cap', price: cn.valuationCap / a.preRoundFDS })
     }
 
-    let chosen = candidates[0]
+    // The 'round' candidate is always present (seeded above), so [0] is a
+    // safe non-empty fallback for every selection basis.
+    const fallback = candidates[0]!
+    let chosen = fallback
     if (basis === 'best') {
-      chosen = candidates.reduce((acc, c) => (c.price < acc.price ? c : acc), candidates[0])
+      chosen = candidates.reduce((acc, c) => (c.price < acc.price ? c : acc), fallback)
     } else if (basis === 'discount') {
-      const d = candidates.find(c => c.label === 'discount')
-      chosen = d ?? candidates[0]
+      chosen = candidates.find(c => c.label === 'discount') ?? fallback
     } else if (basis === 'cap') {
       const cap = candidates.find(c => c.label === 'cap')
-      if (cap) chosen = cap.price < pricePerShare ? cap : { label: 'round', price: pricePerShare }
+      if (cap) chosen = cap.price < pricePerShare ? cap : fallback
     }
 
     const shares = chosen.price > 0 ? Math.floor(total / chosen.price) : 0

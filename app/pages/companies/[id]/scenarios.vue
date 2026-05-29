@@ -127,7 +127,7 @@ async function destroy(s: Scenario) {
 
 const selected = ref<string | null>(null)
 watch(scenarios, (arr) => {
-  if (!selected.value && arr?.length) selected.value = arr[0].id
+  if (!selected.value && arr?.length) selected.value = arr[0]?.id ?? null
 }, { immediate: true })
 
 const { data: result } = await useFetch(() => selected.value ? `/api/scenarios/${selected.value}/compute` : null, {

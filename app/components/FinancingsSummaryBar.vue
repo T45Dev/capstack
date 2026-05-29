@@ -46,7 +46,7 @@ const cumulativeRaise = computed(() => {
   // status. Matches the matrix's "Cumulative financing" final value.
   if (props.rounds.length === 0) return 0
   const last = props.rounds[props.rounds.length - 1]
-  return last.cumulated_financing
+  return last?.cumulated_financing ?? 0
 })
 
 interface Item {

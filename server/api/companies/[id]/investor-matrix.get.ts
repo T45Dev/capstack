@@ -92,8 +92,8 @@ export default defineEventHandler((event) => {
   for (const r of rounds) matrix[r.id] = {}
   for (const a of allocations) {
     const pps = ppsByRound.get(a.round_id) || 0
-    if (!matrix[a.round_id]) matrix[a.round_id] = {}
-    matrix[a.round_id][a.stakeholder_id] = {
+    const bucket = (matrix[a.round_id] ??= {})
+    bucket[a.stakeholder_id] = {
       id: a.id,
       amount: a.amount || 0,
       shares: pps > 0 ? Math.floor((a.amount || 0) / pps) : 0,

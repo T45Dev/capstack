@@ -14,13 +14,10 @@ export default defineEventHandler(async (event) => {
   const co = db().prepare('SELECT id FROM companies WHERE id = ?').get(id)
   if (!co) throw createError({ statusCode: 404, message: 'Company not found' })
 
-  let parts
-  try {
-    parts = await readMultipartFormData(event)
-  } catch (e: any) {
+  const parts = await readMultipartFormData(event).catch((e: any) => {
     console.error('[import] multipart parse failed:', e)
     throw createError({ statusCode: 400, message: `Failed to read upload: ${e?.message || e}` })
-  }
+  })
   if (!parts?.length) throw createError({ statusCode: 400, message: 'No file uploaded' })
 
   const file = parts.find(p => p.name === 'file' || (p.filename && /\.(xlsx|xlsm)$/i.test(p.filename)))

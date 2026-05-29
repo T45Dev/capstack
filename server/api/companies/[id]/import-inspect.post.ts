@@ -10,12 +10,9 @@ export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
   if (!id) throw createError({ statusCode: 400, message: 'id required' })
 
-  let parts
-  try {
-    parts = await readMultipartFormData(event)
-  } catch (e: any) {
+  const parts = await readMultipartFormData(event).catch((e: any) => {
     throw createError({ statusCode: 400, message: `Failed to read upload: ${e?.message || e}` })
-  }
+  })
   if (!parts?.length) throw createError({ statusCode: 400, message: 'No file uploaded' })
 
   const file = parts.find(p => p.name === 'file' || (p.filename && /\.(xlsx|xlsm)$/i.test(p.filename)))
