@@ -68,7 +68,7 @@ Current nav (top → bottom):
 - **Option Pool Impact**
 - **Exit Scenarios**
 
-Removed: standalone Convertible Notes page (now under Financings), Securities rollup card, Holdings pivot card. The CN ledger lives in `app/components/CnLedger.vue` so the Financings page can embed it.
+Removed: standalone Convertible Notes page (now under Financings), Securities rollup card, Holdings pivot card. The embeddable CN-ledger component (`CnLedger.vue`) and the legacy `FinancingsMatrix.vue` / `FinancingsModel.vue` were deleted once they went unmounted — the current model uses the side-by-side Previous/Open round cards plus the InvestorMatrix instead.
 
 ## UI patterns worth knowing
 
