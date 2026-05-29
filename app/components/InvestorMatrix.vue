@@ -9,7 +9,7 @@
 // Adding a new investor: type a name in the bottom row, hit Enter or any
 // cell, and the API auto-creates the stakeholder.
 import { Trash2, Plus, AlertTriangle } from 'lucide-vue-next'
-import { fmtUSD, fmtShares } from '~/utils/format'
+import { fmtUSD, fmtShares, fmtPricePerShare } from '~/utils/format'
 
 const props = defineProps<{ companyId: string }>()
 const emit = defineEmits<{ refreshed: [] }>()
@@ -100,12 +100,36 @@ async function commitCell(roundId: string, stakeholderId: string) {
       })
     }
     // Drop the draft on success; refresh pulls the canonical value.
-    delete drafts.value[roundId][stakeholderId]
-    if (Object.keys(drafts.value[roundId]).length === 0) delete drafts.value[roundId]
+    const bucket = drafts.value[roundId]
+    if (bucket) {
+      delete bucket[stakeholderId]
+      if (Object.keys(bucket).length === 0) delete drafts.value[roundId]
+    }
     await refresh()
     emit('refreshed')
   } catch (e) {
     console.error('Failed to save cell', e)
+  }
+}
+
+// Inline share-price setter. The matrix is shares-primary, so a round
+// with no share_price can't render shares and its cells fall back to raw
+// $. Rather than send the operator off to the round's card, the column
+// header exposes a compact "$/share" input that PATCHes the round in
+// place; once set, every cell in that column flips from $ to shares. The
+// draft commits live via NumberInput's input event, so blur/Enter just
+// flush whatever was typed.
+const priceDrafts = ref<Record<string, number | null>>({})
+async function savePrice(roundId: string) {
+  const v = priceDrafts.value[roundId]
+  if (v == null || v <= 0) { delete priceDrafts.value[roundId]; return }
+  try {
+    await $fetch(`/api/rounds/${roundId}`, { method: 'PATCH', body: { share_price: v } })
+    delete priceDrafts.value[roundId]
+    await refresh()
+    emit('refreshed')
+  } catch (e) {
+    console.error('Failed to set share price', e)
   }
 }
 
@@ -232,6 +256,25 @@ function sumDeltaClass(delta: number, newMoney: number): string {
                 <span v-if="r.kind === 'open'" class="text-[9px] uppercase tracking-wider text-brand-edge font-semibold">Open</span>
               </div>
               <div class="text-[10px] text-ink-400 num text-right mt-0.5">{{ r.close_date || '—' }}</div>
+              <!-- Share price: muted when set; an inline amber setter when
+                   not, so the operator can price a round without leaving
+                   the matrix. Saving flips every cell in this column from
+                   $ to shares. -->
+              <div v-if="(r.share_price || 0) > 0" class="text-[10px] text-ink-400 num text-right mt-0.5">{{ fmtPricePerShare(r.share_price) }}/sh</div>
+              <div v-else class="mt-1 flex items-center justify-end gap-1">
+                <span class="text-[9px] uppercase tracking-wide text-amber-600 font-semibold">$/sh</span>
+                <NumberInput
+                  variant="bare"
+                  prefix="$"
+                  :digits="5"
+                  :model-value="priceDrafts[r.id] ?? null"
+                  placeholder="set price"
+                  input-class="num text-[11px] text-right w-16 bg-amber-50 border border-amber-200 rounded px-1 py-0.5 text-amber-900 placeholder:text-amber-400 placeholder:not-italic focus:border-amber-400 focus:bg-white focus:outline-none"
+                  @update:model-value="(v: number | null) => (priceDrafts[r.id] = v)"
+                  @blur="() => savePrice(r.id)"
+                  @keydown.enter="(e: KeyboardEvent) => (e.target as HTMLInputElement).blur()"
+                />
+              </div>
             </th>
             <th class="px-3 py-2 border-b border-ink-200 text-right bg-amber-50/40">
               <div class="flex items-center justify-end gap-1.5">
@@ -277,12 +320,12 @@ function sumDeltaClass(delta: number, newMoney: number): string {
               </label>
               <!-- Hint when the round has no share_price yet (cell fell
                    back to $ editing because we can't derive shares
-                   without a price). Operator pops into the round's
-                   card to set it. -->
+                   without a price). The $/share setter now lives in this
+                   round's column header — point the operator there. -->
               <div
                 v-if="ppsForRound(r.id) <= 0 && (cellAmount(r.id, inv.id) || 0) > 0"
                 class="text-[10px] text-amber-600 text-right mt-0.5 italic"
-              >set $/share to show shares</div>
+              >$ — set $/share in header ↑</div>
             </td>
             <!-- CN total per investor. Read-only — CN data lives on the
                  Convertible-notes ledger; this column is a roll-up so
