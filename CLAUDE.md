@@ -86,6 +86,8 @@ Removed: standalone Convertible Notes page (now under Financings), Securities ro
 5. **Notes converted rolls into FDS.** It was treated as "informational only" before; that was a bug from the legacy model.
 6. **Effective conv price uses SharePrice as basis**, not just the round PPS. So editing a CN's Share price flows into Effective and Shares.
 7. **Interest accrues through conversion_date**, no today-fallback.
+8. **"Invested $" cost basis = priced rounds only.** Formation (founder common-stock) contributions are excluded from the Dilution Invested-$ sum, and the Preferred Investor matrix drops the formation column plus any founder who only contributed there. Cost basis reflects preferred/priced money in.
+9. **Notes Converted is operator-overridable on the Open Round card.** The `notes_converted_override` column (already in the schema) is surfaced as a typed field: a value replaces the CN-attribution-derived count and rolls into Total FDS; blank reverts to auto-derive. Editing a CN's destination still clears the override so the engine re-derives.
 
 ## Endpoints
 

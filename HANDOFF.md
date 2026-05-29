@@ -1,11 +1,11 @@
 # CapStack — Session Handoff
 
-Last touched: this branch is at the v1-candidate state. All tests green
-(46/46), all changes pushed.
+Last touched: follow-up session on `claude/beautiful-archimedes-X3Lwq`.
+Cleared all five open threads from the prior handoff and added a manual
+Notes Converted field. All tests green, all changes pushed.
 
-- **Branch**: `claude/nice-gauss-RxC0G`
-- **Tip**: `c0a3393`
-- **Tests**: `npm test` — 46/46 passing
+- **Branch**: `claude/beautiful-archimedes-X3Lwq` (HEAD)
+- **Tests**: `npm test` — 33 passing locally; the carta.reconcile suite skips without the private fixtures in `fixtures/private/` (46/46 with them)
 - **Dev**: `npm run dev` (port 3100)
 
 ---
@@ -125,46 +125,56 @@ the page load.
 
 ---
 
-## Open threads
+## Resolved this session
 
-Things flagged or partially addressed that a follow-up session may
-want to pick up:
+All five prior threads were picked up and shipped on
+`claude/beautiful-archimedes-X3Lwq`:
 
-1. **Detailed Cap Table header detection.** The regex requires
-   `name + (common|preferred|series)` in one row. Real Carta exports
-   match this, but stripped-down test fixtures don't. Symptom: holdings
-   come through synthesised from `round_investors` (still correct
-   totals), but DCT's richer per-class detail isn't applied. Loosening
-   the regex is straightforward — worth doing when someone hits it.
+1. **DCT header detection — DONE.** Detection now accepts
+   Stakeholder/Holder as the holder signal and structural columns
+   (Stakeholder ID / Outstanding / Fully Diluted) as the data signal;
+   the name-column resolver gained anchored Stakeholder/Holder
+   fallbacks. New self-contained regression test
+   `carta.detailed-cap-table.test.ts` (builds the workbook in memory, so
+   it runs in CI unlike the private-fixture reconciliation suite).
 
-2. **Round_investors editing on rounds with no `share_price`.** The
-   matrix is shares-primary; when a round's share_price is unset, the
-   cell falls back to `$`-editing and shows a "set $/share to show
-   shares" hint. Works, but feels like a dead-end UX — could add a
-   one-click "set share price" affordance on that cell.
+2. **Share-price dead-end UX — DONE.** Each round column header in the
+   Investor matrix now has an inline `$/share` setter that PATCHes the
+   round; cells flip from `$` to shares on save. The cell hint points up
+   at it.
 
-3. **The dilution `Invested $` column.** Cost basis from
-   `round_investors`. Shows "—" for founders + option-only holders
-   (they're not in `round_investors`). If the operator wants founders'
-   formation cash to count there, parser would need to also seed
-   `round_investors` rows for the CS Ledger (currently it does, but
-   founders are then filtered OUT of the Preferred Investor matrix
-   because they have no grants — that's the right behaviour for that
-   matrix, but means their cost basis is dilution-visible while their
-   investor status isn't). Worth confirming this is the intent before
-   touching anything.
+3. **Dilution `Invested $` — DONE (operator chose "priced rounds
+   only").** Formation contributions are excluded from the sum
+   (`compute.post.ts`), and the Preferred Investor matrix drops the
+   formation column and any founder-only row (`investor-matrix.get.ts`).
 
-4. **Pre-existing strict-null TypeScript noise.** Several
-   `Object is possibly 'undefined'` warnings in `InvestorMatrix.vue`,
-   `investor-matrix.get.ts`, `import.post.ts`, `scenarios.vue`,
-   `FinancingsModel.vue`, etc. They predate this session. Tests pass
-   and runtime is fine; clean these up if a TS-tightening pass is on
-   the cards.
+4. **Strict-null TS noise — DONE.** The TS2532/TS18048/TS2454 family is
+   cleared (20 → 0) across server + UI; each fix is behavior-preserving
+   (the `calc.ts` one also removed a latent empty-array crash).
 
-5. **Unmounted but live code.** `CnLedger.vue`, `FinancingsMatrix.vue`,
-   `FinancingsModel.vue` are still in the codebase. They're not
-   rendered anywhere; left intact so they can be brought back if the
-   model shifts. Safe to delete if cleanup is wanted.
+5. **Unmounted components — DONE.** `CnLedger.vue`,
+   `FinancingsMatrix.vue`, `FinancingsModel.vue` deleted; the two stale
+   doc/comment references updated.
+
+### Also shipped
+
+- **Manual Notes Converted field** on the Open Round card. Surfaces
+  `notes_converted_override`: a typed value overrides the CN-derived
+  count and rolls into Total FDS (the card's local FDS preview now
+  includes it); blank = auto-derive (placeholder shows the derived
+  count); a "revert to auto" link clears it.
+
+## Still open / parked
+
+1. **Broader TypeScript tightening.** ~110 non-strict-null diagnostics
+   remain — mostly `useFetch`/`$fetch` results typed as `{}` (TS2339),
+   plus UiEditableTable / sortable-column generics and the
+   `layouts/default.vue` useFetch overloads. A real fetch-typing pass,
+   not started. (`npx vue-tsc --noEmit -p tsconfig.json` to see them;
+   note vue-tsc + typescript aren't in devDependencies.)
+
+2. **Live-recalc on the CN table edit mode** (carried from CLAUDE.md) —
+   discussed, not built.
 
 ---
 
