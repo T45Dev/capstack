@@ -9,6 +9,7 @@
 // discrete actions, not field edits.
 import { Sparkles, Plus, Trash2, Save, Undo2, Check } from 'lucide-vue-next'
 import { fmtShares, fmtUSD } from '~/utils/format'
+import { newSharesIssued, openRoundPostFds } from '~/utils/capTable'
 
 interface Props { companyId: string }
 const props = defineProps<Props>()
@@ -236,7 +237,7 @@ const postMoney = computed(() => {
 })
 const newShares = computed(() => {
   if (!newMoney.value || !sharePrice.value) return null
-  return Math.floor(newMoney.value / sharePrice.value)
+  return newSharesIssued(newMoney.value, sharePrice.value)
 })
 // Effective notes-converted for the live preview: the operator's typed
 // override wins; otherwise fall back to the server's CN-derived count.
@@ -250,7 +251,13 @@ const totalSharesFdsPost = computed(() => {
   const pool = optionPoolIssued.value ?? 0
   const notes = effNotesConverted.value ?? 0
   if (!base && !issued && !pool && !notes) return null
-  return base + issued + pool + notes
+  return openRoundPostFds({
+    base,
+    newMoney: newMoney.value,
+    sharePrice: sharePrice.value,
+    optionPoolIssued: pool,
+    notesConverted: notes,
+  })
 })
 const ownership = computed(() => {
   if (!newShares.value || !totalSharesFdsPost.value) return null
