@@ -124,4 +124,4 @@ POST /api/companies/:id/compute                      — open-round dilution mat
 - Commit messages: short title + 2-3 paragraph body explaining the why. No "Co-authored-by" or watermark trailers in this repo's style.
 - The user runs `npm run dev` themselves on their LAN. Don't expect to hit their server from this env.
 - Type errors that existed BEFORE the current change are NOT in scope to fix unless asked — there's a pile of pre-existing TS issues in cap-table.vue's Holdings section (now dead) and a few `useFetch` overload mismatches in layouts/default.vue.
-- The GitHub MCP server is currently down. Branch pushes work via git CLI (localhost proxy). PRs must be created and merged through the GitHub web UI by the human.
+- The GitHub MCP server is available again. The standing workflow: push the feature branch, open a PR against `main`, and merge it (merge commit, matching this repo's history). No need to leave PRs waiting for a human to merge.
