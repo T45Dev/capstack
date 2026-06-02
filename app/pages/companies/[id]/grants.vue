@@ -367,6 +367,10 @@ watch(proposedCols, (cols) => {
 }, { immediate: true })
 
 const sortedOutstanding = computed(() => {
+  // Existing grants aren't changing, so there's no would-have-been/will-be
+  // story per grant. Instead, follow the Overall Dilution model: same share
+  // count, Pre over preFDS and Post over postFDS, so open-round dilution
+  // (growing denominator) is visible on existing positions.
   const preDenom  = preFDS.value
   const postDenom = postFDS.value
   const prePPS    = ppsAnchor.value
@@ -396,7 +400,7 @@ const sortedOutstanding = computed(() => {
 })
 
 const sortedProposed = computed(() => {
-  const preDenom  = preFDS.value
+  // All ownership %s denominate against postFDS (see sortedOutstanding).
   const postDenom = postFDS.value
   const prePPS    = ppsAnchor.value
   const ppsPost   = postPPS.value
@@ -415,7 +419,7 @@ const sortedProposed = computed(() => {
       prop_pre_shares:  existing_total,
       prop_new_shares:  newShares,
       prop_post_shares: postShares,
-      prop_pre_pct:  preDenom  > 0 ? existing_total / preDenom  : 0,
+      prop_pre_pct:  postDenom > 0 ? existing_total / postDenom : 0,
       prop_new_pct:  postDenom > 0 ? newShares      / postDenom : 0,
       prop_post_pct: postDenom > 0 ? postShares     / postDenom : 0,
       prop_pre_value:  existing_total * prePPS,
