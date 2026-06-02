@@ -14,6 +14,7 @@ const id = computed(() => route.params.id as string)
 
 interface Grant {
   id: string
+  stakeholder_id: string | null
   recipient_name: string
   recipient_type: string | null
   round: string | null
@@ -76,37 +77,78 @@ const { data: compute } = await useFetch(() => `/api/companies/${id.value}/compu
   default: () => null as any,
 })
 
-// Per-stakeholder existing position derived from the cap table.
+// Stakeholder linking — proposed grants must roll up the FULL position of the
+// matched shareholder, including any linked aliases. Carta often splits one
+// person across several stakeholder rows (a common-stock cert, a preferred
+// cert, a convertible note), tied together via stakeholders.linked_to. We
+// resolve each stakeholder to its canonical "primary" and key positions by
+// that primary so a grant linked to any one alias still captures the group's
+// common / preferred / options / CN.
+const stakeholderIndex = computed(() => {
+  const linkedTo = new Map<string, string | null>()
+  const list = (capTable.value?.stakeholders || []) as Array<{ id: string; name: string; linked_to: string | null }>
+  for (const s of list) linkedTo.set(s.id, s.linked_to || null)
+  function primaryOf(sid: string): string {
+    let cur = sid, depth = 0
+    while (linkedTo.get(cur) && depth < 5) { cur = linkedTo.get(cur)!; depth++ }
+    return cur
+  }
+  // Name → primary id, so an unlinked proposed grant still matches a current
+  // shareholder by name.
+  const byName = new Map<string, string>()
+  for (const s of list) {
+    const k = (s.name || '').trim().toLowerCase()
+    if (k && !byName.has(k)) byName.set(k, primaryOf(s.id))
+  }
+  return { primaryOf, byName }
+})
+
+// Existing position per PRIMARY stakeholder (alias group), derived from the
+// cap table.
 //   common    — shares held in share classes where kind = common
 //   preferred — shares in share classes where kind = preferred / other
-//   options   — sum of outstanding grants for this stakeholder
+//   options   — sum of outstanding grants for the group
 //   cn        — projected shares from convertible notes (at current PPS)
 const positionByStakeholder = computed(() => {
   const map = new Map<string, { common: number; preferred: number; options: number; cn: number }>()
   if (!capTable.value) return map
+  const { primaryOf } = stakeholderIndex.value
+  const get = (sid: string) => {
+    const pid = primaryOf(sid)
+    let row = map.get(pid)
+    if (!row) { row = { common: 0, preferred: 0, options: 0, cn: 0 }; map.set(pid, row) }
+    return row
+  }
   const kindByClass = new Map<string, string>()
   for (const sc of capTable.value.share_classes) kindByClass.set(sc.id, (sc.kind || '').toLowerCase())
   for (const h of capTable.value.holdings) {
+    if (!h.stakeholder_id) continue
     const kind = kindByClass.get(h.share_class_id) || ''
-    const row = map.get(h.stakeholder_id) || { common: 0, preferred: 0, options: 0, cn: 0 }
+    const row = get(h.stakeholder_id)
     if (kind === 'common') row.common += h.shares
     else row.preferred += h.shares
-    map.set(h.stakeholder_id, row)
   }
   for (const g of capTable.value.grants) {
     if (g.status !== 'outstanding' || !g.stakeholder_id) continue
-    const row = map.get(g.stakeholder_id) || { common: 0, preferred: 0, options: 0, cn: 0 }
-    row.options += g.quantity
-    map.set(g.stakeholder_id, row)
+    get(g.stakeholder_id).options += g.quantity
   }
   for (const c of (capTable.value.cn_by_stakeholder || [])) {
     if (!c.stakeholder_id) continue
-    const row = map.get(c.stakeholder_id) || { common: 0, preferred: 0, options: 0, cn: 0 }
-    row.cn += c.shares || 0
-    map.set(c.stakeholder_id, row)
+    get(c.stakeholder_id).cn += c.shares || 0
   }
   return map
 })
+
+// Resolve a proposed grant to its primary stakeholder: prefer the linked
+// stakeholder_id, fall back to matching the recipient name to a current
+// shareholder. Returns null when the grantee isn't a current shareholder.
+function positionFor(g: { stakeholder_id?: string | null; recipient_name: string }) {
+  const idx = stakeholderIndex.value
+  const pid = g.stakeholder_id
+    ? idx.primaryOf(g.stakeholder_id)
+    : idx.byName.get((g.recipient_name || '').trim().toLowerCase())
+  return pid ? positionByStakeholder.value.get(pid) || null : null
+}
 
 const preFDS = computed(() => (compute.value?.round?.preRoundFDS as number) || (capTable.value ? fdsAnchor.value : 0))
 const postFDS = computed(() => (compute.value?.round?.postRoundFDS as number) || preFDS.value)
@@ -359,7 +401,7 @@ const sortedProposed = computed(() => {
   const prePPS    = ppsAnchor.value
   const ppsPost   = postPPS.value
   const rows = proposed.value.map(g => {
-    const pos = g.stakeholder_id ? positionByStakeholder.value.get(g.stakeholder_id) : null
+    const pos = positionFor(g)
     const existing_options = pos?.options || 0
     const existing_common  = pos?.common || 0
     const existing_pref    = pos?.preferred || 0

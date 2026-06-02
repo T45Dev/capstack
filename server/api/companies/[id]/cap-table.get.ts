@@ -14,7 +14,7 @@ export default defineEventHandler((event) => {
   `).all(id) as Array<{ id: string; issue_price: number | null; kind: string }>
 
   const stakeholders = db().prepare(`
-    SELECT id, name, email, type, external_id FROM stakeholders WHERE company_id = ? ORDER BY name COLLATE NOCASE
+    SELECT id, name, email, type, external_id, linked_to FROM stakeholders WHERE company_id = ? ORDER BY name COLLATE NOCASE
   `).all(id)
 
   const holdings = db().prepare(`
