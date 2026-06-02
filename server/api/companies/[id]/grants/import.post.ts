@@ -1,6 +1,7 @@
 import { db } from '~~/server/utils/db'
 import { newId } from '~~/server/utils/ids'
 import { parseGrantsFile } from '~~/server/parsers/grants-smart'
+import { loadImportMappings } from '~~/server/utils/grant-settings'
 
 // Commit a grants import. Re-parses the uploaded file with the same
 // smart-detection logic so the user sees identical results as the preview;
@@ -22,7 +23,15 @@ export default defineEventHandler(async (event) => {
   if (!file?.data) throw createError({ statusCode: 400, message: 'No file uploaded' })
 
   const filename = file.filename || 'grants.xlsx'
-  const result = await parseGrantsFile(filename, Buffer.from(file.data))
+  const result = await parseGrantsFile(filename, Buffer.from(file.data), loadImportMappings(id))
+
+  // Resolve "vesting schedule" cells (by name, case-insensitive) to a defined
+  // schedule so we can store the reference and snapshot its month values.
+  const schedules = db().prepare(
+    'SELECT id, name, vest_months, cliff_months FROM vesting_schedules WHERE company_id = ?',
+  ).all(id) as Array<{ id: string; name: string; vest_months: number; cliff_months: number }>
+  const schedByName = new Map<string, typeof schedules[number]>()
+  for (const s of schedules) schedByName.set(s.name.trim().toLowerCase(), s)
 
   if (result.parsed.length === 0) {
     return {
@@ -49,12 +58,13 @@ export default defineEventHandler(async (event) => {
     INSERT INTO grants (
       id, company_id, stakeholder_id, recipient_name, recipient_type,
       quantity, strike, issue_date, vesting_start, vest_months, cliff_months,
-      status, notes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?)
+      award_type, vesting_schedule_id, status, notes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?)
   `)
 
   let created = 0
   const errors: string[] = []
+  const unknownSchedules = new Set<string>()
   const tx = db().transaction(() => {
     for (const g of result.parsed) {
       try {
@@ -65,6 +75,13 @@ export default defineEventHandler(async (event) => {
           insertSh.run(shId, id, g.recipientName.trim(), g.recipientType || 'Employee')
           idByName.set(lname, shId)
         }
+        // Resolve the named vesting schedule, if any. A matched schedule wins
+        // for the month values; an unmatched name is flagged as a warning.
+        let sched: typeof schedules[number] | undefined
+        if (g.vestingSchedule) {
+          sched = schedByName.get(g.vestingSchedule.trim().toLowerCase())
+          if (!sched) unknownSchedules.add(g.vestingSchedule.trim())
+        }
         insertGr.run(
           newId('gr'), id, shId,
           g.recipientName.trim(),
@@ -73,8 +90,10 @@ export default defineEventHandler(async (event) => {
           g.strike ?? null,
           g.issueDate ?? null,
           g.vestingStart ?? null,
-          g.vestMonths ?? null,
-          g.cliffMonths ?? null,
+          sched ? sched.vest_months : (g.vestMonths ?? null),
+          sched ? sched.cliff_months : (g.cliffMonths ?? null),
+          g.awardType ?? null,
+          sched ? sched.id : null,
           g.notes ?? null,
         )
         created++
@@ -84,6 +103,9 @@ export default defineEventHandler(async (event) => {
     }
   })
   tx()
+  if (unknownSchedules.size) {
+    errors.push(`Unrecognized vesting schedule${unknownSchedules.size > 1 ? 's' : ''}: ${[...unknownSchedules].join(', ')} — define them in Settings → Option Grants.`)
+  }
 
   return {
     ok: created > 0,

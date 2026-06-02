@@ -1,4 +1,5 @@
 import { parseGrantsFile } from '~~/server/parsers/grants-smart'
+import { loadImportMappings } from '~~/server/utils/grant-settings'
 
 // Parse the uploaded file and return what we'd import without committing.
 // Lets the UI surface the detected column mapping and a preview of the
@@ -13,7 +14,7 @@ export default defineEventHandler(async (event) => {
   if (!file?.data) throw createError({ statusCode: 400, message: 'No file uploaded' })
 
   const filename = file.filename || 'grants.xlsx'
-  const result = await parseGrantsFile(filename, Buffer.from(file.data))
+  const result = await parseGrantsFile(filename, Buffer.from(file.data), loadImportMappings(id))
 
   return {
     filename,

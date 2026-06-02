@@ -138,6 +138,30 @@ function migrate(d: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_assumption_versions_company ON assumption_versions(company_id, created_at DESC);
 
+    -- Operator-defined vesting schedules (Option Grants settings). Each is a
+    -- named template the engine can apply: total vesting months + cliff +
+    -- cadence. Grants reference one via grants.vesting_schedule_id and snapshot
+    -- its month values into vest_months/cliff_months when assigned.
+    CREATE TABLE IF NOT EXISTS vesting_schedules (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      vest_months INTEGER NOT NULL DEFAULT 48,
+      cliff_months INTEGER NOT NULL DEFAULT 12,
+      cadence TEXT NOT NULL DEFAULT 'monthly',   -- 'monthly' | 'quarterly' | 'annual'
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_vesting_schedules_company ON vesting_schedules(company_id);
+
+    -- Per-company Option Grants settings. Currently holds the import
+    -- header-mapping overrides as a JSON object keyed by canonical grant
+    -- field → expected spreadsheet header text.
+    CREATE TABLE IF NOT EXISTS grant_settings (
+      company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+      import_mappings TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS scenarios (
       id TEXT PRIMARY KEY,
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -340,6 +364,9 @@ function migrate(d: Database.Database): void {
   ensureColumn('grants', 'last_exercised_date', 'TEXT')
   ensureColumn('grants', 'forfeited_date', 'TEXT')
   ensureColumn('grants', 'expired_date', 'TEXT')
+  // Reference to an operator-defined vesting schedule (vesting_schedules.id).
+  // When set, the grant's vest_months/cliff_months are snapshotted from it.
+  ensureColumn('grants', 'vesting_schedule_id', 'TEXT')
   ensureColumn('rounds', 'option_pool_issued', 'REAL NOT NULL DEFAULT 0')
   ensureColumn('rounds', 'parent_round_code', 'TEXT')
   ensureColumn('rounds', 'pre_money', 'REAL')

@@ -33,11 +33,44 @@ export interface ParsedGrant {
   vestMonths: number | null
   cliffMonths: number | null
   notes: string | null
+  vestingSchedule: string | null
+  awardType: string | null
 }
 
 export type GrantField =
   | 'recipientName' | 'recipientType' | 'quantity' | 'strike'
   | 'issueDate' | 'vestingStart' | 'vestMonths' | 'cliffMonths' | 'notes'
+  | 'vestingSchedule' | 'awardType'
+
+// The canonical "template" fields the operator maps in Option Grants settings.
+// Each lists the default spreadsheet header we expect and the grants-table
+// column it lands in. The header-mapping override (grant_settings) lets the
+// operator change the expected header per field; the alias bank below is the
+// fallback when no override matches.
+export interface CanonicalGrantField {
+  field: GrantField
+  label: string
+  defaultHeader: string
+  mapsTo: string
+}
+export const CANONICAL_GRANT_FIELDS: CanonicalGrantField[] = [
+  { field: 'recipientName',   label: 'Name',                  defaultHeader: 'Name',                  mapsTo: 'recipient_name' },
+  { field: 'quantity',        label: 'Option grant quantity', defaultHeader: 'Option grant quantity', mapsTo: 'quantity' },
+  { field: 'issueDate',       label: 'Issue date',            defaultHeader: 'Issue date',            mapsTo: 'issue_date' },
+  { field: 'vestingStart',    label: 'Vesting date',          defaultHeader: 'Vesting date',          mapsTo: 'vesting_start' },
+  { field: 'notes',           label: 'Note',                  defaultHeader: 'Note',                  mapsTo: 'notes' },
+  { field: 'strike',          label: 'Strike price',          defaultHeader: 'Strike price',          mapsTo: 'strike' },
+  { field: 'vestingSchedule', label: 'Vesting schedule',      defaultHeader: 'Vesting schedule',      mapsTo: 'vesting_schedule_id' },
+  { field: 'awardType',       label: 'Type (ISO/NSO/RSU)',    defaultHeader: 'Type',                  mapsTo: 'award_type' },
+]
+
+// The default header → field overrides (canonical defaults). Importers merge
+// any operator-saved overrides on top of these.
+export function defaultHeaderMappings(): Partial<Record<GrantField, string>> {
+  const out: Partial<Record<GrantField, string>> = {}
+  for (const c of CANONICAL_GRANT_FIELDS) out[c.field] = c.defaultHeader
+  return out
+}
 
 export interface GrantsImportResult {
   parsed: ParsedGrant[]
@@ -87,6 +120,8 @@ const ALIASES: Record<GrantField, RegExp[]> = {
   vestingStart: [
     /^vesting ?start( ?date)?$/,
     /^vest ?start$/,
+    /^vesting ?date$/,
+    /^vest ?date$/,
     /^start ?date$/,
   ],
   vestMonths: [
@@ -103,23 +138,52 @@ const ALIASES: Record<GrantField, RegExp[]> = {
     /^(notes?|comments?|memo|remarks|description|details)$/,
     /notes?/, /comments?/,
   ],
+  vestingSchedule: [
+    /^vesting ?schedule$/,
+    /^schedule$/,
+    /vesting ?schedule/,
+  ],
+  awardType: [
+    /^(award|grant|option|security) ?type$/,
+    /^(iso|nso|rsu)$/,
+  ],
 }
 
 function normalize(s: any): string {
   return String(s ?? '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').trim().replace(/\s+/g, ' ')
 }
 
-function matchHeader(header: string): GrantField | null {
-  const n = normalize(header)
-  if (!n) return null
-  // Walk fields in order of specificity (the alias bank ordering above is
-  // already most-specific-first within each field; field ordering matters
-  // less since first hit wins per header).
-  for (const field of Object.keys(ALIASES) as GrantField[]) {
-    for (const re of ALIASES[field]) {
-      if (re.test(n)) return field
+// Build a header → field matcher. Operator-saved header overrides
+// (grant_settings.import_mappings) win over the alias bank: if a normalized
+// header exactly equals a configured header for some field, it maps there.
+// Otherwise we fall back to the fuzzy alias bank.
+function makeMatcher(overrides?: Partial<Record<GrantField, string>>): (header: string) => GrantField | null {
+  const overrideByHeader = new Map<string, GrantField>()
+  if (overrides) {
+    for (const [field, header] of Object.entries(overrides)) {
+      const n = normalize(header)
+      if (n) overrideByHeader.set(n, field as GrantField)
     }
   }
+  return (header: string) => {
+    const n = normalize(header)
+    if (!n) return null
+    const ov = overrideByHeader.get(n)
+    if (ov) return ov
+    for (const field of Object.keys(ALIASES) as GrantField[]) {
+      for (const re of ALIASES[field]) {
+        if (re.test(n)) return field
+      }
+    }
+    return null
+  }
+}
+
+// Coerce a free-text type cell to one of ISO / NSO / RSU, or null when it
+// isn't one of the recognized award types.
+function normalizeAwardType(v: any): string | null {
+  const s = String(v ?? '').toUpperCase().replace(/[^A-Z]/g, '')
+  if (s === 'ISO' || s === 'NSO' || s === 'RSU') return s
   return null
 }
 
@@ -195,7 +259,8 @@ function cellDate(v: any): string | null {
 
 // ---- xlsx -----------------------------------------------------------------
 
-export async function parseGrantsXlsx(buf: Buffer): Promise<GrantsImportResult> {
+export async function parseGrantsXlsx(buf: Buffer, overrides?: Partial<Record<GrantField, string>>): Promise<GrantsImportResult> {
+  const matchHeader = makeMatcher(overrides)
   const wb = new ExcelJS.Workbook()
   await wb.xlsx.load(buf)
   // Use the first non-empty sheet — for HR-style files this is usually the
@@ -282,6 +347,8 @@ export async function parseGrantsXlsx(buf: Buffer): Promise<GrantsImportResult> 
       vestMonths: 'vestMonths' in colByField && cellHasValue(get('vestMonths')) ? Math.round(cellNumber(get('vestMonths'))) : null,
       cliffMonths: 'cliffMonths' in colByField && cellHasValue(get('cliffMonths')) ? Math.round(cellNumber(get('cliffMonths'))) : null,
       notes: 'notes' in colByField ? cellString(get('notes')) || null : null,
+      vestingSchedule: 'vestingSchedule' in colByField ? cellString(get('vestingSchedule')) || null : null,
+      awardType: 'awardType' in colByField ? normalizeAwardType(get('awardType')) : null,
     })
   }
 
@@ -294,7 +361,8 @@ export async function parseGrantsXlsx(buf: Buffer): Promise<GrantsImportResult> 
 
 // ---- csv ------------------------------------------------------------------
 
-export function parseGrantsCsv(text: string): GrantsImportResult {
+export function parseGrantsCsv(text: string, overrides?: Partial<Record<GrantField, string>>): GrantsImportResult {
+  const matchHeader = makeMatcher(overrides)
   // Simple, defensive CSV split: handles double-quoted cells with embedded
   // commas and newlines. Not a full RFC-4180 implementation but enough for
   // the typical HR export.
@@ -370,6 +438,8 @@ export function parseGrantsCsv(text: string): GrantsImportResult {
       vestMonths: 'vestMonths' in colByField ? Math.round(cellNumber(get('vestMonths'))) || null : null,
       cliffMonths: 'cliffMonths' in colByField ? Math.round(cellNumber(get('cliffMonths'))) || null : null,
       notes: 'notes' in colByField ? cellString(get('notes')) || null : null,
+      vestingSchedule: 'vestingSchedule' in colByField ? cellString(get('vestingSchedule')) || null : null,
+      awardType: 'awardType' in colByField ? normalizeAwardType(get('awardType')) : null,
     })
   }
 
@@ -380,11 +450,13 @@ export function parseGrantsCsv(text: string): GrantsImportResult {
   return { parsed, mapping, unmappedHeaders: unmapped, headerRow, rowsRead, warnings }
 }
 
-// Auto-pick xlsx vs csv based on filename / mime.
-export async function parseGrantsFile(filename: string, buf: Buffer): Promise<GrantsImportResult> {
-  if (/\.xlsx?$|\.xlsm$/i.test(filename)) return parseGrantsXlsx(buf)
-  if (/\.csv$|\.tsv$/i.test(filename)) return parseGrantsCsv(buf.toString('utf8'))
+// Auto-pick xlsx vs csv based on filename / mime. `overrides` carries the
+// operator's saved header-mapping (grant_settings) so configured headers win
+// over the fuzzy alias bank.
+export async function parseGrantsFile(filename: string, buf: Buffer, overrides?: Partial<Record<GrantField, string>>): Promise<GrantsImportResult> {
+  if (/\.xlsx?$|\.xlsm$/i.test(filename)) return parseGrantsXlsx(buf, overrides)
+  if (/\.csv$|\.tsv$/i.test(filename)) return parseGrantsCsv(buf.toString('utf8'), overrides)
   // Last-ditch: try CSV (text-ish), then xlsx.
-  try { return parseGrantsCsv(buf.toString('utf8')) }
-  catch { return parseGrantsXlsx(buf) }
+  try { return parseGrantsCsv(buf.toString('utf8'), overrides) }
+  catch { return parseGrantsXlsx(buf, overrides) }
 }

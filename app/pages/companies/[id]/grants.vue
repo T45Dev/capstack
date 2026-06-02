@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle, UploadCloud, AlertTriangle, CheckCircle2, X } from 'lucide-vue-next'
-import { fmtShares, fmtPct, fmtDate, fmtPricePerShare, optionTypeOf, normalizeDate } from '~/utils/format'
+import { fmtShares, fmtPct, fmtDate, fmtPricePerShare, normalizeDate } from '~/utils/format'
+
+// Badge color per explicit award type (ISO/NSO/RSU). Blank → no badge.
+function awardTypeClass(t: string | null | undefined): string {
+  if (t === 'ISO') return 'border-emerald-300 bg-emerald-50 text-emerald-800'
+  if (t === 'RSU') return 'border-indigo-300 bg-indigo-50 text-indigo-800'
+  return 'border-slate-300 bg-slate-100 text-slate-700' // NSO / other
+}
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -28,7 +35,11 @@ interface Grant {
   quantity_expired?: number | null
   award_type?: string | null
   acceleration?: string | null
+  vesting_schedule_id?: string | null
+  vesting_schedule_name?: string | null
 }
+
+interface VestingSchedule { id: string; name: string; vest_months: number; cliff_months: number; cadence: string }
 
 // Vesting schedule label — the user asked for canonical labels for the two
 // common cases plus "Other" for everything else.
@@ -43,6 +54,10 @@ function vestingLabel(g: { vest_months: number | null; cliff_months: number | nu
 interface Pool { id: string; name: string; authorized: number }
 
 const { data, refresh } = await useFetch<{ grants: Grant[]; pools: Pool[] }>(() => `/api/companies/${id.value}/grants`, { watch: [id], default: () => ({ grants: [], pools: [] } as any) })
+
+// Operator-defined vesting schedules (Settings → Option Grants) — feed the
+// editor's schedule picker and the Proposed table's schedule column.
+const { data: vestingSchedules } = await useFetch<VestingSchedule[]>(() => `/api/companies/${id.value}/vesting-schedules`, { watch: [id], default: () => [] })
 
 // Round-summary drives Authorized — sum of rounds.option_pool_issued
 // (operator-managed on the Financings page) is the source of truth.
@@ -248,11 +263,13 @@ const proposedCols = computed<GrCol[]>(() => {
     cols.push({ key: `prop_new_${u}`,  bucket: 'new',  unit: u, label: `New${unitSuffix(u)}`,  width: w, sortable: true, align: 'right' })
     cols.push({ key: `prop_post_${u}`, bucket: 'post', unit: u, label: `Post${unitSuffix(u)}`, width: w, sortable: true, align: 'right', groupEnd: !isLast })
   })
-  // Dates + operator note. Issue date is read-only here; Vesting date and
-  // Note are editable inline in the cell.
-  cols.push({ key: 'issue_date',   label: 'Issued',       width: 100, sortable: true, align: 'left' })
+  // Per-grant attributes. Strike, Issued and Schedule are read-only here;
+  // Vesting date and Note are editable inline in the cell.
+  cols.push({ key: 'strike',        label: 'Strike',       width: 80,  sortable: true, align: 'right' })
+  cols.push({ key: 'issue_date',    label: 'Issued',       width: 100, sortable: true, align: 'left' })
   cols.push({ key: 'vesting_start', label: 'Vesting date', width: 120, sortable: true, align: 'left' })
-  cols.push({ key: 'notes',        label: 'Note',         width: 200, sortable: false, align: 'left' })
+  cols.push({ key: 'vesting_schedule_name', label: 'Schedule', width: 130, sortable: true, align: 'left' })
+  cols.push({ key: 'notes',         label: 'Note',         width: 200, sortable: false, align: 'left' })
   cols.push({ key: 'actions', label: '', width: 84, sortable: false, align: 'right' })
   return cols
 })
@@ -763,7 +780,7 @@ const fieldLabels: Record<string, string> = {
               <template v-for="g in sortedOutstanding" :key="g.id">
               <tr v-if="editingId === g.id">
                 <td :colspan="outstandingVisibleCols.length" class="p-0 border-b border-ink-200">
-                  <GrantInlineEditor :grant="g" :post-fds="postFDS" :post-pps="postPPS" :saving="saving" @save="saveEditor" @cancel="cancelEdit" />
+                  <GrantInlineEditor :grant="g" :schedules="vestingSchedules" :post-fds="postFDS" :post-pps="postPPS" :saving="saving" @save="saveEditor" @cancel="cancelEdit" />
                 </td>
               </tr>
               <tr v-else class="group">
@@ -771,11 +788,10 @@ const fieldLabels: Record<string, string> = {
                   <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-brand-50/40" :title="g.recipient_name">
                     <span>{{ g.recipient_name }}</span>
                     <span
+                      v-if="g.award_type"
                       class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle"
-                      :class="optionTypeOf(g.recipient_type) === 'ISO'
-                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                        : 'border-slate-300 bg-slate-100 text-slate-700'"
-                    >{{ optionTypeOf(g.recipient_type) }}</span>
+                      :class="awardTypeClass(g.award_type)"
+                    >{{ g.award_type }}</span>
                     <span v-if="!g.linked_stakeholder" class="ml-1 text-[9px] uppercase tracking-wide text-amber-700">unlinked</span>
                   </td>
                   <td v-else-if="c.key === 'strike'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">{{ fmtPricePerShare(g.strike) }}</td>
@@ -862,13 +878,13 @@ const fieldLabels: Record<string, string> = {
               <!-- Inline add editor (Propose grant) sits atop the list. -->
               <tr v-if="adding">
                 <td :colspan="proposedVisibleCols.length" class="p-0 border-b border-ink-200">
-                  <GrantInlineEditor :grant="null" :post-fds="postFDS" :post-pps="postPPS" :saving="saving" @save="saveEditor" @cancel="cancelEdit" />
+                  <GrantInlineEditor :grant="null" :schedules="vestingSchedules" :post-fds="postFDS" :post-pps="postPPS" :saving="saving" @save="saveEditor" @cancel="cancelEdit" />
                 </td>
               </tr>
               <template v-for="g in sortedProposed" :key="g.id">
               <tr v-if="editingId === g.id">
                 <td :colspan="proposedVisibleCols.length" class="p-0 border-b border-ink-200">
-                  <GrantInlineEditor :grant="g" :post-fds="postFDS" :post-pps="postPPS" :saving="saving" @save="saveEditor" @cancel="cancelEdit" />
+                  <GrantInlineEditor :grant="g" :schedules="vestingSchedules" :post-fds="postFDS" :post-pps="postPPS" :saving="saving" @save="saveEditor" @cancel="cancelEdit" />
                 </td>
               </tr>
               <tr v-else class="group">
@@ -876,11 +892,10 @@ const fieldLabels: Record<string, string> = {
                   <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-brand-50/40" :title="g.recipient_name">
                     <span>{{ g.recipient_name }}</span>
                     <span
+                      v-if="g.award_type"
                       class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle"
-                      :class="optionTypeOf(g.recipient_type) === 'ISO'
-                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                        : 'border-slate-300 bg-slate-100 text-slate-700'"
-                    >{{ optionTypeOf(g.recipient_type) }}</span>
+                      :class="awardTypeClass(g.award_type)"
+                    >{{ g.award_type }}</span>
                   </td>
                   <td v-else-if="c.key === 'existing_options'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">
                     <span v-if="g.existing_options">{{ fmtShares(g.existing_options) }}</span>
@@ -912,7 +927,12 @@ const fieldLabels: Record<string, string> = {
                       c.groupEnd ? 'border-r border-ink-200' : '',
                     ]"
                   >{{ fmtUnit(c.unit!, (g as any)[c.key]) }}</td>
+                  <td v-else-if="c.key === 'strike'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">{{ fmtPricePerShare(g.strike) }}</td>
                   <td v-else-if="c.key === 'issue_date'" class="px-2.5 py-1.5 text-ink-600 border-b border-ink-200 group-hover:bg-brand-50/40">{{ fmtDate(g.issue_date) }}</td>
+                  <td v-else-if="c.key === 'vesting_schedule_name'" class="px-2.5 py-1.5 text-ink-600 border-b border-ink-200 truncate group-hover:bg-brand-50/40" :title="g.vesting_schedule_name || ''">
+                    <span v-if="g.vesting_schedule_name">{{ g.vesting_schedule_name }}</span>
+                    <span v-else class="text-ink-400">—</span>
+                  </td>
                   <td v-else-if="c.key === 'vesting_start'" class="px-2 py-1 text-ink-600 border-b border-ink-200 group-hover:bg-brand-50/40">
                     <input
                       v-if="vestEditId === g.id"
