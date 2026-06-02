@@ -35,12 +35,13 @@ export interface ParsedGrant {
   notes: string | null
   vestingSchedule: string | null
   awardType: string | null
+  batch: string | null
 }
 
 export type GrantField =
   | 'recipientName' | 'recipientType' | 'quantity' | 'strike'
   | 'issueDate' | 'vestingStart' | 'vestMonths' | 'cliffMonths' | 'notes'
-  | 'vestingSchedule' | 'awardType'
+  | 'vestingSchedule' | 'awardType' | 'batch'
 
 // The canonical "template" fields the operator maps in Option Grants settings.
 // Each lists the default spreadsheet header we expect and the grants-table
@@ -62,6 +63,7 @@ export const CANONICAL_GRANT_FIELDS: CanonicalGrantField[] = [
   { field: 'strike',          label: 'Strike price',          defaultHeader: 'Strike price',          mapsTo: 'strike' },
   { field: 'vestingSchedule', label: 'Vesting schedule',      defaultHeader: 'Vesting schedule',      mapsTo: 'vesting_schedule_id' },
   { field: 'awardType',       label: 'Type (ISO/NSO/RSU)',    defaultHeader: 'Type',                  mapsTo: 'award_type' },
+  { field: 'batch',           label: 'Batch',                 defaultHeader: 'Batch',                 mapsTo: 'round' },
 ]
 
 // The default header → field overrides (canonical defaults). Importers merge
@@ -128,7 +130,7 @@ const ALIASES: Record<GrantField, RegExp[]> = {
     /^vest(ing)? ?(months|period|term|length|in months)?$/,
     /^(term|duration|period|length)( ?(months|in months))?$/,
     /^vest$/,
-    /vesting/,
+    // Note: no bare /vesting/ here — it would swallow "vesting schedule".
   ],
   cliffMonths: [
     /^cliff( ?months| ?period)?$/,
@@ -146,6 +148,11 @@ const ALIASES: Record<GrantField, RegExp[]> = {
   awardType: [
     /^(award|grant|option|security) ?type$/,
     /^(iso|nso|rsu)$/,
+  ],
+  batch: [
+    /^(grant ?)?batch( ?name)?$/,
+    /^cohort$/,
+    /batch/,
   ],
 }
 
@@ -349,6 +356,7 @@ export async function parseGrantsXlsx(buf: Buffer, overrides?: Partial<Record<Gr
       notes: 'notes' in colByField ? cellString(get('notes')) || null : null,
       vestingSchedule: 'vestingSchedule' in colByField ? cellString(get('vestingSchedule')) || null : null,
       awardType: 'awardType' in colByField ? normalizeAwardType(get('awardType')) : null,
+      batch: 'batch' in colByField ? cellString(get('batch')) || null : null,
     })
   }
 
@@ -440,6 +448,7 @@ export function parseGrantsCsv(text: string, overrides?: Partial<Record<GrantFie
       notes: 'notes' in colByField ? cellString(get('notes')) || null : null,
       vestingSchedule: 'vestingSchedule' in colByField ? cellString(get('vestingSchedule')) || null : null,
       awardType: 'awardType' in colByField ? normalizeAwardType(get('awardType')) : null,
+      batch: 'batch' in colByField ? cellString(get('batch')) || null : null,
     })
   }
 
