@@ -367,6 +367,9 @@ function migrate(d: Database.Database): void {
   // Reference to an operator-defined vesting schedule (vesting_schedules.id).
   // When set, the grant's vest_months/cliff_months are snapshotted from it.
   ensureColumn('grants', 'vesting_schedule_id', 'TEXT')
+  // Ideas import header-mapping overrides (JSON), stored alongside the grants
+  // import mappings on the same per-company settings row.
+  ensureColumn('grant_settings', 'idea_import_mappings', 'TEXT')
   ensureColumn('rounds', 'option_pool_issued', 'REAL NOT NULL DEFAULT 0')
   ensureColumn('rounds', 'parent_round_code', 'TEXT')
   ensureColumn('rounds', 'pre_money', 'REAL')

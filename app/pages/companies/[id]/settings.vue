@@ -8,6 +8,7 @@ const id = computed(() => route.params.id as string)
 // Scaffolded as an array so more settings sections can be added later.
 const tabs = [
   { key: 'grants', label: 'Option Grants' },
+  { key: 'pool', label: 'Option Pool' },
 ] as const
 const activeTab = ref<typeof tabs[number]['key']>('grants')
 
@@ -82,6 +83,38 @@ async function saveMappings() {
 }
 function resetMapping(f: CanonicalField) {
   mappingDraft[f.field] = f.defaultHeader
+}
+
+// ---- Ideas (Option Pool) import field mapping -------------------------
+const { data: ideaSettings, refresh: refreshIdeaSettings } = await useFetch<{ fields: CanonicalField[]; mappings: Record<string, string> }>(
+  () => `/api/companies/${id.value}/idea-settings`,
+  { watch: [id], default: () => ({ fields: [], mappings: {} }) },
+)
+const ideaMappingDraft = reactive<Record<string, string>>({})
+watchEffect(() => {
+  if (ideaSettings.value) {
+    for (const f of ideaSettings.value.fields) {
+      ideaMappingDraft[f.field] = ideaSettings.value.mappings[f.field] ?? f.defaultHeader
+    }
+  }
+})
+const savingIdeaMappings = ref(false)
+const ideaMappingsSaved = ref(false)
+async function saveIdeaMappings() {
+  if (savingIdeaMappings.value) return
+  savingIdeaMappings.value = true
+  ideaMappingsSaved.value = false
+  try {
+    await $fetch(`/api/companies/${id.value}/idea-settings`, { method: 'POST', body: { mappings: { ...ideaMappingDraft } } })
+    await refreshIdeaSettings()
+    ideaMappingsSaved.value = true
+    setTimeout(() => { ideaMappingsSaved.value = false }, 2500)
+  } finally {
+    savingIdeaMappings.value = false
+  }
+}
+function resetIdeaMapping(f: CanonicalField) {
+  ideaMappingDraft[f.field] = f.defaultHeader
 }
 </script>
 
@@ -222,6 +255,48 @@ function resetMapping(f: CanonicalField) {
                 class="text-[11px] text-ink-500 hover:text-brand-600 whitespace-nowrap"
                 title="Reset to default"
                 @click="resetMapping(f)"
+              >reset</button>
+            </div>
+          </div>
+        </div>
+      </UiCard>
+    </div>
+
+    <!-- Option Pool tab -->
+    <div v-else-if="activeTab === 'pool'" class="space-y-6 max-w-4xl">
+      <UiCard title="Ideas import template fields" subtitle="Column headers CapStack looks for when importing option-grant Ideas, and the pool-event field each maps to.">
+        <template #header>
+          <span v-if="ideaMappingsSaved" class="text-xs text-emerald-700 font-medium">Saved ✓</span>
+          <UiButton variant="primary" :disabled="savingIdeaMappings" @click="saveIdeaMappings">
+            <Save :size="14" /> {{ savingIdeaMappings ? 'Saving…' : 'Save mapping' }}
+          </UiButton>
+        </template>
+        <p class="text-[12px] text-ink-500 mb-3">
+          The Ideas importer only adds <b>Future grant</b> ideas (other event types — top-ups, exercises, forfeits, floors, reserves — stay on the Add idea modal). Imports match these headers first, then fall back to smart auto-detection.
+        </p>
+        <div class="space-y-2">
+          <div
+            v-for="f in ideaSettings.fields"
+            :key="f.field"
+            class="grid grid-cols-[1fr_auto_1.4fr] items-center gap-3 py-1.5 border-b border-ink-100 last:border-0"
+          >
+            <div>
+              <div class="text-sm font-medium text-ink-800">{{ f.label }}</div>
+              <div class="text-[11px] text-ink-400 num">→ pool_events.{{ f.mapsTo }}</div>
+            </div>
+            <span class="text-ink-300 text-xs">header</span>
+            <div class="flex items-center gap-2">
+              <input
+                v-model="ideaMappingDraft[f.field]"
+                type="text"
+                class="w-full rounded-md border border-ink-300 bg-white px-2.5 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                :placeholder="f.defaultHeader"
+              />
+              <button
+                v-if="ideaMappingDraft[f.field] !== f.defaultHeader"
+                class="text-[11px] text-ink-500 hover:text-brand-600 whitespace-nowrap"
+                title="Reset to default"
+                @click="resetIdeaMapping(f)"
               >reset</button>
             </div>
           </div>

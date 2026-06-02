@@ -9,7 +9,7 @@
 //   - "vest-schedule" -> each grant reduces the pool month-by-month as shares
 //                        vest (1/vest_months after the cliff, lump-sum at the
 //                        cliff date).
-import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, ChevronRight, Lightbulb, TrendingUp, TrendingDown as ArrowDownIcon, X } from 'lucide-vue-next'
+import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, ChevronRight, Lightbulb, TrendingUp, TrendingDown as ArrowDownIcon, X, UploadCloud, AlertTriangle, CheckCircle2 } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtUSD, fmtDate } from '~/utils/format'
 
 const route = useRoute()
@@ -551,6 +551,89 @@ async function deleteIdea(idea: any) {
   await refreshIdeas()
 }
 
+// ---- Ideas import (Future grant ideas only) ----------------------------
+// Mirrors the Option Grants importer: drop a file → preview detected mapping
+// → resolve any name collisions with existing grant-ideas → commit.
+interface IdeaImportPreview {
+  filename: string
+  mapping: Record<string, string>
+  unmappedHeaders: string[]
+  warnings: string[]
+  sample: Array<{ name: string; targetDate: string | null; kind: string | null; shares: number; vestMonths: number | null; cliffMonths: number | null; notes: string | null }>
+  totalParsed: number
+}
+interface IdeaCollision { key: string; name: string; existingShares: number; incomingShares: number }
+const showImport = ref(false)
+const importFile = ref<File | null>(null)
+const importPreview = ref<IdeaImportPreview | null>(null)
+const importPreviewing = ref(false)
+const importCommitting = ref(false)
+const importError = ref<string | null>(null)
+const importDone = ref<{ created: number; updated: number; skipped: number; warnings: string[] } | null>(null)
+const collisions = ref<IdeaCollision[]>([])
+const resolutions = reactive<Record<string, 'combine' | 'replace' | 'skip'>>({})
+
+const ideaFieldLabels: Record<string, string> = {
+  name: 'Name', targetDate: 'Target date', kind: 'ISO / NSO', shares: 'Shares',
+  vestMonths: 'Vest months', cliffMonths: 'Cliff months', notes: 'Notes',
+}
+
+function openImport() {
+  showImport.value = true
+  importFile.value = null
+  importPreview.value = null
+  importError.value = null
+  importDone.value = null
+  collisions.value = []
+}
+function closeImport() { showImport.value = false }
+function onImportFile(e: Event) {
+  const t = e.target as HTMLInputElement
+  if (t.files?.[0]) { importFile.value = t.files[0]; previewImport() }
+}
+function onImportDrop(e: DragEvent) {
+  if (e.dataTransfer?.files?.[0]) { importFile.value = e.dataTransfer.files[0]; previewImport() }
+}
+async function previewImport() {
+  if (!importFile.value) return
+  importPreviewing.value = true
+  importPreview.value = null
+  importError.value = null
+  try {
+    const fd = new FormData()
+    fd.append('file', importFile.value)
+    importPreview.value = await $fetch(`/api/companies/${id.value}/pool-events/import-preview`, { method: 'POST', body: fd })
+  } catch (e: any) {
+    importError.value = e?.data?.message || e?.message || 'Preview failed'
+  } finally {
+    importPreviewing.value = false
+  }
+}
+interface IdeaImportResult { ok: boolean; needsResolution?: boolean; collisions?: IdeaCollision[]; created?: number; updated?: number; skipped?: number; warnings?: string[] }
+async function commitImport(withResolutions = false) {
+  if (!importFile.value || importCommitting.value) return
+  importCommitting.value = true
+  importError.value = null
+  try {
+    const fd = new FormData()
+    fd.append('file', importFile.value)
+    if (withResolutions) fd.append('resolutions', JSON.stringify({ ...resolutions }))
+    const res = await $fetch<IdeaImportResult>(`/api/companies/${id.value}/pool-events/import`, { method: 'POST', body: fd })
+    if (res.needsResolution && res.collisions?.length) {
+      collisions.value = res.collisions
+      for (const c of res.collisions) if (!(c.key in resolutions)) resolutions[c.key] = 'combine'
+      return
+    }
+    collisions.value = []
+    importDone.value = { created: res.created || 0, updated: res.updated || 0, skipped: res.skipped || 0, warnings: res.warnings || [] }
+    await refreshIdeas()
+  } catch (e: any) {
+    importError.value = e?.data?.message || e?.message || 'Import failed'
+  } finally {
+    importCommitting.value = false
+  }
+}
+
 // Inline date edit for grant events on the timeline. When a grant came in
 // without an issue date (no plan sheet matched, or the date column was
 // labeled something we didn't catch), the operator can pick a date right
@@ -935,7 +1018,10 @@ const chart = computed(() => {
             </h2>
             <p class="text-xs text-ink-500">Hypothetical future events. Folded into the projected Available + chart above, but not the Timeline.</p>
           </div>
-          <UiButton variant="primary" @click="openModal()"><Plus :size="14" /> Add idea</UiButton>
+          <div class="flex items-center gap-2">
+            <UiButton @click="openImport"><UploadCloud :size="14" /> Import ideas</UiButton>
+            <UiButton variant="primary" @click="openModal()"><Plus :size="14" /> Add idea</UiButton>
+          </div>
         </div>
         <div v-if="!ideaEventsList.length" class="px-4 py-8 text-sm text-ink-500 text-center">
           No ideas yet. Click <span class="font-medium text-ink-700">Add idea</span> to model a future top-up, grant, exercise, forfeit, or floor.
@@ -1063,6 +1149,164 @@ const chart = computed(() => {
             <Lightbulb :size="14" /> {{ saving ? 'Saving…' : (editingIdea ? 'Update idea' : 'Add idea') }}
           </UiButton>
         </div>
+      </div>
+    </div>
+
+    <!-- Ideas import modal — Future grant ideas only -->
+    <div v-if="showImport" class="fixed inset-0 z-50 bg-ink-900/40 backdrop-blur-sm grid place-items-center p-4" @click.self="closeImport">
+      <div class="w-full max-w-3xl rounded-lg border border-ink-300 bg-white shadow-card-hover">
+        <header class="px-5 py-3 border-b border-ink-200 flex items-center justify-between gap-2">
+          <div>
+            <h2 class="text-base font-semibold text-ink-900">Import ideas</h2>
+            <p class="text-xs text-ink-500 mt-0.5">Drop a spreadsheet of future option-grant ideas — we match headers like "Name", "Shares", "Target date". Imported as Future grant ideas.</p>
+          </div>
+          <button class="p-1.5 hover:bg-ink-200 rounded" @click="closeImport"><X :size="16" /></button>
+        </header>
+
+        <div class="p-5 space-y-4">
+          <!-- Step 1: drop / pick -->
+          <div
+            v-if="!importPreview && !importDone"
+            class="rounded-md border-2 border-dashed transition-colors p-8 text-center border-ink-300 bg-ink-100/30"
+            @dragover.prevent @drop.prevent="onImportDrop"
+          >
+            <UploadCloud :size="28" class="mx-auto text-ink-500" />
+            <p class="mt-2 text-sm text-ink-700">
+              <span class="font-medium">Drop a file here</span> or
+              <label class="text-brand-600 hover:text-brand-700 cursor-pointer underline font-medium">
+                browse
+                <input type="file" accept=".xlsx,.xlsm,.csv,.tsv" class="hidden" @change="onImportFile" />
+              </label>
+            </p>
+            <p v-if="importFile" class="mt-1 text-xs text-ink-600">{{ importFile.name }}</p>
+            <p class="mt-2 text-[11px] text-ink-500">xlsx / xlsm / csv / tsv. Configure expected headers in Settings → Option Pool.</p>
+            <p v-if="importPreviewing" class="mt-3 text-xs text-brand-700">Analyzing…</p>
+          </div>
+
+          <!-- Step 2: mapping + sample -->
+          <div v-else-if="importPreview && !collisions.length && !importDone" class="space-y-4">
+            <div v-if="importPreview.warnings.length" class="rounded-md border border-amber-200 bg-amber-50 p-3">
+              <h4 class="text-[11px] font-semibold uppercase tracking-wide text-amber-700 mb-1 flex items-center gap-1"><AlertTriangle :size="12" /> Heads up</h4>
+              <ul class="text-xs text-amber-900 list-disc pl-5 space-y-0.5">
+                <li v-for="(w, i) in importPreview.warnings" :key="i">{{ w }}</li>
+              </ul>
+            </div>
+            <div>
+              <h4 class="text-[11px] font-semibold uppercase tracking-wide text-ink-500 mb-2">Column mapping</h4>
+              <div class="text-xs grid grid-cols-2 gap-x-4 gap-y-1">
+                <template v-for="(field, header) in importPreview.mapping" :key="header">
+                  <div class="text-ink-600 truncate" :title="header">{{ header }}</div>
+                  <div class="text-ink-900 font-medium">→ {{ ideaFieldLabels[field] || field }}</div>
+                </template>
+              </div>
+              <p v-if="importPreview.unmappedHeaders.length" class="mt-2 text-[11px] text-ink-500 italic">Ignored: {{ importPreview.unmappedHeaders.join(', ') }}</p>
+            </div>
+            <div v-if="importPreview.sample.length">
+              <h4 class="text-[11px] font-semibold uppercase tracking-wide text-ink-500 mb-2">
+                Preview ({{ importPreview.totalParsed }} total{{ importPreview.totalParsed > importPreview.sample.length ? ` — first ${importPreview.sample.length} shown` : '' }})
+              </h4>
+              <div class="border border-ink-200 rounded overflow-x-auto">
+                <table class="text-[12px] w-full">
+                  <thead class="bg-ink-100 text-ink-700">
+                    <tr>
+                      <th class="px-2 py-1 text-left text-[10px] uppercase tracking-wide">Name</th>
+                      <th class="px-2 py-1 text-left text-[10px] uppercase tracking-wide">Target date</th>
+                      <th class="px-2 py-1 text-left text-[10px] uppercase tracking-wide">ISO/NSO</th>
+                      <th class="px-2 py-1 text-right text-[10px] uppercase tracking-wide">Shares</th>
+                    </tr>
+                  </thead>
+                  <tbody class="num">
+                    <tr v-for="(r, i) in importPreview.sample" :key="i" class="border-t border-ink-200 odd:bg-ink-50/30">
+                      <td class="px-2 py-1 text-ink-900 font-medium">{{ r.name }}</td>
+                      <td class="px-2 py-1 text-ink-700">{{ r.targetDate ? fmtDate(r.targetDate) : '—' }}</td>
+                      <td class="px-2 py-1 text-ink-700">{{ r.kind || '—' }}</td>
+                      <td class="px-2 py-1 text-right text-ink-900">{{ fmtShares(r.shares) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <p v-if="importError" class="text-sm text-red-700">{{ importError }}</p>
+          </div>
+
+          <!-- Step 2b: resolve name collisions -->
+          <div v-else-if="collisions.length && !importDone" class="space-y-3">
+            <div class="rounded-md border border-amber-200 bg-amber-50 p-3">
+              <h4 class="text-[11px] font-semibold uppercase tracking-wide text-amber-700 mb-1 flex items-center gap-1">
+                <AlertTriangle :size="12" /> {{ collisions.length }} match{{ collisions.length === 1 ? '' : 'es' }} with existing grant-ideas
+              </h4>
+              <p class="text-xs text-amber-900">Same name. <b>Combine</b> adds the imported shares, <b>Replace</b> overwrites the existing idea, <b>Skip</b> leaves it untouched.</p>
+            </div>
+            <div class="border border-ink-200 rounded overflow-x-auto">
+              <table class="text-[12px] w-full">
+                <thead class="bg-ink-100 text-ink-700">
+                  <tr>
+                    <th class="px-2 py-1 text-left text-[10px] uppercase tracking-wide">Name</th>
+                    <th class="px-2 py-1 text-right text-[10px] uppercase tracking-wide">Existing</th>
+                    <th class="px-2 py-1 text-right text-[10px] uppercase tracking-wide">Imported</th>
+                    <th class="px-2 py-1 text-left text-[10px] uppercase tracking-wide w-56">Action</th>
+                  </tr>
+                </thead>
+                <tbody class="num">
+                  <tr v-for="c in collisions" :key="c.key" class="border-t border-ink-200">
+                    <td class="px-2 py-1 text-ink-900 font-medium">{{ c.name }}</td>
+                    <td class="px-2 py-1 text-right text-ink-700">{{ fmtShares(c.existingShares) }}</td>
+                    <td class="px-2 py-1 text-right text-ink-700">{{ fmtShares(c.incomingShares) }}</td>
+                    <td class="px-2 py-1">
+                      <div class="inline-flex rounded-md border border-ink-300 overflow-hidden text-[11px]">
+                        <button
+                          v-for="opt in (['combine','replace','skip'] as const)"
+                          :key="opt"
+                          type="button"
+                          class="px-2 py-1 capitalize transition-colors"
+                          :class="resolutions[c.key] === opt ? 'bg-brand-500 text-white' : 'bg-white text-ink-700 hover:bg-ink-100'"
+                          @click="resolutions[c.key] = opt"
+                        >{{ opt }}</button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-if="importError" class="text-sm text-red-700">{{ importError }}</p>
+          </div>
+
+          <!-- Step 3: done -->
+          <div v-else-if="importDone" class="space-y-3">
+            <div class="flex items-center gap-2 text-emerald-700">
+              <CheckCircle2 :size="20" />
+              <span class="font-medium">
+                Import complete — {{ importDone.created }} added<template v-if="importDone.updated">, {{ importDone.updated }} updated</template><template v-if="importDone.skipped">, {{ importDone.skipped }} skipped</template>.
+              </span>
+            </div>
+            <div v-if="importDone.warnings.length" class="rounded-md border border-amber-200 bg-amber-50 p-3">
+              <h4 class="text-[11px] font-semibold uppercase tracking-wide text-amber-700 mb-1">Notes</h4>
+              <ul class="text-xs text-amber-900 list-disc pl-5 space-y-0.5">
+                <li v-for="(w, i) in importDone.warnings" :key="i">{{ w }}</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <footer class="px-5 py-3 border-t border-ink-200 flex items-center justify-end gap-2">
+          <UiButton variant="ghost" @click="closeImport">{{ importDone ? 'Done' : 'Cancel' }}</UiButton>
+          <UiButton
+            v-if="importPreview && !collisions.length && !importDone"
+            variant="primary"
+            :disabled="!importPreview.totalParsed || importCommitting"
+            @click="commitImport(false)"
+          >
+            <UploadCloud :size="14" /> {{ importCommitting ? 'Importing…' : `Import ${importPreview.totalParsed} idea${importPreview.totalParsed === 1 ? '' : 's'}` }}
+          </UiButton>
+          <UiButton
+            v-else-if="collisions.length && !importDone"
+            variant="primary"
+            :disabled="importCommitting"
+            @click="commitImport(true)"
+          >
+            <UploadCloud :size="14" /> {{ importCommitting ? 'Importing…' : 'Apply & import' }}
+          </UiButton>
+        </footer>
       </div>
     </div>
   </div>
