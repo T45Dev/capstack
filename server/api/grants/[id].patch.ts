@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
     // Per-grant detail from the Carta option-plan sheet — editable so the
     // operator can correct values if the import misread something.
     'quantity_issued', 'quantity_exercised', 'quantity_forfeited', 'quantity_expired',
-    'award_type', 'acceleration',
+    'award_type', 'acceleration', 'vesting_schedule_id',
   ]
   const updates: string[] = []
   const params: any[] = []

@@ -19,6 +19,8 @@ export default defineEventHandler(async (event) => {
     approval_status?: 'Pending' | 'Approved' | 'Rejected'
     stakeholder_id?: string
     notes?: string
+    award_type?: string
+    vesting_schedule_id?: string
   }>(event)
 
   if (!body.recipient_name?.trim()) throw createError({ statusCode: 400, message: 'recipient_name required' })
@@ -41,8 +43,8 @@ export default defineEventHandler(async (event) => {
   db().prepare(`
     INSERT INTO grants (
       id, company_id, stakeholder_id, recipient_name, recipient_type, round, quantity, strike,
-      issue_date, vesting_start, vest_months, cliff_months, status, approval_status, notes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      issue_date, vesting_start, vest_months, cliff_months, award_type, vesting_schedule_id, status, approval_status, notes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     grantId,
     id,
@@ -56,6 +58,8 @@ export default defineEventHandler(async (event) => {
     body.vesting_start || null,
     body.vest_months ?? 48,
     body.cliff_months ?? 12,
+    body.award_type || null,
+    body.vesting_schedule_id || null,
     status,
     approvalStatus,
     body.notes || null,

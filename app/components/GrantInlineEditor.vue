@@ -9,14 +9,24 @@
 import { Award, X } from 'lucide-vue-next'
 import { fmtShares, fmtPct } from '~/utils/format'
 
+interface VestingScheduleOpt {
+  id: string
+  name: string
+  vest_months: number
+  cliff_months: number
+  cadence?: string
+}
+
 interface GrantDraft {
   recipient_name: string
   recipient_type: string
+  award_type: string            // '' | 'ISO' | 'NSO' | 'RSU'
   round: string
   quantity: number
   strike: number | null
   issue_date: string
   vesting_start: string
+  vesting_schedule_id: string | null
   vest_months: number
   cliff_months: number
   status: 'outstanding' | 'proposed'
@@ -30,11 +40,13 @@ interface GrantInput {
   id?: string
   recipient_name?: string | null
   recipient_type?: string | null
+  award_type?: string | null
   round?: string | null
   quantity?: number | null
   strike?: number | null
   issue_date?: string | null
   vesting_start?: string | null
+  vesting_schedule_id?: string | null
   vest_months?: number | null
   cliff_months?: number | null
   status?: string | null
@@ -47,10 +59,11 @@ const props = withDefaults(defineProps<{
   postFds?: number
   postPps?: number
   saving?: boolean
-}>(), { grant: null, postFds: 0, postPps: 0, saving: false })
+  schedules?: VestingScheduleOpt[]
+}>(), { grant: null, postFds: 0, postPps: 0, saving: false, schedules: () => [] })
 
 const emit = defineEmits<{
-  (e: 'save', form: GrantDraft): void
+  (e: 'save', form: Record<string, any>): void
   (e: 'cancel'): void
 }>()
 
@@ -61,11 +74,13 @@ function seed(): GrantDraft {
   return {
     recipient_name: g.recipient_name ?? '',
     recipient_type: g.recipient_type ?? 'Employee',
-    round: g.round ?? 'Post-A4 / Pre-B',
+    award_type: g.award_type ?? '',
+    round: g.round ?? '',
     quantity: g.quantity ?? 0,
     strike: g.strike ?? null,
     issue_date: g.issue_date ?? today,
     vesting_start: g.vesting_start ?? today,
+    vesting_schedule_id: g.vesting_schedule_id ?? null,
     vest_months: g.vest_months ?? 48,
     cliff_months: g.cliff_months ?? 12,
     status: (g.status === 'outstanding' ? 'outstanding' : 'proposed'),
@@ -102,10 +117,33 @@ watch(inputMode, (next, prev) => {
 })
 watch(typedValue, (v) => { form.quantity = modeToShares(v, inputMode.value) })
 
+// Vesting schedule picker. Choosing a named schedule snapshots its month
+// values onto the grant; editing the months directly reverts to "Custom".
+function onSchedule(e: Event) {
+  const sid = (e.target as HTMLSelectElement).value || null
+  form.vesting_schedule_id = sid
+  if (sid) {
+    const s = props.schedules.find(x => x.id === sid)
+    if (s) { form.vest_months = s.vest_months; form.cliff_months = s.cliff_months }
+  }
+}
+watch(() => [form.vest_months, form.cliff_months], () => {
+  if (!form.vesting_schedule_id) return
+  const s = props.schedules.find(x => x.id === form.vesting_schedule_id)
+  if (s && (s.vest_months !== form.vest_months || s.cliff_months !== form.cliff_months)) {
+    form.vesting_schedule_id = null
+  }
+})
+
 const canSave = computed(() => form.recipient_name.trim().length > 0 && form.quantity > 0 && !props.saving)
 function onSave() {
   if (!canSave.value) return
-  emit('save', { ...form })
+  // Normalize empties to null so blank Type / schedule clear cleanly.
+  emit('save', {
+    ...form,
+    award_type: form.award_type || null,
+    vesting_schedule_id: form.vesting_schedule_id || null,
+  })
 }
 </script>
 
@@ -114,7 +152,7 @@ function onSave() {
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <UiInput v-model="form.recipient_name" label="Recipient" placeholder="Marwan Berrada" class="col-span-2" />
       <label class="block">
-        <span class="block text-xs font-medium text-ink-700 mb-1">Type</span>
+        <span class="block text-xs font-medium text-ink-700 mb-1">Role</span>
         <select v-model="form.recipient_type" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
           <option>Employee</option>
           <option>Board Member</option>
@@ -123,7 +161,16 @@ function onSave() {
           <option>Advisor</option>
         </select>
       </label>
-      <UiInput v-model="form.round" label="Round / batch" placeholder="Post-A4 / Pre-B" />
+      <label class="block">
+        <span class="block text-xs font-medium text-ink-700 mb-1">Type</span>
+        <select v-model="form.award_type" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+          <option value="">—</option>
+          <option value="ISO">ISO</option>
+          <option value="NSO">NSO</option>
+          <option value="RSU">RSU</option>
+        </select>
+      </label>
+      <UiInput v-model="form.round" label="Batch" placeholder="Q3 2025 hires" />
 
       <div class="col-span-2">
         <div class="flex items-end gap-2">
@@ -157,6 +204,13 @@ function onSave() {
 
       <UiInput v-model="form.issue_date" type="date" label="Issue date" />
       <UiInput v-model="form.vesting_start" type="date" label="Vesting date" />
+      <label class="block">
+        <span class="block text-xs font-medium text-ink-700 mb-1">Vesting schedule</span>
+        <select :value="form.vesting_schedule_id || ''" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" @change="onSchedule">
+          <option value="">Custom</option>
+          <option v-for="s in schedules" :key="s.id" :value="s.id">{{ s.name }}</option>
+        </select>
+      </label>
       <div class="grid grid-cols-2 gap-3">
         <UiInput v-model="form.vest_months" type="number" label="Vest mo." />
         <UiInput v-model="form.cliff_months" type="number" label="Cliff mo." />
