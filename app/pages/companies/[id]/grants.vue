@@ -70,12 +70,22 @@ const { data: roundSummary } = await useFetch<{ rounds: any[] }>(() => `/api/com
 // AND so we can surface each proposed grantee's existing position (common,
 // preferred, outstanding options).
 const { data: capTable } = await useFetch(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => null as any })
-// Compute for pre/post-round FDS denominators for the % columns.
+// Compute for the round PPS (post $ values). FDS denominators come from
+// the aggregate-round + open round below, NOT from compute — see preFDS.
 const { data: compute } = await useFetch(() => `/api/companies/${id.value}/compute`, {
   method: 'POST',
   watch: [id],
   default: () => null as any,
 })
+// Previous-Round aggregate — fully-diluted total for the state BEFORE the
+// open round. This is the single source of truth the Financings cards and
+// the Overall Dilution page denominate against; the grants %s must use the
+// same base or they read inflated (compute's preRoundFDS is cap-table-only
+// and omits the open round's new shares + converted notes).
+const { data: aggregate } = await useFetch<{ total_shares_fds: number | null }>(
+  () => `/api/companies/${id.value}/aggregate-round`,
+  { watch: [id], default: () => ({ total_shares_fds: null } as any) },
+)
 
 // Stakeholder linking — proposed grants must roll up the FULL position of the
 // matched shareholder, including any linked aliases. Carta often splits one
@@ -150,9 +160,35 @@ function positionFor(g: { stakeholder_id?: string | null; recipient_name: string
   return pid ? positionByStakeholder.value.get(pid) || null : null
 }
 
-const preFDS = computed(() => (compute.value?.round?.preRoundFDS as number) || (capTable.value ? fdsAnchor.value : 0))
-const postFDS = computed(() => (compute.value?.round?.postRoundFDS as number) || preFDS.value)
-const postPPS = computed(() => (compute.value?.round?.pricePerShare as number) || ppsAnchor.value)
+// Current round being modeled — the open round if flagged, else the latest
+// non-formation round. Mirrors dilution.vue / the Financings Open Round card.
+const currentRound = computed(() => {
+  const rs = (roundSummary.value?.rounds || []).filter((r: any) => r.kind !== 'formation')
+  if (!rs.length) return null
+  return rs.find((r: any) => r.kind === 'open') || rs[rs.length - 1] || null
+})
+// FDS denominators mirror the Overall Dilution page exactly (decision #10):
+//   preFDS  = the Previous-Round aggregate's Total FDS (everything before
+//             the open round).
+//   postFDS = that base + the open round's OWN new shares (new_money /
+//             share_price) + option pool issued + notes converted.
+// Falls back to the cap-table anchor only when no rounds exist yet, so a
+// fresh company with just a Carta import still shows a denominator.
+const preFDS = computed(() => {
+  const base = aggregate.value?.total_shares_fds
+  return (base != null && base > 0) ? base : (capTable.value ? fdsAnchor.value : 0)
+})
+const postFDS = computed(() => {
+  const base = aggregate.value?.total_shares_fds
+  if (base == null || base <= 0) return preFDS.value
+  const r = currentRound.value as any
+  if (!r) return base
+  const issued = (r.new_money && r.share_price) ? Math.floor(r.new_money / r.share_price) : 0
+  const pool = r.option_pool_issued || 0
+  const notes = r.notes_converted || 0
+  return base + issued + pool + notes
+})
+const postPPS = computed(() => (currentRound.value as any)?.share_price || (compute.value?.round?.pricePerShare as number) || ppsAnchor.value)
 
 const outstanding = computed(() => data.value!.grants.filter(g => g.status === 'outstanding'))
 const proposed = computed(() => data.value!.grants.filter(g => g.status === 'proposed'))
