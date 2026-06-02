@@ -540,6 +540,19 @@ async function destroy(g: Grant) {
   await refresh()
 }
 
+const clearingProposed = ref(false)
+async function clearProposed() {
+  if (!proposed.value.length || clearingProposed.value) return
+  if (!confirm(`Delete all ${proposed.value.length} proposed grants? This can't be undone — outstanding grants are not affected.`)) return
+  clearingProposed.value = true
+  try {
+    await $fetch(`/api/companies/${id.value}/grants/proposed`, { method: 'DELETE' })
+    await refresh()
+  } finally {
+    clearingProposed.value = false
+  }
+}
+
 async function toggleApproval(g: Grant) {
   const next: 'Pending' | 'Approved' = g.approval_status === 'Approved' ? 'Pending' : 'Approved'
   await $fetch(`/api/grants/${g.id}`, { method: 'PATCH', body: { approval_status: next } })
@@ -868,6 +881,14 @@ const fieldLabels: Record<string, string> = {
       <UiCard :title="`Proposed (${proposed.length})`" subtitle="Draft grants — promote to make them live" :padded="false">
         <template #header>
           <TableUnitsToggle storage-key="capstack:grants:proposed:units" />
+          <button
+            v-if="proposed.length"
+            type="button"
+            class="px-2 py-1 text-[11px] text-red-600 border border-ink-300 rounded hover:bg-red-50 disabled:opacity-50"
+            :disabled="clearingProposed"
+            title="Delete all proposed grants"
+            @click="clearProposed"
+          >{{ clearingProposed ? 'Clearing…' : 'Clear' }}</button>
           <details class="relative">
             <summary class="cursor-pointer list-none px-2 py-1 text-[11px] text-ink-600 border border-ink-300 rounded hover:bg-ink-100 select-none">
               Columns
