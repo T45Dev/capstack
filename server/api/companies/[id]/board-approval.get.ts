@@ -1,6 +1,5 @@
 import ExcelJS from 'exceljs'
 import { db } from '~~/server/utils/db'
-import { computeRound, type ConvertibleNote } from '~~/server/utils/calc'
 
 // Generates a board-approval xlsx that follows the S3VC Option Grants
 // Workbook template (tab 3, "Board Option Grant Approval"). Returned as a
@@ -33,13 +32,16 @@ export default defineEventHandler(async (event) => {
   const allGrants = db().prepare(`SELECT * FROM grants WHERE company_id = ?`).all(id) as any[]
   const shareClasses = db().prepare(`SELECT * FROM share_classes WHERE company_id = ?`).all(id) as any[]
   const holdings = db().prepare(`SELECT * FROM holdings WHERE company_id = ?`).all(id) as any[]
-  const convertibles = db().prepare(`SELECT * FROM convertibles WHERE company_id = ? AND status = 'outstanding'`).all(id) as any[]
   const pools = db().prepare(`SELECT * FROM option_pools WHERE company_id = ?`).all(id) as any[]
   const vestingSchedules = db().prepare(`SELECT id, name, vest_months, cliff_months FROM vesting_schedules WHERE company_id = ?`).all(id) as any[]
   const scheduleById = new Map<string, any>()
   for (const s of vestingSchedules) scheduleById.set(s.id, s)
 
-  // ---- Compute pre / post FDS ----
+  // ---- Compute pre-round FDS ----
+  // The board denominates every ownership % against the pre-round fully
+  // diluted securities (the operator-typed pre_round_fds, falling back to a
+  // cap-table derivation). This is also the "Total Fully Diluted Securities"
+  // reference figure at the foot of the pool summary.
   const holdingsTotal = holdings.reduce((a, h) => a + (h.shares || 0), 0)
   const outstandingTotal = allGrants.filter(g => g.status === 'outstanding').reduce((a, g) => a + g.quantity, 0)
   const proposedTotal = proposedGrants.reduce((a, g) => a + g.quantity, 0)
@@ -47,25 +49,6 @@ export default defineEventHandler(async (event) => {
   const optionsAvailable = Math.max(0, poolAuthorized - outstandingTotal - proposedTotal)
   const fdsFromCapTable = holdingsTotal + outstandingTotal + optionsAvailable + (assumptions?.pool_top_up_shares || 0)
   const preFDS = assumptions?.pre_round_fds ?? fdsFromCapTable
-
-  const cnNotes: ConvertibleNote[] = convertibles.map(c => ({
-    id: c.id,
-    stakeholderName: c.stakeholder_name,
-    principal: c.principal || 0,
-    interestAccrued: c.interest_accrued || 0,
-    conversionDiscount: c.conversion_discount || 0,
-    valuationCap: c.valuation_cap,
-    convertsAtRound: c.converts_at_round !== 0,
-  }))
-  const round = computeRound({
-    preRoundFDS: preFDS,
-    preMoney: assumptions?.pre_money ?? 0,
-    newMoney: assumptions?.new_money ?? 0,
-    convertibles: cnNotes,
-    cnBasis: assumptions?.cn_conversion_basis ?? 'best',
-  })
-  // If no round is modelled, post-FDS falls back to pre-FDS so the % column still resolves.
-  const postFDS = round.postRoundFDS > 0 ? round.postRoundFDS : preFDS
 
   // company.starting_round is the canonical round CODE (the pre-baseline
   // picker stores codes so renames of the display name don't break the
@@ -269,7 +252,7 @@ export default defineEventHandler(async (event) => {
       ws.getCell(r, 5).numFmt = '"$"#,##0.0000'
     }
     ws.getCell(r, 6).value = vestingDesc(g.vest_months, g.cliff_months)
-    ws.getCell(r, 7).value = postFDS > 0 ? g.quantity / postFDS : 0
+    ws.getCell(r, 7).value = preFDS > 0 ? g.quantity / preFDS : 0
     ws.getCell(r, 7).numFmt = '0.000%'
     applyBorders(r, 1, 7)
     r++
@@ -299,7 +282,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const totalPctPost = ws.getCell(r, 7)
-  totalPctPost.value = postFDS > 0 ? proposedTotal / postFDS : 0
+  totalPctPost.value = preFDS > 0 ? proposedTotal / preFDS : 0
   totalPctPost.numFmt = '0.000%'
   totalPctPost.font = whiteBold
   totalPctPost.fill = sectionFill
@@ -339,7 +322,7 @@ export default defineEventHandler(async (event) => {
     ws.getCell(r, 6).value = preferred
     ws.getCell(r, 7).value = total
     for (let c = 3; c <= 7; c++) ws.getCell(r, c).numFmt = '#,##0'
-    ws.getCell(r, 8).value = postFDS > 0 ? total / postFDS : 0
+    ws.getCell(r, 8).value = preFDS > 0 ? total / preFDS : 0
     ws.getCell(r, 8).numFmt = '0.000%'
     setDateCell(r, 9, g.vesting_start)
     ws.getCell(r, 10).value = scheduleLabel(g)
@@ -374,7 +357,7 @@ export default defineEventHandler(async (event) => {
     c.border = allBorders
   })
   const sec2PctPost = ws.getCell(r, 8)
-  sec2PctPost.value = postFDS > 0 ? sumTotal / postFDS : 0
+  sec2PctPost.value = preFDS > 0 ? sumTotal / preFDS : 0
   sec2PctPost.numFmt = '0.000%'
   sec2PctPost.font = whiteBold
   sec2PctPost.fill = sectionFill
@@ -446,7 +429,7 @@ export default defineEventHandler(async (event) => {
     ws.getCell(r, 6).value = a.exercised
     ws.getCell(r, 7).value = total
     for (let c = 2; c <= 7; c++) ws.getCell(r, c).numFmt = '#,##0;(#,##0)'
-    ws.getCell(r, 8).value = postFDS > 0 ? total / postFDS : 0
+    ws.getCell(r, 8).value = preFDS > 0 ? total / preFDS : 0
     ws.getCell(r, 8).numFmt = '0.000%'
     applyBorders(r, 1, 8)
 
@@ -479,7 +462,7 @@ export default defineEventHandler(async (event) => {
     c.fill = sectionFill
     c.border = allBorders
   })
-  ws.getCell(r, 8).value = postFDS > 0 ? catTotal / postFDS : 0
+  ws.getCell(r, 8).value = preFDS > 0 ? catTotal / preFDS : 0
   ws.getCell(r, 8).numFmt = '0.000%'
   ws.getCell(r, 8).font = whiteBold
   ws.getCell(r, 8).fill = sectionFill
@@ -499,7 +482,7 @@ export default defineEventHandler(async (event) => {
     v.numFmt = '#,##0'
     v.font = blackBold
     v.border = allBorders
-    ws.getCell(r, 8).value = postFDS > 0 ? value / postFDS : 0
+    ws.getCell(r, 8).value = preFDS > 0 ? value / preFDS : 0
     ws.getCell(r, 8).numFmt = '0.000%'
     ws.getCell(r, 8).border = allBorders
     r++
@@ -515,7 +498,7 @@ export default defineEventHandler(async (event) => {
   fdLab.alignment = { horizontal: 'left', vertical: 'middle' }
   fdLab.border = allBorders
   const fdVal = ws.getCell(r, 7)
-  fdVal.value = postFDS
+  fdVal.value = preFDS
   fdVal.numFmt = '#,##0'
   fdVal.font = blackBold
   fdVal.border = allBorders
