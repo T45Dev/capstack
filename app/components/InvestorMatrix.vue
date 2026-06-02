@@ -231,7 +231,7 @@ function sumDeltaClass(delta: number, newMoney: number): string {
     <div v-if="!(data?.rounds.length)" class="px-4 py-10 text-center text-sm text-ink-500">
       Add a round on the Rounds tab to start attributing investors.
     </div>
-    <div v-else class="overflow-x-auto">
+    <div v-else class="overflow-x-auto table-scroll">
       <table class="border-separate w-full" :style="{ borderSpacing: 0 }">
         <colgroup>
           <col style="width: 220px" />

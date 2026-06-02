@@ -48,6 +48,33 @@ input[type='number'] {
 }
 .scrollbar-none::-webkit-scrollbar { display: none; }
 
+/* Cap a table's scroll container at (roughly) the viewport and scroll the
+   body internally, so long tables never push the whole page taller than one
+   screen. Applied app-wide to data-table wrappers. The offset leaves room
+   for the 48px top bar, page padding, the page header, and the card header.
+   A `max-height` (not a fixed height) means short tables stay short — only
+   tall ones scroll. Pair with `.table-sticky-head` for a frozen header. */
+.table-scroll {
+  overflow: auto;
+  max-height: calc(100vh - 13rem);
+}
+
+/* Freeze the header row while the body scrolls. Requires the <th> cells to
+   carry an opaque background (they do across our tables — bg-ink-100 /
+   bg-ink-50). The z-index uses :where() so it stays a low-specificity
+   default — header cells that pin a corner with their own higher z-index
+   (e.g. a sticky-left first column) keep it. */
+.table-sticky-head thead th {
+  position: sticky;
+  top: 0;
+}
+:where(.table-sticky-head thead th) {
+  z-index: 3;
+}
+.table-sticky-head thead th.sticky-col {
+  z-index: 4;
+}
+
 /* Freeze a table column to the left edge during horizontal scroll. */
 .sticky-col {
   position: sticky;

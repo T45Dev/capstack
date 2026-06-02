@@ -297,7 +297,7 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
           </div>
 
           <div class="rounded-lg border border-ink-300 bg-white shadow-card overflow-hidden">
-            <div class="overflow-x-auto">
+            <div class="overflow-x-auto table-scroll table-sticky-head">
               <table class="text-[13px] border-separate" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: payoutWidth + 'px' }">
                 <colgroup>
                   <col v-for="c in payoutTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
@@ -307,7 +307,7 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
                     <th
                       v-for="c in payoutTable.cols"
                       :key="c.key"
-                      class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold"
+                      class="relative px-2.5 py-1.5 border-b border-ink-300 select-none font-semibold bg-ink-100"
                       :class="[c.align === 'right' ? 'text-right' : 'text-left', c.sortable ? 'cursor-pointer hover:text-ink-900' : '']"
                       @click="c.sortable ? payoutTable.toggleSort(c.key) : null"
                     >
