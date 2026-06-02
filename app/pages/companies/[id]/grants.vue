@@ -581,7 +581,14 @@ const importPreview = ref<ImportPreview | null>(null)
 const importPreviewing = ref(false)
 const importCommitting = ref(false)
 const importError = ref<string | null>(null)
-const importDone = ref<{ created: number; warnings: string[] } | null>(null)
+const importDone = ref<{ created: number; updated: number; skipped: number; warnings: string[] } | null>(null)
+
+// Collision resolution: when an import matches existing proposed grants
+// (same recipient name + batch), the server returns the matches and we ask
+// the operator how to resolve each one before re-submitting.
+interface Collision { key: string; recipientName: string; batch: string; existingQuantity: number; incomingQuantity: number }
+const collisions = ref<Collision[]>([])
+const resolutions = reactive<Record<string, 'combine' | 'replace' | 'skip'>>({})
 
 function openImport() {
   showImport.value = true
@@ -589,6 +596,7 @@ function openImport() {
   importPreview.value = null
   importError.value = null
   importDone.value = null
+  collisions.value = []
 }
 function closeImport() {
   showImport.value = false
@@ -615,14 +623,39 @@ async function previewImport() {
     importPreviewing.value = false
   }
 }
-async function commitImport() {
+interface ImportResult {
+  ok: boolean
+  needsResolution?: boolean
+  collisions?: Collision[]
+  created?: number
+  updated?: number
+  skipped?: number
+  warnings?: string[]
+}
+// Pass `withResolutions` on the second pass once the operator has chosen how
+// to handle each collision.
+async function commitImport(withResolutions = false) {
   if (!importFile.value || importCommitting.value) return
   importCommitting.value = true
+  importError.value = null
   try {
     const fd = new FormData()
     fd.append('file', importFile.value)
-    const res = await $fetch<{ ok: boolean; created: number; warnings: string[] }>(`/api/companies/${id.value}/grants/import`, { method: 'POST', body: fd })
-    importDone.value = { created: res.created, warnings: res.warnings || [] }
+    if (withResolutions) fd.append('resolutions', JSON.stringify({ ...resolutions }))
+    const res = await $fetch<ImportResult>(`/api/companies/${id.value}/grants/import`, { method: 'POST', body: fd })
+    if (res.needsResolution && res.collisions?.length) {
+      // Surface the matches; default every one to "combine".
+      collisions.value = res.collisions
+      for (const c of res.collisions) if (!(c.key in resolutions)) resolutions[c.key] = 'combine'
+      return
+    }
+    collisions.value = []
+    importDone.value = {
+      created: res.created || 0,
+      updated: res.updated || 0,
+      skipped: res.skipped || 0,
+      warnings: res.warnings || [],
+    }
     await refresh()
   } catch (e: any) {
     importError.value = e?.data?.message || e?.message || 'Import failed'
@@ -634,14 +667,17 @@ async function commitImport() {
 // Field-name labels for the mapping table.
 const fieldLabels: Record<string, string> = {
   recipientName: 'Recipient',
-  recipientType: 'Type',
+  recipientType: 'Role',
   quantity: 'Shares',
   strike: 'Strike',
   issueDate: 'Issue date',
-  vestingStart: 'Vesting start',
+  vestingStart: 'Vesting date',
   vestMonths: 'Vest months',
   cliffMonths: 'Cliff months',
   notes: 'Notes',
+  vestingSchedule: 'Vesting schedule',
+  awardType: 'Type (ISO/NSO/RSU)',
+  batch: 'Batch',
 }
 </script>
 
@@ -1013,7 +1049,7 @@ const fieldLabels: Record<string, string> = {
           </div>
 
           <!-- Step 2: detected mapping + sample preview -->
-          <div v-else-if="importPreview && !importDone" class="space-y-4">
+          <div v-else-if="importPreview && !collisions.length && !importDone" class="space-y-4">
             <div v-if="importPreview.warnings.length" class="rounded-md border border-amber-200 bg-amber-50 p-3">
               <h4 class="text-[11px] font-semibold uppercase tracking-wide text-amber-700 mb-1 flex items-center gap-1">
                 <AlertTriangle :size="12" /> Heads up
@@ -1067,11 +1103,57 @@ const fieldLabels: Record<string, string> = {
             <p v-if="importError" class="text-sm text-red-700">{{ importError }}</p>
           </div>
 
+          <!-- Step 2b: resolve collisions with existing proposed grants -->
+          <div v-else-if="collisions.length && !importDone" class="space-y-3">
+            <div class="rounded-md border border-amber-200 bg-amber-50 p-3">
+              <h4 class="text-[11px] font-semibold uppercase tracking-wide text-amber-700 mb-1 flex items-center gap-1">
+                <AlertTriangle :size="12" /> {{ collisions.length }} match{{ collisions.length === 1 ? '' : 'es' }} with existing proposed grants
+              </h4>
+              <p class="text-xs text-amber-900">Same recipient + batch. Choose what to do with each — <b>Combine</b> adds the imported shares, <b>Replace</b> overwrites the existing grant, <b>Skip</b> leaves it untouched.</p>
+            </div>
+            <div class="border border-ink-200 rounded overflow-x-auto">
+              <table class="text-[12px] w-full">
+                <thead class="bg-ink-100 text-ink-700">
+                  <tr>
+                    <th class="px-2 py-1 text-left text-[10px] uppercase tracking-wide">Recipient</th>
+                    <th class="px-2 py-1 text-left text-[10px] uppercase tracking-wide">Batch</th>
+                    <th class="px-2 py-1 text-right text-[10px] uppercase tracking-wide">Existing</th>
+                    <th class="px-2 py-1 text-right text-[10px] uppercase tracking-wide">Imported</th>
+                    <th class="px-2 py-1 text-left text-[10px] uppercase tracking-wide w-56">Action</th>
+                  </tr>
+                </thead>
+                <tbody class="num">
+                  <tr v-for="c in collisions" :key="c.key" class="border-t border-ink-200">
+                    <td class="px-2 py-1 text-ink-900 font-medium">{{ c.recipientName }}</td>
+                    <td class="px-2 py-1 text-ink-600">{{ c.batch || '—' }}</td>
+                    <td class="px-2 py-1 text-right text-ink-700">{{ fmtShares(c.existingQuantity) }}</td>
+                    <td class="px-2 py-1 text-right text-ink-700">{{ fmtShares(c.incomingQuantity) }}</td>
+                    <td class="px-2 py-1">
+                      <div class="inline-flex rounded-md border border-ink-300 overflow-hidden text-[11px]">
+                        <button
+                          v-for="opt in (['combine','replace','skip'] as const)"
+                          :key="opt"
+                          type="button"
+                          class="px-2 py-1 capitalize transition-colors"
+                          :class="resolutions[c.key] === opt ? 'bg-brand-500 text-white' : 'bg-white text-ink-700 hover:bg-ink-100'"
+                          @click="resolutions[c.key] = opt"
+                        >{{ opt }}</button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-if="importError" class="text-sm text-red-700">{{ importError }}</p>
+          </div>
+
           <!-- Step 3: done -->
           <div v-else-if="importDone" class="space-y-3">
             <div class="flex items-center gap-2 text-emerald-700">
               <CheckCircle2 :size="20" />
-              <span class="font-medium">Imported {{ importDone.created }} proposed grant{{ importDone.created === 1 ? '' : 's' }}.</span>
+              <span class="font-medium">
+                Import complete — {{ importDone.created }} added<template v-if="importDone.updated">, {{ importDone.updated }} updated</template><template v-if="importDone.skipped">, {{ importDone.skipped }} skipped</template>.
+              </span>
             </div>
             <div v-if="importDone.warnings.length" class="rounded-md border border-amber-200 bg-amber-50 p-3">
               <h4 class="text-[11px] font-semibold uppercase tracking-wide text-amber-700 mb-1">Notes</h4>
@@ -1085,12 +1167,20 @@ const fieldLabels: Record<string, string> = {
         <footer class="px-5 py-3 border-t border-ink-200 flex items-center justify-end gap-2">
           <UiButton variant="ghost" @click="closeImport">{{ importDone ? 'Done' : 'Cancel' }}</UiButton>
           <UiButton
-            v-if="importPreview && !importDone"
+            v-if="importPreview && !collisions.length && !importDone"
             variant="primary"
             :disabled="!importPreview.totalParsed || importCommitting"
-            @click="commitImport"
+            @click="commitImport(false)"
           >
             <UploadCloud :size="14" /> {{ importCommitting ? 'Importing…' : `Import ${importPreview.totalParsed} grant${importPreview.totalParsed === 1 ? '' : 's'}` }}
+          </UiButton>
+          <UiButton
+            v-else-if="collisions.length && !importDone"
+            variant="primary"
+            :disabled="importCommitting"
+            @click="commitImport(true)"
+          >
+            <UploadCloud :size="14" /> {{ importCommitting ? 'Importing…' : 'Apply & import' }}
           </UiButton>
         </footer>
       </div>
