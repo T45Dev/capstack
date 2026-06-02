@@ -5,6 +5,15 @@ import { computeRound, type ConvertibleNote } from '~~/server/utils/calc'
 // Generates a board-approval xlsx that follows the S3VC Option Grants
 // Workbook template (tab 3, "Board Option Grant Approval"). Returned as a
 // downloadable .xlsx attachment.
+//
+// Layout (per the board's preferred format):
+//   1. Proposed new grants — Last, First, Role/Category, New Grant,
+//      Exercise Price, Vesting, % FD Post.
+//   2. Total ownership summary — Last, First, New Grant, Outstanding
+//      Options, Common, Preferred, Total Securities, % FD Post,
+//      Vesting Begin, Vesting Schedule, Notes. Sorted by Total desc.
+//   3. Option pool summary by category — Prior / New / Forfeited /
+//      Outstanding / Exercised / Total, with real lifecycle math.
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
   if (!id) throw createError({ statusCode: 400, message: 'id required' })
@@ -26,6 +35,9 @@ export default defineEventHandler(async (event) => {
   const holdings = db().prepare(`SELECT * FROM holdings WHERE company_id = ?`).all(id) as any[]
   const convertibles = db().prepare(`SELECT * FROM convertibles WHERE company_id = ? AND status = 'outstanding'`).all(id) as any[]
   const pools = db().prepare(`SELECT * FROM option_pools WHERE company_id = ?`).all(id) as any[]
+  const vestingSchedules = db().prepare(`SELECT id, name, vest_months, cliff_months FROM vesting_schedules WHERE company_id = ?`).all(id) as any[]
+  const scheduleById = new Map<string, any>()
+  for (const s of vestingSchedules) scheduleById.set(s.id, s)
 
   // ---- Compute pre / post FDS ----
   const holdingsTotal = holdings.reduce((a, h) => a + (h.shares || 0), 0)
@@ -52,7 +64,7 @@ export default defineEventHandler(async (event) => {
     convertibles: cnNotes,
     cnBasis: assumptions?.cn_conversion_basis ?? 'best',
   })
-  // If no round is modelled, post-FDS falls back to pre-FDS so the % columns still resolve.
+  // If no round is modelled, post-FDS falls back to pre-FDS so the % column still resolves.
   const postFDS = round.postRoundFDS > 0 ? round.postRoundFDS : preFDS
 
   // company.starting_round is the canonical round CODE (the pre-baseline
@@ -70,6 +82,7 @@ export default defineEventHandler(async (event) => {
   const roundName: string = assumptions?.round_name || baselineRoundName || 'Round'
   // "Series B" -> "B", "Series A-2" -> "A-2", "Bridge" -> "Bridge"
   const roundSuffix = roundName.replace(/^Series\s+/i, '')
+  const pctPostHeader = `% FD Securities Post-${roundSuffix}`
 
   // ---- Look-up tables for section 2 ----
   const shareClassKind = new Map<string, string>()
@@ -103,16 +116,19 @@ export default defineEventHandler(async (event) => {
     properties: { defaultRowHeight: 15 },
   })
 
+  const LAST_COL = 11
   ws.columns = [
     { width: 18 }, // A — Last
-    { width: 18 }, // B — First
+    { width: 14 }, // B — First
     { width: 18 }, // C — Role / Category
-    { width: 16 }, // D — Approval Status
-    { width: 16 }, // E — New Grant
-    { width: 14 }, // F — Exercise Price
-    { width: 28 }, // G — Vesting
-    { width: 18 }, // H — % FD Pre
-    { width: 18 }, // I — % FD Post
+    { width: 16 }, // D — New Grant
+    { width: 14 }, // E — Exercise Price
+    { width: 26 }, // F — Vesting
+    { width: 16 }, // G — Total Securities / % FD Post
+    { width: 16 }, // H — % FD Post
+    { width: 14 }, // I — Vesting Begin
+    { width: 22 }, // J — Vesting Schedule
+    { width: 42 }, // K — Notes
   ]
 
   // Styles
@@ -125,7 +141,7 @@ export default defineEventHandler(async (event) => {
   const allBorders: Partial<ExcelJS.Borders> = { top: thin, bottom: thin, left: thin, right: thin }
 
   function setSectionHeader(row: number, text: string) {
-    ws.mergeCells(row, 1, row, 9)
+    ws.mergeCells(row, 1, row, LAST_COL)
     const c = ws.getCell(row, 1)
     c.value = text
     c.font = whiteBold
@@ -146,7 +162,7 @@ export default defineEventHandler(async (event) => {
     ws.getRow(row).height = 30
   }
 
-  function applyBorders(row: number, startCol = 1, endCol = 9) {
+  function applyBorders(row: number, startCol = 1, endCol = LAST_COL) {
     for (let c = startCol; c <= endCol; c++) ws.getCell(row, c).border = allBorders
   }
 
@@ -166,10 +182,31 @@ export default defineEventHandler(async (event) => {
     return `1/${v} monthly, ${cliffPart}`
   }
 
+  // "Vesting Schedule" label — prefer the operator-named schedule, else
+  // derive a friendly label from the grant's own vest/cliff months.
+  function scheduleLabel(g: any): string {
+    const sched = g.vesting_schedule_id ? scheduleById.get(g.vesting_schedule_id) : null
+    if (sched?.name) return sched.name
+    const vm = g.vest_months ?? 48
+    const cm = g.cliff_months ?? 12
+    if (vm === 48 && cm === 12) return 'Standard 4-year vest'
+    const yrs = vm % 12 === 0 ? `${vm / 12}-year vest` : `${vm}-month vest`
+    return cm === 0 ? `${yrs}, no cliff` : yrs
+  }
+
+  function setDateCell(row: number, col: number, raw: string | null | undefined) {
+    if (!raw) return
+    const d = new Date(`${String(raw).slice(0, 10)}T00:00:00`)
+    if (isNaN(d.getTime())) { ws.getCell(row, col).value = String(raw); return }
+    const cell = ws.getCell(row, col)
+    cell.value = d
+    cell.numFmt = 'm/d/yy'
+  }
+
   let r = 1
 
   // ---- Title block ----
-  ws.mergeCells(r, 1, r, 9)
+  ws.mergeCells(r, 1, r, LAST_COL)
   const titleCell = ws.getCell(r, 1)
   titleCell.value = 'BOARD OPTION GRANT APPROVAL'
   titleCell.font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' }, name: 'Calibri' }
@@ -178,7 +215,7 @@ export default defineEventHandler(async (event) => {
   ws.getRow(r).height = 28
   r++
 
-  ws.mergeCells(r, 1, r, 9)
+  ws.mergeCells(r, 1, r, LAST_COL)
   const subtitleCell = ws.getCell(r, 1)
   const formattedDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
   subtitleCell.value = `${company.name}  —  ${roundName}  —  ${formattedDate}`
@@ -186,7 +223,7 @@ export default defineEventHandler(async (event) => {
   subtitleCell.alignment = { horizontal: 'center' }
   r++
 
-  ws.mergeCells(r, 1, r, 9)
+  ws.mergeCells(r, 1, r, LAST_COL)
   const confCell = ws.getCell(r, 1)
   confCell.value = 'Confidential'
   confCell.font = { italic: true, size: 10, color: { argb: 'FF64748B' }, name: 'Calibri' }
@@ -198,15 +235,15 @@ export default defineEventHandler(async (event) => {
   r++
 
   // GRANTEE | GRANT DETAILS sub-headers
-  ws.mergeCells(r, 1, r, 4)
+  ws.mergeCells(r, 1, r, 3)
   const granteeGroup = ws.getCell(r, 1)
   granteeGroup.value = 'GRANTEE'
   granteeGroup.font = blackBold
   granteeGroup.fill = subGroupFill
   granteeGroup.alignment = { horizontal: 'center', vertical: 'middle' }
   granteeGroup.border = allBorders
-  ws.mergeCells(r, 5, r, 9)
-  const detailGroup = ws.getCell(r, 5)
+  ws.mergeCells(r, 4, r, 7)
+  const detailGroup = ws.getCell(r, 4)
   detailGroup.value = 'GRANT DETAILS'
   detailGroup.font = blackBold
   detailGroup.fill = subGroupFill
@@ -215,9 +252,8 @@ export default defineEventHandler(async (event) => {
   r++
 
   setColHeader(r, [
-    'Last', 'First', 'Role / Category', 'Approval Status',
-    'New Grant (# Options)', 'Exercise Price', 'Vesting',
-    `% FD Securities Pre-${roundSuffix}`, `% FD Securities Post-${roundSuffix}`,
+    'Last', 'First', 'Role / Category',
+    'New Grant (# Options)', 'Exercise Price', 'Vesting', pctPostHeader,
   ])
   r++
 
@@ -226,24 +262,21 @@ export default defineEventHandler(async (event) => {
     ws.getCell(r, 1).value = last
     ws.getCell(r, 2).value = first
     ws.getCell(r, 3).value = g.recipient_type || ''
-    ws.getCell(r, 4).value = g.approval_status || 'Pending'
-    ws.getCell(r, 5).value = g.quantity
-    ws.getCell(r, 5).numFmt = '#,##0'
+    ws.getCell(r, 4).value = g.quantity
+    ws.getCell(r, 4).numFmt = '#,##0'
     if (g.strike != null) {
-      ws.getCell(r, 6).value = g.strike
-      ws.getCell(r, 6).numFmt = '"$"#,##0.0000'
+      ws.getCell(r, 5).value = g.strike
+      ws.getCell(r, 5).numFmt = '"$"#,##0.0000'
     }
-    ws.getCell(r, 7).value = vestingDesc(g.vest_months, g.cliff_months)
-    ws.getCell(r, 8).value = preFDS > 0 ? g.quantity / preFDS : 0
-    ws.getCell(r, 8).numFmt = '0.000%'
-    ws.getCell(r, 9).value = postFDS > 0 ? g.quantity / postFDS : 0
-    ws.getCell(r, 9).numFmt = '0.000%'
-    applyBorders(r)
+    ws.getCell(r, 6).value = vestingDesc(g.vest_months, g.cliff_months)
+    ws.getCell(r, 7).value = postFDS > 0 ? g.quantity / postFDS : 0
+    ws.getCell(r, 7).numFmt = '0.000%'
+    applyBorders(r, 1, 7)
     r++
   }
 
   // Total row
-  ws.mergeCells(r, 1, r, 4)
+  ws.mergeCells(r, 1, r, 3)
   const totalLabel = ws.getCell(r, 1)
   totalLabel.value = 'TOTAL NEW GRANTS'
   totalLabel.font = whiteBold
@@ -251,28 +284,21 @@ export default defineEventHandler(async (event) => {
   totalLabel.alignment = { horizontal: 'left', vertical: 'middle' }
   totalLabel.border = allBorders
 
-  const totalQty = ws.getCell(r, 5)
+  const totalQty = ws.getCell(r, 4)
   totalQty.value = proposedTotal
   totalQty.numFmt = '#,##0'
   totalQty.font = whiteBold
   totalQty.fill = sectionFill
   totalQty.border = allBorders
 
-  for (let c = 6; c <= 7; c++) {
+  for (let c = 5; c <= 6; c++) {
     const cell = ws.getCell(r, c)
     cell.font = whiteBold
     cell.fill = sectionFill
     cell.border = allBorders
   }
 
-  const totalPctPre = ws.getCell(r, 8)
-  totalPctPre.value = preFDS > 0 ? proposedTotal / preFDS : 0
-  totalPctPre.numFmt = '0.000%'
-  totalPctPre.font = whiteBold
-  totalPctPre.fill = sectionFill
-  totalPctPre.border = allBorders
-
-  const totalPctPost = ws.getCell(r, 9)
+  const totalPctPost = ws.getCell(r, 7)
   totalPctPost.value = postFDS > 0 ? proposedTotal / postFDS : 0
   totalPctPost.numFmt = '0.000%'
   totalPctPost.font = whiteBold
@@ -286,20 +312,25 @@ export default defineEventHandler(async (event) => {
 
   setColHeader(r, [
     'Last', 'First', 'New Grant', 'Outstanding Options',
-    'Common Stock', 'Preferred Stock', 'Total Securities',
-    `% FD Securities Pre-${roundSuffix}`, `% FD Securities Post-${roundSuffix}`,
+    'Common Stock', 'Preferred Stock', 'Total Securities', pctPostHeader,
+    'Vesting Begin', 'Vesting Schedule', 'Notes',
   ])
   r++
 
-  let sumNew = 0, sumOut = 0, sumCommon = 0, sumPref = 0, sumTotal = 0
-  for (const g of proposedGrants) {
-    const { last, first } = splitName(g.recipient_name)
+  // Build rows first so we can sort by Total Securities descending.
+  const sec2Rows = proposedGrants.map(g => {
     const existing = g.stakeholder_id ? positionByStakeholder.get(g.stakeholder_id) : null
     const existingOptions = (g.stakeholder_id ? outstandingOptionsByStakeholder.get(g.stakeholder_id) : 0) || 0
     const common = existing?.common || 0
     const preferred = existing?.preferred || 0
     const total = g.quantity + existingOptions + common + preferred
+    return { g, existingOptions, common, preferred, total }
+  }).sort((a, b) => b.total - a.total)
 
+  let sumNew = 0, sumOut = 0, sumCommon = 0, sumPref = 0, sumTotal = 0
+  for (const row of sec2Rows) {
+    const { g, existingOptions, common, preferred, total } = row
+    const { last, first } = splitName(g.recipient_name)
     ws.getCell(r, 1).value = last
     ws.getCell(r, 2).value = first
     ws.getCell(r, 3).value = g.quantity
@@ -308,10 +339,12 @@ export default defineEventHandler(async (event) => {
     ws.getCell(r, 6).value = preferred
     ws.getCell(r, 7).value = total
     for (let c = 3; c <= 7; c++) ws.getCell(r, c).numFmt = '#,##0'
-    ws.getCell(r, 8).value = preFDS > 0 ? total / preFDS : 0
-    ws.getCell(r, 9).value = postFDS > 0 ? total / postFDS : 0
+    ws.getCell(r, 8).value = postFDS > 0 ? total / postFDS : 0
     ws.getCell(r, 8).numFmt = '0.000%'
-    ws.getCell(r, 9).numFmt = '0.000%'
+    setDateCell(r, 9, g.vesting_start)
+    ws.getCell(r, 10).value = scheduleLabel(g)
+    ws.getCell(r, 11).value = g.notes || ''
+    ws.getCell(r, 11).alignment = { wrapText: true, vertical: 'top' }
     applyBorders(r)
 
     sumNew += g.quantity
@@ -340,18 +373,18 @@ export default defineEventHandler(async (event) => {
     c.fill = sectionFill
     c.border = allBorders
   })
-  const sec2Pct1 = ws.getCell(r, 8)
-  sec2Pct1.value = preFDS > 0 ? sumTotal / preFDS : 0
-  sec2Pct1.numFmt = '0.000%'
-  sec2Pct1.font = whiteBold
-  sec2Pct1.fill = sectionFill
-  sec2Pct1.border = allBorders
-  const sec2Pct2 = ws.getCell(r, 9)
-  sec2Pct2.value = postFDS > 0 ? sumTotal / postFDS : 0
-  sec2Pct2.numFmt = '0.000%'
-  sec2Pct2.font = whiteBold
-  sec2Pct2.fill = sectionFill
-  sec2Pct2.border = allBorders
+  const sec2PctPost = ws.getCell(r, 8)
+  sec2PctPost.value = postFDS > 0 ? sumTotal / postFDS : 0
+  sec2PctPost.numFmt = '0.000%'
+  sec2PctPost.font = whiteBold
+  sec2PctPost.fill = sectionFill
+  sec2PctPost.border = allBorders
+  for (let c = 9; c <= LAST_COL; c++) {
+    const cell = ws.getCell(r, c)
+    cell.font = whiteBold
+    cell.fill = sectionFill
+    cell.border = allBorders
+  }
   r += 2
 
   // ---- Section 3: Option pool summary by category ----
@@ -360,53 +393,80 @@ export default defineEventHandler(async (event) => {
 
   setColHeader(r, [
     'Category', 'Prior Grants', 'New Grants', 'Forfeited Grants',
-    'Outstanding Options', 'Exercised Options', 'Outstanding + Exercised + New',
-    `% FD Securities Pre-${roundSuffix}`, `% FD Securities Post-${roundSuffix}`,
+    'Outstanding Options', 'Exercised Options', 'Outstanding + Exercised + New', pctPostHeader,
   ])
   r++
 
-  const categoryMap: Record<string, string[]> = {
-    'Employees': ['employee'],
-    'BoD / Advisors': ['board', 'board member', 'advisor', 'consultant', 'sab'],
-    'Ex-Employees': ['ex-employee', 'former employee'],
+  // Map a grant's recipient_type to one of the three board buckets.
+  const CATEGORIES = ['Employees', 'BoD / Advisors', 'Ex-Employees'] as const
+  type Cat = typeof CATEGORIES[number]
+  function catOf(type: string | null | undefined): Cat {
+    const t = (type || '').toLowerCase().trim()
+    if (t === 'employee' || t === 'employees') return 'Employees'
+    if (t.startsWith('ex-') || t.startsWith('ex ') || t.startsWith('former')) return 'Ex-Employees'
+    // advisor, board, board member, bod, sab, kol, consultant, etc.
+    return 'BoD / Advisors'
   }
-  const inCategory = (g: any, types: string[]) =>
-    types.includes((g.recipient_type || '').toLowerCase())
 
-  let catSumPrior = 0, catSumNew = 0, catSumForf = 0, catSumOutstanding = 0, catSumExercised = 0, catSumTotal = 0
-  for (const [label, types] of Object.entries(categoryMap)) {
-    const prior = allGrants.filter(g => g.status === 'outstanding' && inCategory(g, types)).reduce((a, g) => a + g.quantity, 0)
-    const newG = proposedGrants.filter(g => inCategory(g, types)).reduce((a, g) => a + g.quantity, 0)
-    const forf = -allGrants.filter(g => g.status === 'cancelled' && inCategory(g, types)).reduce((a, g) => a + g.quantity, 0)
-    const outstanding = prior
-    const exercised = 0 // not tracked
-    const total = outstanding + exercised + newG
+  // Per-category lifecycle aggregation.
+  //   issued (Prior) = quantity_issued ?? quantity
+  //   forfExp        = forfeited + expired (both return to the pool)
+  //   outstanding    = issued − exercised − forfExp
+  //   Total          = outstanding + exercised + new − forfExp
+  const agg: Record<Cat, { issued: number; exercised: number; forfExp: number; outstanding: number; newG: number }> = {
+    'Employees':      { issued: 0, exercised: 0, forfExp: 0, outstanding: 0, newG: 0 },
+    'BoD / Advisors': { issued: 0, exercised: 0, forfExp: 0, outstanding: 0, newG: 0 },
+    'Ex-Employees':   { issued: 0, exercised: 0, forfExp: 0, outstanding: 0, newG: 0 },
+  }
+  for (const g of allGrants) {
+    if (g.status !== 'outstanding') continue
+    const a = agg[catOf(g.recipient_type)]
+    const issued = g.quantity_issued ?? g.quantity
+    const exercised = g.quantity_exercised || 0
+    const forfExp = (g.quantity_forfeited || 0) + (g.quantity_expired || 0)
+    a.issued += issued
+    a.exercised += exercised
+    a.forfExp += forfExp
+    a.outstanding += (issued - exercised - forfExp)
+  }
+  for (const g of proposedGrants) agg[catOf(g.recipient_type)].newG += g.quantity
+
+  let catPrior = 0, catNew = 0, catForf = 0, catOut = 0, catEx = 0, catTotal = 0
+  for (const label of CATEGORIES) {
+    const a = agg[label]
+    const prior = a.issued
+    const forf = -a.forfExp
+    const total = a.outstanding + a.exercised + a.newG - a.forfExp
 
     ws.getCell(r, 1).value = label
     ws.getCell(r, 2).value = prior
-    ws.getCell(r, 3).value = newG
+    ws.getCell(r, 3).value = a.newG
     ws.getCell(r, 4).value = forf
-    ws.getCell(r, 5).value = outstanding
-    ws.getCell(r, 6).value = exercised
+    ws.getCell(r, 5).value = a.outstanding
+    ws.getCell(r, 6).value = a.exercised
     ws.getCell(r, 7).value = total
-    for (let c = 2; c <= 7; c++) ws.getCell(r, c).numFmt = '#,##0'
-    ws.getCell(r, 8).value = preFDS > 0 ? total / preFDS : 0
-    ws.getCell(r, 9).value = postFDS > 0 ? total / postFDS : 0
+    for (let c = 2; c <= 7; c++) ws.getCell(r, c).numFmt = '#,##0;(#,##0)'
+    ws.getCell(r, 8).value = postFDS > 0 ? total / postFDS : 0
     ws.getCell(r, 8).numFmt = '0.000%'
-    ws.getCell(r, 9).numFmt = '0.000%'
-    applyBorders(r)
+    applyBorders(r, 1, 8)
 
-    catSumPrior += prior
-    catSumNew += newG
-    catSumForf += forf
-    catSumOutstanding += outstanding
-    catSumExercised += exercised
-    catSumTotal += total
+    // Explanatory note when a category is a net source to the pool
+    // (forfeitures exceed new draws), mirroring the board's annotation.
+    if (label === 'Ex-Employees' && (a.forfExp > 0 || a.exercised > 0) && total < a.newG) {
+      ws.mergeCells(r, 9, r, LAST_COL)
+      const note = ws.getCell(r, 9)
+      note.value = `Ex-Employees reflects (${a.forfExp.toLocaleString()}) of forfeited/expired options returning to the pool, net of ${a.exercised.toLocaleString()} historical exercises and ${a.newG.toLocaleString()} new grant(s). A negative total means the category is a net source of shares to the pool rather than a draw.`
+      note.font = { size: 9, italic: true, name: 'Calibri', color: { argb: 'FF475569' } }
+      note.alignment = { wrapText: true, vertical: 'top' }
+    }
+
+    catPrior += prior; catNew += a.newG; catForf += forf
+    catOut += a.outstanding; catEx += a.exercised; catTotal += total
     r++
   }
 
   // Total allocated row
-  const totRowVals = [catSumPrior, catSumNew, catSumForf, catSumOutstanding, catSumExercised, catSumTotal]
+  const totRowVals = [catPrior, catNew, catForf, catOut, catEx, catTotal]
   ws.getCell(r, 1).value = 'TOTAL ALLOCATED'
   ws.getCell(r, 1).font = whiteBold
   ws.getCell(r, 1).fill = sectionFill
@@ -414,21 +474,16 @@ export default defineEventHandler(async (event) => {
   totRowVals.forEach((v, i) => {
     const c = ws.getCell(r, 2 + i)
     c.value = v
-    c.numFmt = '#,##0'
+    c.numFmt = '#,##0;(#,##0)'
     c.font = whiteBold
     c.fill = sectionFill
     c.border = allBorders
   })
-  ws.getCell(r, 8).value = preFDS > 0 ? catSumTotal / preFDS : 0
+  ws.getCell(r, 8).value = postFDS > 0 ? catTotal / postFDS : 0
   ws.getCell(r, 8).numFmt = '0.000%'
   ws.getCell(r, 8).font = whiteBold
   ws.getCell(r, 8).fill = sectionFill
   ws.getCell(r, 8).border = allBorders
-  ws.getCell(r, 9).value = postFDS > 0 ? catSumTotal / postFDS : 0
-  ws.getCell(r, 9).numFmt = '0.000%'
-  ws.getCell(r, 9).font = whiteBold
-  ws.getCell(r, 9).fill = sectionFill
-  ws.getCell(r, 9).border = allBorders
   r += 2
 
   // Authorized + remaining + total FD
@@ -444,17 +499,14 @@ export default defineEventHandler(async (event) => {
     v.numFmt = '#,##0'
     v.font = blackBold
     v.border = allBorders
-    ws.getCell(r, 8).value = preFDS > 0 ? value / preFDS : 0
+    ws.getCell(r, 8).value = postFDS > 0 ? value / postFDS : 0
     ws.getCell(r, 8).numFmt = '0.000%'
     ws.getCell(r, 8).border = allBorders
-    ws.getCell(r, 9).value = postFDS > 0 ? value / postFDS : 0
-    ws.getCell(r, 9).numFmt = '0.000%'
-    ws.getCell(r, 9).border = allBorders
     r++
   }
 
   summaryRow('TOTAL OPTIONS AUTHORIZED', poolAuthorized)
-  summaryRow('TOTAL OPTIONS REMAINING AFTER ABOVE GRANTS', Math.max(0, poolAuthorized - catSumTotal))
+  summaryRow('TOTAL OPTIONS REMAINING AFTER ABOVE GRANTS', Math.max(0, poolAuthorized - catTotal))
   // Total FD just for reference (no percent of itself).
   ws.mergeCells(r, 1, r, 6)
   const fdLab = ws.getCell(r, 1)
@@ -467,7 +519,7 @@ export default defineEventHandler(async (event) => {
   fdVal.numFmt = '#,##0'
   fdVal.font = blackBold
   fdVal.border = allBorders
-  for (let c = 8; c <= 9; c++) ws.getCell(r, c).border = allBorders
+  ws.getCell(r, 8).border = allBorders
   r += 2
 
   // ---- Definitions ----
@@ -484,7 +536,7 @@ export default defineEventHandler(async (event) => {
     '* under Equity Incentive Plan',
   ]
   for (const d of definitions) {
-    ws.mergeCells(r, 1, r, 9)
+    ws.mergeCells(r, 1, r, LAST_COL)
     const c = ws.getCell(r, 1)
     c.value = d
     c.font = { size: 10, name: 'Calibri', color: { argb: 'FF1E293B' }, italic: d.startsWith('*') }
