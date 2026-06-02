@@ -50,7 +50,7 @@ const totalWidth = computed(() => table.cols.reduce((sum, c) => sum + c.width, 0
 </script>
 
 <template>
-  <div class="overflow-x-auto">
+  <div class="overflow-x-auto table-scroll table-sticky-head">
     <table class="text-sm border-separate" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: totalWidth + 'px' }">
       <colgroup>
         <col v-for="col in table.cols" :key="col.key" :style="{ width: col.width + 'px' }" />
@@ -60,7 +60,7 @@ const totalWidth = computed(() => table.cols.reduce((sum, c) => sum + c.width, 0
           <th
             v-for="col in table.cols"
             :key="col.key"
-            class="relative px-3 py-2 border-b border-ink-300 select-none font-semibold"
+            class="relative px-3 py-2 border-b border-ink-300 select-none font-semibold bg-ink-100"
             :class="[
               col.align === 'right' ? 'text-right' : (col.align === 'center' ? 'text-center' : 'text-left'),
               col.sortable ? 'cursor-pointer hover:text-ink-900' : '',

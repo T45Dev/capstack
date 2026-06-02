@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Plus, Trash2, Edit3, Award, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle, UploadCloud, AlertTriangle, CheckCircle2, X } from 'lucide-vue-next'
-import { fmtShares, fmtPct, fmtDate, fmtPricePerShare, optionTypeOf } from '~/utils/format'
+import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle, UploadCloud, AlertTriangle, CheckCircle2, X } from 'lucide-vue-next'
+import { fmtShares, fmtPct, fmtDate, fmtPricePerShare, optionTypeOf, normalizeDate } from '~/utils/format'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -14,6 +14,7 @@ interface Grant {
   strike: number | null
   issue_date: string | null
   vesting_start: string | null
+  vesting_date: string | null
   vest_months: number | null
   cliff_months: number | null
   status: 'outstanding' | 'proposed' | 'cancelled'
@@ -248,6 +249,9 @@ const proposedCols = computed<GrCol[]>(() => {
     cols.push({ key: `prop_new_${u}`,  bucket: 'new',  unit: u, label: `New${unitSuffix(u)}`,  width: w, sortable: true, align: 'right' })
     cols.push({ key: `prop_post_${u}`, bucket: 'post', unit: u, label: `Post${unitSuffix(u)}`, width: w, sortable: true, align: 'right', groupEnd: !isLast })
   })
+  // Operator-set per-grant fields, editable inline in the cell.
+  cols.push({ key: 'vesting_date', label: 'Vest date', width: 120, sortable: true, align: 'left' })
+  cols.push({ key: 'notes',        label: 'Note',      width: 200, sortable: false, align: 'left' })
   cols.push({ key: 'actions', label: '', width: 84, sortable: false, align: 'right' })
   return cols
 })
@@ -383,109 +387,117 @@ function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
   return table.sort.dir
 }
 
-// ----- form state -----
-const showCreate = ref(false)
-const editing = ref<Grant | null>(null)
-const form = reactive({
-  recipient_name: '',
-  recipient_type: 'Employee',
-  round: 'Post-A4 / Pre-B',
-  quantity: 0,
-  strike: null as number | null,
-  issue_date: new Date().toISOString().slice(0, 10),
-  vesting_start: new Date().toISOString().slice(0, 10),
-  vest_months: 48,
-  cliff_months: 12,
-  status: 'proposed' as 'outstanding' | 'proposed',
-  notes: '',
-})
-
-// Input-mode toggle for the Quantity field: user can express the grant as
-// shares, % of post-round FDS, or $ value at the round PPS. The grant is
-// always stored as a share count; `typedValue` is the value the user is
-// currently editing, in whatever mode they picked.
-const inputMode = ref<'shares' | 'pct' | 'value'>('shares')
-const typedValue = ref(0)
-
-function sharesToMode(shares: number, mode: 'shares' | 'pct' | 'value'): number {
-  if (mode === 'shares') return shares
-  if (mode === 'pct')    return postFDS.value > 0 ? (shares / postFDS.value) * 100 : 0
-  return shares * postPPS.value
-}
-
-function modeToShares(v: number, mode: 'shares' | 'pct' | 'value'): number {
-  if (mode === 'shares') return Math.round(v)
-  if (mode === 'pct')    return Math.round((v / 100) * postFDS.value)
-  return postPPS.value > 0 ? Math.round(v / postPPS.value) : 0
-}
-
-// Swap modes mid-edit: convert whatever the user typed into shares, then
-// re-project into the new mode so the field reflects the same underlying
-// grant in the new unit.
-watch(inputMode, (next, prev) => {
-  if (next === prev) return
-  const shares = modeToShares(typedValue.value, prev)
-  form.quantity = shares
-  typedValue.value = sharesToMode(shares, next)
-})
-
-// As the user types, keep form.quantity in sync (always shares).
-watch(typedValue, (v) => {
-  form.quantity = modeToShares(v, inputMode.value)
-})
-
-function reset() {
-  form.recipient_name = ''
-  form.recipient_type = 'Employee'
-  form.round = 'Post-A4 / Pre-B'
-  form.quantity = 0
-  form.strike = null
-  form.issue_date = new Date().toISOString().slice(0, 10)
-  form.vesting_start = new Date().toISOString().slice(0, 10)
-  form.vest_months = 48
-  form.cliff_months = 12
-  form.status = 'proposed'
-  form.notes = ''
-  editing.value = null
-  inputMode.value = 'shares'
-  typedValue.value = 0
-}
+// ----- inline edit / add state -----
+// The pencil opens a row into a full inline editor (GrantInlineEditor) in
+// place of the old modal. `editingId` is the grant currently open for edit;
+// `adding` renders a fresh editor row atop the Proposed table. Only one is
+// active at a time.
+const editingId = ref<string | null>(null)
+const adding = ref(false)
+const saving = ref(false)
 
 function startEdit(g: Grant) {
-  editing.value = g
-  form.recipient_name = g.recipient_name
-  form.recipient_type = g.recipient_type || 'Employee'
-  form.round = g.round || 'Post-A4 / Pre-B'
-  form.quantity = g.quantity
-  form.strike = g.strike
-  form.issue_date = g.issue_date || ''
-  form.vesting_start = g.vesting_start || ''
-  form.vest_months = g.vest_months ?? 48
-  form.cliff_months = g.cliff_months ?? 12
-  form.status = (g.status === 'cancelled' ? 'proposed' : g.status) as any
-  form.notes = g.notes || ''
-  inputMode.value = 'shares'
-  typedValue.value = g.quantity
-  showCreate.value = true
+  adding.value = false
+  editingId.value = g.id
+}
+function startAdd() {
+  editingId.value = null
+  adding.value = true
+}
+function cancelEdit() {
+  editingId.value = null
+  adding.value = false
 }
 
-const saving = ref(false)
-async function save() {
-  if (!form.recipient_name.trim() || form.quantity <= 0 || saving.value) return
+async function saveEditor(formVals: any) {
+  if (saving.value) return
   saving.value = true
   try {
-    if (editing.value) {
-      await $fetch(`/api/grants/${editing.value.id}`, { method: 'PATCH', body: form })
+    if (editingId.value) {
+      await $fetch(`/api/grants/${editingId.value}`, { method: 'PATCH', body: formVals })
     } else {
-      await $fetch(`/api/companies/${id.value}/grants`, { method: 'POST', body: form })
+      await $fetch(`/api/companies/${id.value}/grants`, { method: 'POST', body: formVals })
     }
-    showCreate.value = false
-    reset()
+    cancelEdit()
     await refresh()
   } finally {
     saving.value = false
   }
 }
+
+// Quick single-field inline cell edits (Note, Vesting date) — PATCH just the
+// one column without opening the full row editor.
+async function quickPatch(g: Grant, patch: Record<string, any>) {
+  await $fetch(`/api/grants/${g.id}`, { method: 'PATCH', body: patch })
+  await refresh()
+}
+
+// --- inline Note cell ---
+const noteEditId = ref<string | null>(null)
+const noteDraft = ref('')
+function startNoteEdit(g: Grant) {
+  if (editingId.value === g.id) return
+  noteEditId.value = g.id
+  noteDraft.value = g.notes || ''
+}
+async function commitNote(g: Grant) {
+  if (noteEditId.value !== g.id) return
+  noteEditId.value = null
+  const next = noteDraft.value.trim()
+  if ((g.notes || '') !== next) await quickPatch(g, { notes: next || null })
+}
+
+// --- inline Vesting-date cell ---
+const vestEditId = ref<string | null>(null)
+function startVestEdit(g: Grant) {
+  if (editingId.value === g.id) return
+  vestEditId.value = g.id
+}
+async function commitVest(g: Grant, raw: string) {
+  if (vestEditId.value !== g.id) return
+  vestEditId.value = null
+  const next = normalizeDate(raw) || null
+  if ((g.vesting_date || null) !== next) await quickPatch(g, { vesting_date: next })
+}
+
+// ----- split-screen resizer between the two tables -----
+// Drag the divider to give one table more width. Persisted per browser.
+const splitPct = ref(50)
+const isWide = ref(false)
+const splitWrap = ref<HTMLElement | null>(null)
+let splitting = false
+onMounted(() => {
+  try {
+    const s = localStorage.getItem('capstack:grants:split')
+    if (s) splitPct.value = Math.min(80, Math.max(20, Number(s)))
+  } catch { /* ignore */ }
+  const mq = window.matchMedia('(min-width: 1280px)')
+  isWide.value = mq.matches
+  mq.addEventListener('change', (e) => { isWide.value = e.matches })
+})
+function startSplit() {
+  splitting = true
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onSplitMove)
+  window.addEventListener('mouseup', endSplit)
+}
+function onSplitMove(e: MouseEvent) {
+  if (!splitting || !splitWrap.value) return
+  const r = splitWrap.value.getBoundingClientRect()
+  splitPct.value = Math.min(80, Math.max(20, ((e.clientX - r.left) / r.width) * 100))
+}
+function endSplit() {
+  if (!splitting) return
+  splitting = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  window.removeEventListener('mousemove', onSplitMove)
+  window.removeEventListener('mouseup', endSplit)
+  try { localStorage.setItem('capstack:grants:split', String(Math.round(splitPct.value))) } catch { /* ignore */ }
+}
+const firstStyle = computed(() => isWide.value ? { width: `calc(${splitPct.value}% - 0.5rem)` } : {})
+const secondStyle = computed(() => isWide.value ? { width: `calc(${100 - splitPct.value}% - 0.5rem)` } : {})
 
 async function cancel(g: Grant) {
   if (!confirm(`Cancel grant of ${g.quantity} to ${g.recipient_name}?`)) return
@@ -627,7 +639,7 @@ const fieldLabels: Record<string, string> = {
           <FileDown :size="14" /> Export board approval (.xlsx)
         </UiButton>
         <UiButton @click="openImport"><UploadCloud :size="14" /> Import proposed</UiButton>
-        <UiButton variant="primary" @click="reset(); showCreate = true"><Plus :size="14" /> Propose grant</UiButton>
+        <UiButton variant="primary" @click="startAdd()"><Plus :size="14" /> Propose grant</UiButton>
       </div>
     </div>
 
@@ -697,8 +709,10 @@ const fieldLabels: Record<string, string> = {
       </div>
     </div>
 
-    <!-- Outstanding + Proposed side by side from typical laptop widths upward. -->
-    <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+    <!-- Outstanding + Proposed side by side from typical laptop widths upward,
+         with a draggable split-screen divider between them. -->
+    <div ref="splitWrap" class="flex flex-col xl:flex-row items-stretch gap-4 xl:gap-0">
+      <div class="min-w-0" :style="firstStyle">
       <UiCard :title="`Outstanding (${outstanding.length})`" subtitle="Live grants on the cap table" :padded="false">
         <template #header>
           <TableUnitsToggle storage-key="capstack:grants:outstanding:units" />
@@ -716,7 +730,7 @@ const fieldLabels: Record<string, string> = {
           </details>
         </template>
         <div v-if="!outstanding.length" class="text-sm text-ink-500 px-4 py-6 text-center">No outstanding grants.</div>
-        <div v-else class="overflow-x-auto">
+        <div v-else class="overflow-x-auto table-scroll table-sticky-head">
           <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
               <col v-for="c in outstandingVisibleCols" :key="c.key" :style="{ width: c.width + 'px' }" />
@@ -745,7 +759,13 @@ const fieldLabels: Record<string, string> = {
               </tr>
             </thead>
             <tbody class="num">
-              <tr v-for="g in sortedOutstanding" :key="g.id" class="group">
+              <template v-for="g in sortedOutstanding" :key="g.id">
+              <tr v-if="editingId === g.id">
+                <td :colspan="outstandingVisibleCols.length" class="p-0 border-b border-ink-200">
+                  <GrantInlineEditor :grant="g" :post-fds="postFDS" :post-pps="postPPS" :saving="saving" @save="saveEditor" @cancel="cancelEdit" />
+                </td>
+              </tr>
+              <tr v-else class="group">
                 <template v-for="c in outstandingVisibleCols" :key="c.key">
                   <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-brand-50/40" :title="g.recipient_name">
                     <span>{{ g.recipient_name }}</span>
@@ -775,11 +795,23 @@ const fieldLabels: Record<string, string> = {
                   </td>
                 </template>
               </tr>
+              </template>
             </tbody>
           </table>
         </div>
       </UiCard>
+      </div>
 
+      <!-- Split-screen drag handle (wide screens only). -->
+      <div
+        class="hidden xl:flex items-center justify-center w-4 shrink-0 cursor-col-resize group"
+        title="Drag to resize"
+        @mousedown.prevent="startSplit"
+      >
+        <span class="h-16 w-1 rounded-full bg-ink-300 group-hover:bg-brand-500 transition-colors" />
+      </div>
+
+      <div class="min-w-0" :style="secondStyle">
       <UiCard :title="`Proposed (${proposed.length})`" subtitle="Draft grants — promote to make them live" :padded="false">
         <template #header>
           <TableUnitsToggle storage-key="capstack:grants:proposed:units" />
@@ -796,8 +828,8 @@ const fieldLabels: Record<string, string> = {
             </div>
           </details>
         </template>
-        <div v-if="!proposed.length" class="text-sm text-ink-500 px-4 py-6 text-center">No proposed grants. Click "Propose grant" to draft one.</div>
-        <div v-else class="overflow-x-auto">
+        <div v-if="!proposed.length && !adding" class="text-sm text-ink-500 px-4 py-6 text-center">No proposed grants. Click "Propose grant" to draft one.</div>
+        <div v-else class="overflow-x-auto table-scroll table-sticky-head">
           <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
               <col v-for="c in proposedVisibleCols" :key="c.key" :style="{ width: c.width + 'px' }" />
@@ -826,7 +858,19 @@ const fieldLabels: Record<string, string> = {
               </tr>
             </thead>
             <tbody class="num">
-              <tr v-for="g in sortedProposed" :key="g.id" class="group">
+              <!-- Inline add editor (Propose grant) sits atop the list. -->
+              <tr v-if="adding">
+                <td :colspan="proposedVisibleCols.length" class="p-0 border-b border-ink-200">
+                  <GrantInlineEditor :grant="null" :post-fds="postFDS" :post-pps="postPPS" :saving="saving" @save="saveEditor" @cancel="cancelEdit" />
+                </td>
+              </tr>
+              <template v-for="g in sortedProposed" :key="g.id">
+              <tr v-if="editingId === g.id">
+                <td :colspan="proposedVisibleCols.length" class="p-0 border-b border-ink-200">
+                  <GrantInlineEditor :grant="g" :post-fds="postFDS" :post-pps="postPPS" :saving="saving" @save="saveEditor" @cancel="cancelEdit" />
+                </td>
+              </tr>
+              <tr v-else class="group">
                 <template v-for="c in proposedVisibleCols" :key="c.key">
                   <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-brand-50/40" :title="g.recipient_name">
                     <span>{{ g.recipient_name }}</span>
@@ -867,6 +911,38 @@ const fieldLabels: Record<string, string> = {
                       c.groupEnd ? 'border-r border-ink-200' : '',
                     ]"
                   >{{ fmtUnit(c.unit!, (g as any)[c.key]) }}</td>
+                  <td v-else-if="c.key === 'vesting_date'" class="px-2 py-1 text-ink-600 border-b border-ink-200 group-hover:bg-brand-50/40">
+                    <input
+                      v-if="vestEditId === g.id"
+                      type="date"
+                      :value="g.vesting_date || ''"
+                      class="w-full bg-white border border-brand-300 rounded px-1.5 py-1 text-[12px] num focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      @vue:mounted="(v: any) => v.el.focus()"
+                      @change="(e: any) => commitVest(g, e.target.value)"
+                      @blur="(e: any) => commitVest(g, (e.target as HTMLInputElement).value)"
+                      @keyup.escape="vestEditId = null"
+                    />
+                    <button v-else type="button" class="block w-full text-left truncate hover:text-brand-700" @click="startVestEdit(g)">
+                      <span v-if="g.vesting_date">{{ fmtDate(g.vesting_date) }}</span>
+                      <span v-else class="text-ink-400 italic">set…</span>
+                    </button>
+                  </td>
+                  <td v-else-if="c.key === 'notes'" class="px-2 py-1 text-ink-600 border-b border-ink-200 group-hover:bg-brand-50/40">
+                    <input
+                      v-if="noteEditId === g.id"
+                      v-model="noteDraft"
+                      type="text"
+                      class="w-full bg-white border border-brand-300 rounded px-1.5 py-1 text-[12px] focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      @vue:mounted="(v: any) => v.el.focus()"
+                      @blur="commitNote(g)"
+                      @keyup.enter="commitNote(g)"
+                      @keyup.escape="noteEditId = null"
+                    />
+                    <button v-else type="button" class="block w-full text-left truncate hover:text-brand-700" :title="g.notes || ''" @click="startNoteEdit(g)">
+                      <span v-if="g.notes">{{ g.notes }}</span>
+                      <span v-else class="text-ink-400 italic">add…</span>
+                    </button>
+                  </td>
                   <td v-else-if="c.key === 'actions'" class="px-2 py-1 text-right border-b border-ink-200 whitespace-nowrap group-hover:bg-brand-50/40">
                     <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded" @click="startEdit(g)" title="Edit"><Edit3 :size="13" /></button>
                     <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded" @click="promote(g)" title="Promote to outstanding"><ArrowUpCircle :size="13" /></button>
@@ -874,84 +950,11 @@ const fieldLabels: Record<string, string> = {
                   </td>
                 </template>
               </tr>
+              </template>
             </tbody>
           </table>
         </div>
       </UiCard>
-    </div>
-
-    <!-- Modal -->
-    <div v-if="showCreate" class="fixed inset-0 z-40 bg-ink-900/40 backdrop-blur-sm grid place-items-center p-4" @click.self="showCreate = false">
-      <div class="w-full max-w-lg rounded-lg border border-ink-300 bg-white p-5 shadow-card-hover">
-        <h2 class="text-base font-semibold text-ink-900">{{ editing ? 'Edit grant' : 'Propose grant' }}</h2>
-        <div class="mt-4 grid grid-cols-2 gap-3">
-          <UiInput v-model="form.recipient_name" label="Recipient" placeholder="Marwan Berrada" class="col-span-2" />
-          <label class="block col-span-1">
-            <span class="block text-xs font-medium text-ink-700 mb-1">Type</span>
-            <select v-model="form.recipient_type" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-              <option>Employee</option>
-              <option>Board Member</option>
-              <option>Consultant</option>
-              <option>SAB</option>
-              <option>Advisor</option>
-            </select>
-          </label>
-          <UiInput v-model="form.round" label="Round / batch" placeholder="Post-A4 / Pre-B" />
-          <div class="col-span-2">
-            <div class="flex items-end gap-2 flex-wrap">
-              <UiInput
-                v-model="typedValue"
-                type="number"
-                :label="`Grant size (${inputMode === 'shares' ? 'shares' : inputMode === 'pct' ? '% of post-round FDS' : '$ at round PPS'})`"
-                :prefix="inputMode === 'value' ? '$' : ''"
-                :suffix="inputMode === 'pct' ? '%' : ''"
-                :step="inputMode === 'shares' ? '100' : inputMode === 'pct' ? '0.01' : '1000'"
-                class="flex-1 min-w-[180px]"
-              />
-              <div class="inline-flex rounded-md border border-ink-300 overflow-hidden text-xs">
-                <button
-                  v-for="m in (['shares','pct','value'] as const)"
-                  :key="m"
-                  type="button"
-                  class="px-2.5 py-2 transition-colors"
-                  :class="inputMode === m ? 'bg-brand-500 text-white' : 'bg-white text-ink-700 hover:bg-ink-100'"
-                  @click="inputMode = m"
-                >{{ m === 'shares' ? 'Shares' : m === 'pct' ? '%' : '$' }}</button>
-              </div>
-            </div>
-            <p class="mt-1 text-[11px] text-ink-500">
-              Stored as <span class="num text-ink-700">{{ fmtShares(form.quantity) }}</span> shares.
-              <span v-if="inputMode !== 'shares' && postFDS > 0">
-                · = <span class="num text-ink-700">{{ fmtPct(form.quantity / postFDS, 2) }}</span> of post-FDS
-              </span>
-              <span v-if="inputMode !== 'value' && postPPS > 0">
-                · ≈ <span class="num text-ink-700">${{ Math.round(form.quantity * postPPS).toLocaleString() }}</span> at round PPS
-              </span>
-            </p>
-          </div>
-          <UiInput v-model="form.strike" type="number" label="Strike (PPS)" prefix="$" step="0.00001" :digits="5" />
-          <UiInput v-model="form.issue_date" type="date" label="Issue date" />
-          <UiInput v-model="form.vesting_start" type="date" label="Vest start" />
-          <UiInput v-model="form.vest_months" type="number" label="Vest months" />
-          <UiInput v-model="form.cliff_months" type="number" label="Cliff months" />
-          <label class="block col-span-2">
-            <span class="block text-xs font-medium text-ink-700 mb-1">Status</span>
-            <select v-model="form.status" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-              <option value="proposed">Proposed (draft)</option>
-              <option value="outstanding">Outstanding (live)</option>
-            </select>
-          </label>
-          <label class="block col-span-2">
-            <span class="block text-xs font-medium text-ink-700 mb-1">Notes</span>
-            <textarea v-model="form.notes" rows="2" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
-          </label>
-        </div>
-        <div class="mt-5 flex justify-end gap-2">
-          <UiButton variant="ghost" @click="showCreate = false">Cancel</UiButton>
-          <UiButton variant="primary" :disabled="!form.recipient_name.trim() || form.quantity <= 0 || saving" @click="save">
-            <Award :size="14" /> {{ saving ? 'Saving…' : 'Save grant' }}
-          </UiButton>
-        </div>
       </div>
     </div>
 

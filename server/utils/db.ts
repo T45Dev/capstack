@@ -340,6 +340,10 @@ function migrate(d: Database.Database): void {
   ensureColumn('grants', 'last_exercised_date', 'TEXT')
   ensureColumn('grants', 'forfeited_date', 'TEXT')
   ensureColumn('grants', 'expired_date', 'TEXT')
+  // Vesting date — a dedicated date the operator sets per proposed grant,
+  // distinct from vesting_start (the vest-commencement date). Surfaced as an
+  // editable column on the Proposed table.
+  ensureColumn('grants', 'vesting_date', 'TEXT')
   ensureColumn('rounds', 'option_pool_issued', 'REAL NOT NULL DEFAULT 0')
   ensureColumn('rounds', 'parent_round_code', 'TEXT')
   ensureColumn('rounds', 'pre_money', 'REAL')
