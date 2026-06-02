@@ -13,7 +13,6 @@ export default defineEventHandler(async (event) => {
     strike?: number
     issue_date?: string
     vesting_start?: string
-    vesting_date?: string
     vest_months?: number
     cliff_months?: number
     status?: 'outstanding' | 'proposed' | 'cancelled'
@@ -42,8 +41,8 @@ export default defineEventHandler(async (event) => {
   db().prepare(`
     INSERT INTO grants (
       id, company_id, stakeholder_id, recipient_name, recipient_type, round, quantity, strike,
-      issue_date, vesting_start, vesting_date, vest_months, cliff_months, status, approval_status, notes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      issue_date, vesting_start, vest_months, cliff_months, status, approval_status, notes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     grantId,
     id,
@@ -55,7 +54,6 @@ export default defineEventHandler(async (event) => {
     body.strike ?? null,
     body.issue_date || null,
     body.vesting_start || null,
-    body.vesting_date || null,
     body.vest_months ?? 48,
     body.cliff_months ?? 12,
     status,

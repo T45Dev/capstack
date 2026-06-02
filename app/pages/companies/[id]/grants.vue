@@ -14,7 +14,6 @@ interface Grant {
   strike: number | null
   issue_date: string | null
   vesting_start: string | null
-  vesting_date: string | null
   vest_months: number | null
   cliff_months: number | null
   status: 'outstanding' | 'proposed' | 'cancelled'
@@ -249,9 +248,11 @@ const proposedCols = computed<GrCol[]>(() => {
     cols.push({ key: `prop_new_${u}`,  bucket: 'new',  unit: u, label: `New${unitSuffix(u)}`,  width: w, sortable: true, align: 'right' })
     cols.push({ key: `prop_post_${u}`, bucket: 'post', unit: u, label: `Post${unitSuffix(u)}`, width: w, sortable: true, align: 'right', groupEnd: !isLast })
   })
-  // Operator-set per-grant fields, editable inline in the cell.
-  cols.push({ key: 'vesting_date', label: 'Vest date', width: 120, sortable: true, align: 'left' })
-  cols.push({ key: 'notes',        label: 'Note',      width: 200, sortable: false, align: 'left' })
+  // Dates + operator note. Issue date is read-only here; Vesting date and
+  // Note are editable inline in the cell.
+  cols.push({ key: 'issue_date',   label: 'Issued',       width: 100, sortable: true, align: 'left' })
+  cols.push({ key: 'vesting_start', label: 'Vesting date', width: 120, sortable: true, align: 'left' })
+  cols.push({ key: 'notes',        label: 'Note',         width: 200, sortable: false, align: 'left' })
   cols.push({ key: 'actions', label: '', width: 84, sortable: false, align: 'right' })
   return cols
 })
@@ -457,7 +458,7 @@ async function commitVest(g: Grant, raw: string) {
   if (vestEditId.value !== g.id) return
   vestEditId.value = null
   const next = normalizeDate(raw) || null
-  if ((g.vesting_date || null) !== next) await quickPatch(g, { vesting_date: next })
+  if ((g.vesting_start || null) !== next) await quickPatch(g, { vesting_start: next })
 }
 
 // ----- split-screen resizer between the two tables -----
@@ -911,11 +912,12 @@ const fieldLabels: Record<string, string> = {
                       c.groupEnd ? 'border-r border-ink-200' : '',
                     ]"
                   >{{ fmtUnit(c.unit!, (g as any)[c.key]) }}</td>
-                  <td v-else-if="c.key === 'vesting_date'" class="px-2 py-1 text-ink-600 border-b border-ink-200 group-hover:bg-brand-50/40">
+                  <td v-else-if="c.key === 'issue_date'" class="px-2.5 py-1.5 text-ink-600 border-b border-ink-200 group-hover:bg-brand-50/40">{{ fmtDate(g.issue_date) }}</td>
+                  <td v-else-if="c.key === 'vesting_start'" class="px-2 py-1 text-ink-600 border-b border-ink-200 group-hover:bg-brand-50/40">
                     <input
                       v-if="vestEditId === g.id"
                       type="date"
-                      :value="g.vesting_date || ''"
+                      :value="g.vesting_start || ''"
                       class="w-full bg-white border border-brand-300 rounded px-1.5 py-1 text-[12px] num focus:outline-none focus:ring-1 focus:ring-brand-500"
                       @vue:mounted="(v: any) => v.el.focus()"
                       @change="(e: any) => commitVest(g, e.target.value)"
@@ -923,7 +925,7 @@ const fieldLabels: Record<string, string> = {
                       @keyup.escape="vestEditId = null"
                     />
                     <button v-else type="button" class="block w-full text-left truncate hover:text-brand-700" @click="startVestEdit(g)">
-                      <span v-if="g.vesting_date">{{ fmtDate(g.vesting_date) }}</span>
+                      <span v-if="g.vesting_start">{{ fmtDate(g.vesting_start) }}</span>
                       <span v-else class="text-ink-400 italic">set…</span>
                     </button>
                   </td>

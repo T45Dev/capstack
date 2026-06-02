@@ -7,7 +7,7 @@ export default defineEventHandler(async (event) => {
 
   const fields = [
     'recipient_name', 'recipient_type', 'round', 'quantity', 'strike',
-    'issue_date', 'vesting_start', 'vesting_date', 'vest_months', 'cliff_months', 'status',
+    'issue_date', 'vesting_start', 'vest_months', 'cliff_months', 'status',
     'approval_status', 'notes',
     // Per-grant detail from the Carta option-plan sheet — editable so the
     // operator can correct values if the import misread something.
