@@ -17,7 +17,6 @@ interface GrantDraft {
   strike: number | null
   issue_date: string
   vesting_start: string
-  vesting_date: string
   vest_months: number
   cliff_months: number
   status: 'outstanding' | 'proposed'
@@ -36,7 +35,6 @@ interface GrantInput {
   strike?: number | null
   issue_date?: string | null
   vesting_start?: string | null
-  vesting_date?: string | null
   vest_months?: number | null
   cliff_months?: number | null
   status?: string | null
@@ -68,7 +66,6 @@ function seed(): GrantDraft {
     strike: g.strike ?? null,
     issue_date: g.issue_date ?? today,
     vesting_start: g.vesting_start ?? today,
-    vesting_date: g.vesting_date ?? '',
     vest_months: g.vest_months ?? 48,
     cliff_months: g.cliff_months ?? 12,
     status: (g.status === 'outstanding' ? 'outstanding' : 'proposed'),
@@ -159,8 +156,7 @@ function onSave() {
       <UiInput v-model="form.strike" type="number" label="Strike (PPS)" prefix="$" step="0.00001" :digits="5" />
 
       <UiInput v-model="form.issue_date" type="date" label="Issue date" />
-      <UiInput v-model="form.vesting_start" type="date" label="Vest start" />
-      <UiInput v-model="form.vesting_date" type="date" label="Vesting date" />
+      <UiInput v-model="form.vesting_start" type="date" label="Vesting date" />
       <div class="grid grid-cols-2 gap-3">
         <UiInput v-model="form.vest_months" type="number" label="Vest mo." />
         <UiInput v-model="form.cliff_months" type="number" label="Cliff mo." />
