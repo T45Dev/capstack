@@ -367,7 +367,9 @@ watch(proposedCols, (cols) => {
 }, { immediate: true })
 
 const sortedOutstanding = computed(() => {
-  const preDenom  = preFDS.value
+  // All ownership %s denominate against postFDS so Pre and Post share the
+  // same (post-round) basis — the Pre column shows the already-diluted
+  // standing, not a stale pre-round number. $ values still use pre/post PPS.
   const postDenom = postFDS.value
   const prePPS    = ppsAnchor.value
   const ppsPost   = postPPS.value
@@ -377,7 +379,7 @@ const sortedOutstanding = computed(() => {
       ...g,
       out_pre_shares:  q,
       out_post_shares: q,
-      out_pre_pct:  preDenom  > 0 ? q / preDenom  : 0,
+      out_pre_pct:  postDenom > 0 ? q / postDenom : 0,
       out_post_pct: postDenom > 0 ? q / postDenom : 0,
       out_pre_value:  q * prePPS,
       out_post_value: q * ppsPost,
@@ -396,7 +398,7 @@ const sortedOutstanding = computed(() => {
 })
 
 const sortedProposed = computed(() => {
-  const preDenom  = preFDS.value
+  // All ownership %s denominate against postFDS (see sortedOutstanding).
   const postDenom = postFDS.value
   const prePPS    = ppsAnchor.value
   const ppsPost   = postPPS.value
@@ -415,7 +417,7 @@ const sortedProposed = computed(() => {
       prop_pre_shares:  existing_total,
       prop_new_shares:  newShares,
       prop_post_shares: postShares,
-      prop_pre_pct:  preDenom  > 0 ? existing_total / preDenom  : 0,
+      prop_pre_pct:  postDenom > 0 ? existing_total / postDenom : 0,
       prop_new_pct:  postDenom > 0 ? newShares      / postDenom : 0,
       prop_post_pct: postDenom > 0 ? postShares     / postDenom : 0,
       prop_pre_value:  existing_total * prePPS,
