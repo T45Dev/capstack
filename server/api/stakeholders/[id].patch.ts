@@ -9,15 +9,20 @@ export default defineEventHandler(async (event) => {
   if (!id) throw createError({ statusCode: 400, message: 'id required' })
   const body = await readBody<Record<string, any>>(event)
 
-  const fields = ['title', 'job_level']
+  const fields = ['title', 'job_level', 'fairness_include']
   const updates: string[] = []
   const params: any[] = []
   for (const f of fields) {
     if (f in body) {
       updates.push(`${f} = ?`)
-      // Normalise empty strings to NULL so a cleared field reverts to "unset".
       const v = body[f]
-      params.push(v === '' || v == null ? null : String(v).trim())
+      if (f === 'fairness_include') {
+        // Boolean-ish -> 0/1; null clears back to the default.
+        params.push(v == null ? null : (v ? 1 : 0))
+      } else {
+        // Normalise empty strings to NULL so a cleared field reverts to "unset".
+        params.push(v === '' || v == null ? null : String(v).trim())
+      }
     }
   }
   if (!updates.length) return db().prepare('SELECT * FROM stakeholders WHERE id = ?').get(id)
