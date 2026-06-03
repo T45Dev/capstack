@@ -43,6 +43,10 @@ export interface RawHolder {
   heldShares: number
   proposedShares: number
   firstGrantDate: string | null
+  // Where this row comes from: a live outstanding grant, a not-yet-issued
+  // proposed grant, or an anonymous pool idea. Proposed/idea rows are only
+  // emitted when includeFuture is on.
+  source?: 'grant' | 'proposed' | 'idea'
 }
 
 export interface Band {
@@ -54,6 +58,7 @@ export interface Band {
 }
 
 export interface Holder extends RawHolder {
+  source: 'grant' | 'proposed' | 'idea'
   hireRoundCode: string | null
   hireRoundName: string | null
   entryFDS: number
@@ -187,6 +192,7 @@ export function buildFairness(rounds: FairnessRound[], rawHolders: RawHolder[], 
 
     return {
       ...h,
+      source: h.source ?? 'grant',
       hireRoundCode: hireRound?.code ?? null,
       hireRoundName: hireRound?.name ?? null,
       entryFDS,

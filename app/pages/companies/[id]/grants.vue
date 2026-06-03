@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle, UploadCloud, AlertTriangle, CheckCircle2, X } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtDate, fmtPricePerShare, normalizeDate } from '~/utils/format'
-import { calcSum } from '~/utils/calc'
+import { calcSum, calcPct, calcValueUSD } from '~/utils/calc'
 
 // Badge color per explicit award type (ISO/NSO/RSU). Blank → no badge.
 function awardTypeClass(t: string | null | undefined): string {
@@ -521,6 +521,37 @@ function fmtUnit(unit: 'shares' | 'pct' | 'value', n: number): string {
   return n > 0 ? `$${Math.round(n).toLocaleString()}` : '—'
 }
 
+// Calc-tooltip strings for the per-unit bucket cells (shares are raw grant
+// quantities, so only % and $ carry the math; the proposed Post column also
+// shows the pre + new sum).
+function existingParts(g: any): Array<[string, number]> {
+  const parts: Array<[string, number]> = []
+  if (g.existing_options) parts.push(['Options', g.existing_options])
+  if (g.existing_common)  parts.push(['Common', g.existing_common])
+  if (g.existing_pref)    parts.push(['Preferred', g.existing_pref])
+  if (g.existing_cn)      parts.push(['CN', g.existing_cn])
+  return parts
+}
+function fExistingTotal(g: any): string | null {
+  const parts = existingParts(g)
+  return parts.length > 1 ? calcSum(parts) : null
+}
+function fOut(g: any, c: any): string | null {
+  const shares = g[`out_${c.bucket}_shares`] || 0
+  if (c.unit === 'pct') return calcPct(shares, c.bucket === 'pre' ? preFDS.value : postFDS.value)
+  if (c.unit === 'value') return shares > 0 ? calcValueUSD(shares, c.bucket === 'pre' ? ppsAnchor.value : postPPS.value) : null
+  return null // shares column = the raw grant quantity
+}
+function fProp(g: any, c: any): string | null {
+  const shares = g[`prop_${c.bucket}_shares`] || 0
+  if (c.unit === 'pct') return calcPct(shares, postFDS.value)
+  if (c.unit === 'value') return shares > 0 ? calcValueUSD(shares, c.bucket === 'pre' ? ppsAnchor.value : postPPS.value) : null
+  // shares
+  if (c.bucket === 'post') return `${fmtShares(g.prop_pre_shares)} + ${fmtShares(g.prop_new_shares)} = ${fmtShares(g.prop_post_shares)}`
+  if (c.bucket === 'pre') return fExistingTotal(g)
+  return null // new shares = the proposed grant amount
+}
+
 function sortIconFor(table: ReturnType<typeof useSortableTable>, key: string) {
   if (table.sort.key !== key) return null
   return table.sort.dir
@@ -976,7 +1007,7 @@ const fieldLabels: Record<string, string> = {
                       c.bucket === 'post' ? 'text-ink-900 font-medium' : 'text-ink-700',
                       c.groupEnd ? 'border-r border-ink-200' : '',
                     ]"
-                  >{{ fmtUnit(c.unit!, (g as any)[c.key]) }}</td>
+                  ><UiCalcTip :formula="fOut(g, c)">{{ fmtUnit(c.unit!, (g as any)[c.key]) }}</UiCalcTip></td>
                   <td v-else-if="c.key === 'actions'" class="px-2 py-1 text-right border-b border-ink-200 whitespace-nowrap group-hover:bg-brand-50/40">
                     <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded" @click="startEdit(g)" title="Edit"><Edit3 :size="13" /></button>
                     <button class="text-ink-500 hover:text-amber-600 px-1 py-0.5 rounded" @click="demote(g)" title="Demote to proposed"><ArrowDownCircle :size="13" /></button>
@@ -1098,7 +1129,7 @@ const fieldLabels: Record<string, string> = {
                     <span v-else class="text-ink-400">—</span>
                   </td>
                   <td v-else-if="c.key === 'existing_total'" class="px-2.5 py-1.5 text-right font-medium text-ink-900 border-b border-ink-200 border-r border-ink-200 group-hover:bg-brand-50/40">
-                    <span v-if="g.existing_total">{{ fmtShares(g.existing_total) }}</span>
+                    <UiCalcTip v-if="g.existing_total" :formula="fExistingTotal(g)">{{ fmtShares(g.existing_total) }}</UiCalcTip>
                     <span v-else class="text-ink-400">—</span>
                   </td>
                   <td
@@ -1110,7 +1141,7 @@ const fieldLabels: Record<string, string> = {
                       c.bucket === 'pre'  ? 'text-ink-700' : '',
                       c.groupEnd ? 'border-r border-ink-200' : '',
                     ]"
-                  >{{ fmtUnit(c.unit!, (g as any)[c.key]) }}</td>
+                  ><UiCalcTip :formula="fProp(g, c)">{{ fmtUnit(c.unit!, (g as any)[c.key]) }}</UiCalcTip></td>
                   <td v-else-if="c.key === 'strike'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">{{ fmtPricePerShare(g.strike) }}</td>
                   <td v-else-if="c.key === 'issue_date'" class="px-2.5 py-1.5 text-ink-600 border-b border-ink-200 group-hover:bg-brand-50/40">{{ fmtDate(g.issue_date) }}</td>
                   <td v-else-if="c.key === 'vesting_schedule_name'" class="px-2.5 py-1.5 text-ink-600 border-b border-ink-200 truncate group-hover:bg-brand-50/40" :title="g.vesting_schedule_name || ''">

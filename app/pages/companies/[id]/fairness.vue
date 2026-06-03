@@ -27,6 +27,7 @@ interface Holder {
   title: string | null
   level: string | null
   include: boolean
+  source: 'grant' | 'proposed' | 'idea'
   awardTypes: string[]
   optionShares: number
   heldShares: number
@@ -96,6 +97,12 @@ function fRec(h: Holder, target: number): string | null {
   return `Target ${fmtPct(target, 3)} × ${fmtShares(post)} = ${fmtShares(targetShares)}\n− current ${fmtShares(h.totalShares)}\n= +${fmtShares(h.recommendedAddl)}`
 }
 function fRecPct(h: Holder): string { return calcPct(h.totalShares + h.recommendedAddl, data.value?.selectedPostFDS || 0) }
+
+// Source chip — distinguishes not-yet-issued rows from live grants.
+const sourceMeta: Record<string, { label: string; cls: string }> = {
+  proposed: { label: 'Proposed', cls: 'border-blue-200 bg-blue-50 text-blue-700' },
+  idea: { label: 'Idea', cls: 'border-amber-300 bg-amber-50 text-amber-700' },
+}
 
 const flagMeta: Record<string, { label: string; cls: string }> = {
   under: { label: 'Under-granted', cls: 'bg-red-50 text-red-700 border-red-200' },
@@ -192,7 +199,7 @@ const tabs = [
           </tr>
         </thead>
         <tbody>
-          <tr v-for="h in data.holders" :key="h.stakeholderId || h.name" class="border-b border-ink-100 last:border-0 hover:bg-ink-50/40" :class="h.include ? '' : 'opacity-55'">
+          <tr v-for="h in data.holders" :key="h.stakeholderId || `${h.source}:${h.name}`" class="border-b border-ink-100 last:border-0 hover:bg-ink-50/40" :class="h.include ? '' : 'opacity-55'">
             <td class="px-3 py-1.5 text-center">
               <input
                 type="checkbox"
@@ -203,7 +210,10 @@ const tabs = [
                 @change="(ev) => toggleInclude(h, ev)"
               >
             </td>
-            <td class="px-4 py-1.5 text-ink-900">{{ h.name }}</td>
+            <td class="px-4 py-1.5 text-ink-900">
+              {{ h.name }}
+              <span v-if="sourceMeta[h.source]" class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle" :class="sourceMeta[h.source].cls">{{ sourceMeta[h.source].label }}</span>
+            </td>
             <td class="px-3 py-1.5 text-ink-600 num text-[12px]">{{ h.awardTypes.join(', ') || '—' }}</td>
             <td class="px-3 py-1.5">
               <input :class="amberInput" :value="h.title || ''" :disabled="!h.stakeholderId" placeholder="title"
@@ -235,8 +245,11 @@ const tabs = [
           </tr>
         </thead>
         <tbody>
-          <tr v-for="h in included" :key="h.stakeholderId || h.name" class="border-b border-ink-100 last:border-0 hover:bg-ink-50/40">
-            <td class="px-4 py-1.5 text-ink-900">{{ h.name }}</td>
+          <tr v-for="h in included" :key="h.stakeholderId || `${h.source}:${h.name}`" class="border-b border-ink-100 last:border-0 hover:bg-ink-50/40">
+            <td class="px-4 py-1.5 text-ink-900">
+              {{ h.name }}
+              <span v-if="sourceMeta[h.source]" class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle" :class="sourceMeta[h.source].cls">{{ sourceMeta[h.source].label }}</span>
+            </td>
             <td class="px-3 py-1.5 text-ink-600">{{ h.level || '—' }}</td>
             <td class="px-3 py-1.5 text-right text-ink-800">{{ fmtShares(h.grantShares) }}</td>
             <td class="px-3 py-1.5 text-right text-ink-800"><UiCalcTip :formula="fTotal(h)">{{ fmtShares(h.totalShares) }}</UiCalcTip></td>
@@ -281,8 +294,11 @@ const tabs = [
               </tr>
             </thead>
             <tbody>
-              <tr v-for="h in lvl.holders" :key="h.stakeholderId || h.name" class="border-b border-ink-100 last:border-0">
-                <td class="px-4 py-1.5 text-ink-900">{{ h.name }}</td>
+              <tr v-for="h in lvl.holders" :key="h.stakeholderId || `${h.source}:${h.name}`" class="border-b border-ink-100 last:border-0">
+                <td class="px-4 py-1.5 text-ink-900">
+                  {{ h.name }}
+                  <span v-if="sourceMeta[h.source]" class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle" :class="sourceMeta[h.source].cls">{{ sourceMeta[h.source].label }}</span>
+                </td>
                 <td class="px-3 py-1.5 text-right text-ink-700"><UiCalcTip :formula="fPost(h)">{{ fmtPct(h.postPct, 3) }}</UiCalcTip></td>
                 <td class="px-3 py-1.5 pl-6">
                   <span class="inline-block text-[11px] px-2 py-0.5 rounded border" :class="flagMeta[h.flag].cls">{{ flagMeta[h.flag].label }}</span>

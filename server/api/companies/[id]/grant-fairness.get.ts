@@ -75,19 +75,30 @@ export default defineEventHandler(async (event) => {
     if (date && (!a.firstGrantDate || date < a.firstGrantDate)) a.firstGrantDate = date
   }
 
-  // Proposed grants per optionholder (for the include-future basis).
+  // Proposed grants per optionholder (for the include-future basis). Track
+  // the recipient + award type too, so proposed-only people (not already
+  // holding an outstanding grant) can be surfaced as their own rows.
   const proposedBy = new Map<string, number>()
-  for (const row of db().prepare(`SELECT stakeholder_id, recipient_name, quantity FROM grants WHERE company_id = ? AND status = 'proposed'`).all(id) as any[]) {
+  const proposedDetail = new Map<string, { stakeholderId: string | null; name: string; kinds: Set<string> }>()
+  for (const row of db().prepare(`SELECT stakeholder_id, recipient_name, award_type, quantity FROM grants WHERE company_id = ? AND status = 'proposed'`).all(id) as any[]) {
     const key = keyOf(row.stakeholder_id, row.recipient_name)
     proposedBy.set(key, (proposedBy.get(key) || 0) + (row.quantity || 0))
+    let d = proposedDetail.get(key)
+    if (!d) { d = { stakeholderId: row.stakeholder_id || null, name: row.recipient_name || 'Proposed grant', kinds: new Set() }; proposedDetail.set(key, d) }
+    if (row.award_type) d.kinds.add(String(row.award_type).toUpperCase())
   }
 
-  // Pool ideas (anonymous future grants/reserves) — a single aggregate.
+  // Pool ideas (anonymous future grants/reserves) — kept individually so each
+  // is its own row, plus an aggregate for the methodology note.
   let ideasShares = 0
+  const ideaList: Array<{ name: string; shares: number; kind: string | null }> = []
   try {
     const ideas = await $fetch<any[]>(`/api/companies/${id}/pool-events`)
     for (const ie of (ideas || [])) {
-      if (ie.type === 'grant' || ie.type === 'reserve') ideasShares += ie.shares || 0
+      if (ie.type === 'grant' || ie.type === 'reserve') {
+        ideasShares += ie.shares || 0
+        ideaList.push({ name: ie.name || 'Idea', shares: ie.shares || 0, kind: ie.kind || null })
+      }
     }
   } catch { /* pool-events optional */ }
 
@@ -104,8 +115,47 @@ export default defineEventHandler(async (event) => {
       heldShares: a.stakeholderId ? (heldBy.get(a.stakeholderId) || 0) : 0,
       proposedShares: proposedBy.get(key) || 0,
       firstGrantDate: a.firstGrantDate,
+      source: 'grant' as const,
     }
   })
+
+  // With the toggle on, surface not-yet-issued equity as its own rows so the
+  // roster/holdings reflect the full picture: proposed grants for people who
+  // don't already hold options, and each anonymous pool idea.
+  if (includeFuture) {
+    for (const [key, d] of proposedDetail) {
+      if (map.has(key)) continue // already an outstanding holder (augmented)
+      const meta = d.stakeholderId ? sMeta.get(d.stakeholderId) : null
+      holders.push({
+        stakeholderId: d.stakeholderId,
+        name: meta?.name || d.name,
+        title: meta?.title ?? null,
+        level: meta?.level ?? null,
+        include: meta ? meta.include : true,
+        awardTypes: [...d.kinds].sort(),
+        optionShares: 0,
+        heldShares: d.stakeholderId ? (heldBy.get(d.stakeholderId) || 0) : 0,
+        proposedShares: proposedBy.get(key) || 0,
+        firstGrantDate: null,
+        source: 'proposed',
+      })
+    }
+    for (const idea of ideaList) {
+      holders.push({
+        stakeholderId: null,
+        name: idea.name,
+        title: null,
+        level: null,
+        include: true,
+        awardTypes: idea.kind ? [String(idea.kind).toUpperCase()] : [],
+        optionShares: 0,
+        heldShares: 0,
+        proposedShares: idea.shares,
+        firstGrantDate: null,
+        source: 'idea',
+      })
+    }
+  }
 
   const result = buildFairness(rounds, holders, { selectedRoundCode: selectedRound, includeFuture, ideasShares })
   return { company: { id: company.id, name: company.name, slug: company.slug }, ...result }
