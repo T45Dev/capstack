@@ -202,9 +202,9 @@ function classBgFooter(kind: string): string {
             </tr>
           </thead>
           <tbody>
-            <template v-for="p in filtered" :key="p.id">
-              <tr class="hover:bg-ink-50/40 border-b border-ink-100">
-                <td class="px-3 py-2 sticky left-0 bg-white z-[5]">
+            <template v-for="(p, pi) in filtered" :key="p.id">
+              <tr class="group hover:bg-brand-50/50 transition-colors" :class="pi % 2 ? 'bg-ink-50/60' : ''">
+                <td class="px-3 py-2 sticky left-0 z-[5] group-hover:bg-brand-50" :class="pi % 2 ? 'bg-ink-50' : 'bg-white'">
                   <div class="flex items-center gap-2">
                     <button
                       v-if="p.aliases.length"

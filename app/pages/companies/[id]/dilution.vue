@@ -454,8 +454,7 @@ async function onImported() {
             <!-- Group label row -->
             <tr>
               <th v-for="(g, gi) in groupSpans" :key="gi" :colspan="g.span"
-                  class="px-3 py-1 text-center text-ink-700 border-b border-ink-300"
-                  :class="gi > 0 ? 'border-l' : ''">
+                  class="px-3 py-1 text-center text-ink-700 border-b border-ink-300">
                 {{ g.label }}
               </th>
             </tr>
@@ -465,7 +464,7 @@ async function onImported() {
                   class="relative px-3 py-1.5 border-b border-ink-300"
                   :class="[
                     col.align === 'right' ? 'text-right' : 'text-left',
-                    ci === 1 || ci === 4 || ci === 7 ? 'border-l' : '',
+                    ci === 1 || ci === 4 || ci === 7 ? 'pl-6' : '',
                     ci === 2 || ci === 5 || ci === 8 ? 'text-brand-700' : '',
                   ]"
               >
@@ -483,8 +482,8 @@ async function onImported() {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in sortedRows" :key="r.stakeholderId" class="hover:bg-brand-50/40">
-              <td class="px-3 py-1.5 border-b border-ink-200">
+            <tr v-for="r in sortedRows" :key="r.stakeholderId" class="even:bg-ink-50/60 hover:bg-brand-50/70 transition-colors">
+              <td class="px-3 py-1.5">
                 <span class="text-ink-900 font-medium" :title="r.aliasNames.length ? `Includes: ${r.aliasNames.join(', ')}` : r.name">{{ r.name }}</span>
                 <span v-if="r.type" class="ml-1.5 text-[9px] uppercase tracking-wide text-ink-500 bg-ink-100 border border-ink-200 px-1 py-0.5 rounded align-middle">{{ r.type }}</span>
                 <span v-if="r.isFuture" class="ml-1.5 text-[9px] uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded align-middle">future</span>
@@ -497,19 +496,19 @@ async function onImported() {
               </td>
 
               <!-- ---- Shares group: Pre / Δ / Post ---- -->
-              <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200">{{ fmtShares(r.preShares) }}</td>
-              <td class="px-3 py-1.5 text-right font-semibold border-b border-ink-200" :class="deltaColor(r.deltaShares)"><UiCalcTip :formula="fDeltaSharesRow(r)">{{ fmtDeltaShares(r.deltaShares) }}</UiCalcTip></td>
-              <td class="px-3 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200">{{ fmtShares(r.postShares) }}</td>
+              <td class="px-3 py-1.5 pl-6 text-right text-ink-700">{{ fmtShares(r.preShares) }}</td>
+              <td class="px-3 py-1.5 text-right font-semibold" :class="deltaColor(r.deltaShares)"><UiCalcTip :formula="fDeltaSharesRow(r)">{{ fmtDeltaShares(r.deltaShares) }}</UiCalcTip></td>
+              <td class="px-3 py-1.5 text-right text-ink-900 font-medium">{{ fmtShares(r.postShares) }}</td>
 
               <!-- ---- Ownership % group: Pre / Δ / Post ---- -->
-              <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200"><UiCalcTip :formula="fPreRow(r)">{{ fmtPct(r.prePct, 2) }}</UiCalcTip></td>
-              <td class="px-3 py-1.5 text-right font-semibold border-b border-ink-200" :class="deltaColor(r.deltaPct)"><UiCalcTip :formula="fDeltaPctRow(r)">{{ fmtDeltaPct(r.deltaPct) }}</UiCalcTip></td>
-              <td class="px-3 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200"><UiCalcTip :formula="fPostRow(r)">{{ fmtPct(r.postPct, 2) }}</UiCalcTip></td>
+              <td class="px-3 py-1.5 pl-6 text-right text-ink-700"><UiCalcTip :formula="fPreRow(r)">{{ fmtPct(r.prePct, 2) }}</UiCalcTip></td>
+              <td class="px-3 py-1.5 text-right font-semibold" :class="deltaColor(r.deltaPct)"><UiCalcTip :formula="fDeltaPctRow(r)">{{ fmtDeltaPct(r.deltaPct) }}</UiCalcTip></td>
+              <td class="px-3 py-1.5 text-right text-ink-900 font-medium"><UiCalcTip :formula="fPostRow(r)">{{ fmtPct(r.postPct, 2) }}</UiCalcTip></td>
 
               <!-- ---- Value ($) group: Pre / Δ / Post ---- -->
-              <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200"><UiCalcTip :formula="pps > 0 ? fPreVal(r) : null">{{ pps > 0 ? fmtUSD(r.preValue) : '—' }}</UiCalcTip></td>
-              <td class="px-3 py-1.5 text-right font-semibold border-b border-ink-200" :class="deltaColor(r.deltaValue)"><UiCalcTip :formula="pps > 0 ? fDeltaValRow(r) : null">{{ pps > 0 ? fmtDeltaUSD(r.deltaValue) : '—' }}</UiCalcTip></td>
-              <td class="px-3 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200"><UiCalcTip :formula="pps > 0 ? fPostVal(r) : null">{{ pps > 0 ? fmtUSD(r.postValue) : '—' }}</UiCalcTip></td>
+              <td class="px-3 py-1.5 pl-6 text-right text-ink-700"><UiCalcTip :formula="pps > 0 ? fPreVal(r) : null">{{ pps > 0 ? fmtUSD(r.preValue) : '—' }}</UiCalcTip></td>
+              <td class="px-3 py-1.5 text-right font-semibold" :class="deltaColor(r.deltaValue)"><UiCalcTip :formula="pps > 0 ? fDeltaValRow(r) : null">{{ pps > 0 ? fmtDeltaUSD(r.deltaValue) : '—' }}</UiCalcTip></td>
+              <td class="px-3 py-1.5 text-right text-ink-900 font-medium"><UiCalcTip :formula="pps > 0 ? fPostVal(r) : null">{{ pps > 0 ? fmtUSD(r.postValue) : '—' }}</UiCalcTip></td>
             </tr>
           </tbody>
         </table>
