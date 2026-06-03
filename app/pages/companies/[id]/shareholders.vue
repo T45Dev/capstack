@@ -6,6 +6,7 @@
 // aliases' shares fold into the primary's row across every column.
 import { Users, Link2, Link2Off, Search, ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { fmtShares } from '~/utils/format'
+import { calcSum } from '~/utils/calc'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -47,6 +48,27 @@ const filtered = computed<Primary[]>(() => {
 })
 
 const shareClasses = computed<ShareClass[]>(() => data.value?.share_classes || [])
+
+// Calc tooltips — the per-holder and grand total are sums across every
+// share-class ledger plus options.
+function fHolderTotal(p: Primary): string | null {
+  const parts: Array<[string, number]> = []
+  for (const sc of shareClasses.value) {
+    const v = p.holdings[sc.code] || 0
+    if (v) parts.push([sc.code, v])
+  }
+  if (p.options_outstanding) parts.push(['Options', p.options_outstanding])
+  return parts.length > 1 ? calcSum(parts) : null
+}
+const fGrandTotal = computed<string | null>(() => {
+  const parts: Array<[string, number]> = []
+  for (const sc of shareClasses.value) {
+    const v = totals.value.byClass[sc.code] || 0
+    if (v) parts.push([sc.code, v])
+  }
+  if (totals.value.options) parts.push(['Options', totals.value.options])
+  return parts.length > 1 ? calcSum(parts) : null
+})
 
 const totals = computed(() => {
   const rows = data.value?.stakeholders || []
@@ -213,7 +235,7 @@ function classBgFooter(kind: string): string {
                 <td class="px-3 py-2 text-right num bg-ink-50/40" :class="p.options_outstanding === 0 ? 'text-ink-300' : 'text-ink-700'">
                   {{ p.options_outstanding ? fmtShares(p.options_outstanding) : '—' }}
                 </td>
-                <td class="px-3 py-2 text-right num font-semibold text-ink-900">{{ fmtShares(p.total_shares) }}</td>
+                <td class="px-3 py-2 text-right num font-semibold text-ink-900"><UiCalcTip :formula="fHolderTotal(p)">{{ fmtShares(p.total_shares) }}</UiCalcTip></td>
                 <td class="px-3 py-2 text-right">
                   <button
                     type="button"
@@ -273,7 +295,7 @@ function classBgFooter(kind: string): string {
                 {{ fmtShares(totals.byClass[sc.code] || 0) }}
               </td>
               <td class="px-3 py-2 text-right text-ink-800 font-semibold bg-ink-50/70">{{ fmtShares(totals.options) }}</td>
-              <td class="px-3 py-2 text-right text-ink-900 font-bold">{{ fmtShares(totals.total) }}</td>
+              <td class="px-3 py-2 text-right text-ink-900 font-bold"><UiCalcTip :formula="fGrandTotal">{{ fmtShares(totals.total) }}</UiCalcTip></td>
               <td></td>
             </tr>
           </tfoot>
