@@ -46,6 +46,8 @@ export interface RawHolder {
   initialShares?: number     // granted size of the earliest grant (new-hire signal)
   salary?: number | null
   salaryMidpoint?: number | null
+  benchmarkRole?: string | null
+  benchmark?: MarketBand | null
   // Where this row comes from: a live outstanding grant, a not-yet-issued
   // proposed grant, or an anonymous pool idea. Proposed/idea rows are only
   // emitted when includeFuture is on.
@@ -64,10 +66,22 @@ export interface Band {
   max: number
 }
 
+// Market equity band (% of FDS, decimals) from an external survey.
+export interface MarketBand {
+  n: number
+  min: number | null
+  p25: number | null
+  med: number | null
+  p75: number | null
+  max: number | null
+}
+
 export interface Holder extends RawHolder {
   source: 'grant' | 'proposed' | 'idea'
   editKind: 'stakeholder' | 'grant' | 'idea'
   editId: string | null
+  benchmarkRole: string | null
+  benchmark: MarketBand | null
   hireRoundCode: string | null
   hireRoundName: string | null
   entryFDS: number
@@ -212,6 +226,8 @@ export function buildFairness(rounds: FairnessRound[], rawHolders: RawHolder[], 
       source: h.source ?? 'grant',
       editKind: h.editKind ?? 'stakeholder',
       editId: h.editId ?? h.stakeholderId,
+      benchmarkRole: h.benchmarkRole ?? null,
+      benchmark: h.benchmark ?? null,
       hireRoundCode: hireRound?.code ?? null,
       hireRoundName: hireRound?.name ?? null,
       entryFDS,

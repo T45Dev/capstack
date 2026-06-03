@@ -1,6 +1,7 @@
 import { db } from '~~/server/utils/db'
 import { buildFairness, type FairnessRound, type RawHolder } from '~~/server/utils/fairness'
 import { classifyAwardType } from '~~/server/utils/awardType'
+import { THELANDER_EQUITY, THELANDER_ROLES } from '~~/server/utils/thelander'
 
 // Employee Grant Fairness data. Per-round FDS is reused from the
 // round-summary endpoint (single source of truth for the cumulative walk);
@@ -35,8 +36,8 @@ export default defineEventHandler(async (event) => {
   }))
 
   // Stakeholder comp metadata (title / level / include).
-  const sMeta = new Map<string, { name: string; title: string | null; level: string | null; include: boolean; salary: number | null; salaryMidpoint: number | null }>()
-  for (const s of db().prepare(`SELECT id, name, title, job_level, fairness_include, salary, salary_midpoint FROM stakeholders WHERE company_id = ?`).all(id) as any[]) {
+  const sMeta = new Map<string, { name: string; title: string | null; level: string | null; include: boolean; salary: number | null; salaryMidpoint: number | null; benchmarkRole: string | null }>()
+  for (const s of db().prepare(`SELECT id, name, title, job_level, fairness_include, salary, salary_midpoint, benchmark_role FROM stakeholders WHERE company_id = ?`).all(id) as any[]) {
     sMeta.set(s.id, {
       name: s.name,
       title: s.title || null,
@@ -44,8 +45,10 @@ export default defineEventHandler(async (event) => {
       include: s.fairness_include == null ? true : !!s.fairness_include,
       salary: s.salary ?? null,
       salaryMidpoint: s.salary_midpoint ?? null,
+      benchmarkRole: s.benchmark_role || null,
     })
   }
+  const bandFor = (role: string | null) => role && THELANDER_EQUITY[role] ? THELANDER_EQUITY[role] : null
 
   // Held shares (common / preferred / warrants) per stakeholder.
   const heldBy = new Map<string, number>()
@@ -128,6 +131,8 @@ export default defineEventHandler(async (event) => {
       initialShares: a.initialShares,
       salary: meta?.salary ?? null,
       salaryMidpoint: meta?.salaryMidpoint ?? null,
+      benchmarkRole: meta?.benchmarkRole ?? null,
+      benchmark: bandFor(meta?.benchmarkRole ?? null),
       source: 'grant' as const,
     }
   })
@@ -153,6 +158,8 @@ export default defineEventHandler(async (event) => {
         firstGrantDate: null,
         salary: meta?.salary ?? null,
         salaryMidpoint: meta?.salaryMidpoint ?? null,
+        benchmarkRole: meta?.benchmarkRole ?? null,
+        benchmark: bandFor(meta?.benchmarkRole ?? null),
         source: 'proposed',
         // Edit on the stakeholder when linked, else on the proposed grant row.
         editKind: d.stakeholderId ? 'stakeholder' : 'grant',
@@ -179,5 +186,5 @@ export default defineEventHandler(async (event) => {
   }
 
   const result = buildFairness(rounds, holders, { selectedRoundCode: selectedRound, includeFuture, ideasShares })
-  return { company: { id: company.id, name: company.name, slug: company.slug }, ...result }
+  return { company: { id: company.id, name: company.name, slug: company.slug }, benchmarkRoles: THELANDER_ROLES, ...result }
 })
