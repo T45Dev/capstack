@@ -151,6 +151,21 @@ describe('buildFairness', () => {
     expect(res.levels.map(l => l.level)).toEqual(['10', '2'])
   })
 
+  it('computes calibration fields: entry PPS/value, ISO flag, compa-ratio', () => {
+    const res = buildFairness(rounds, [
+      H({ name: 'X', level: '4', optionShares: 10_000, firstGrantDate: '2023-02-01', awardTypes: ['ISO'], salary: 100_000, salaryMidpoint: 120_000 }),
+      H({ name: 'Y', optionShares: 5_000, firstGrantDate: '2023-02-01', awardTypes: ['NSO'] }),
+    ], {})
+    const x = res.holders.find(h => h.name === 'X')!
+    expect(x.entryPPS).toBe(1)            // R2 share price
+    expect(x.entryValue).toBe(10_000)     // 10,000 × $1
+    expect(x.isISO).toBe(true)
+    expect(x.compaRatio).toBeCloseTo(0.8333, 3)
+    const y = res.holders.find(h => h.name === 'Y')!
+    expect(y.isISO).toBe(false)
+    expect(y.compaRatio).toBeNull()
+  })
+
   it('does not flag holders without a level', () => {
     const res = buildFairness(rounds, [H({ name: 'NL', optionShares: 1000, firstGrantDate: '2023-02-01' })], {})
     expect(res.holders[0].flag).toBe('na')

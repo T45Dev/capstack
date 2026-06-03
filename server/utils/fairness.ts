@@ -43,6 +43,8 @@ export interface RawHolder {
   heldShares: number
   proposedShares: number
   firstGrantDate: string | null
+  salary?: number | null
+  salaryMidpoint?: number | null
   // Where this row comes from: a live outstanding grant, a not-yet-issued
   // proposed grant, or an anonymous pool idea. Proposed/idea rows are only
   // emitted when includeFuture is on.
@@ -62,7 +64,11 @@ export interface Holder extends RawHolder {
   hireRoundCode: string | null
   hireRoundName: string | null
   entryFDS: number
+  entryPPS: number          // share price at the hire round
+  entryValue: number        // optionShares × entryPPS — $ value at grant
   entryPct: number
+  isISO: boolean            // award types include ISO (drives calibration scope)
+  compaRatio: number | null // salary / midpoint, when both known
   grantShares: number   // options (+ proposed when includeFuture)
   totalShares: number   // grantShares + held
   prePct: number
@@ -179,8 +185,11 @@ export function buildFairness(rounds: FairnessRound[], rawHolders: RawHolder[], 
     const grantShares = h.optionShares + (includeFuture ? h.proposedShares : 0)
     const totalShares = grantShares + h.heldShares
     const entryPct = entryFDS > 0 ? grantShares / entryFDS : 0
+    const entryPPS = hireRound?.sharePrice || 0
+    const entryValue = h.optionShares * entryPPS
     const prePct = sel && sel.preFDS > 0 ? totalShares / sel.preFDS : 0
     const postPct = sel && sel.postFDS > 0 ? totalShares / sel.postFDS : 0
+    const compaRatio = (h.salary && h.salaryMidpoint) ? h.salary / h.salaryMidpoint : null
 
     const perRound: Record<string, { prePct: number; postPct: number }> = {}
     for (const rd of rounds) {
@@ -196,7 +205,11 @@ export function buildFairness(rounds: FairnessRound[], rawHolders: RawHolder[], 
       hireRoundCode: hireRound?.code ?? null,
       hireRoundName: hireRound?.name ?? null,
       entryFDS,
+      entryPPS,
+      entryValue,
       entryPct,
+      isISO: h.awardTypes.includes('ISO'),
+      compaRatio,
       grantShares,
       totalShares,
       prePct,

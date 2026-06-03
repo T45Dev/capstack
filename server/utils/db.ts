@@ -345,6 +345,11 @@ function migrate(d: Database.Database): void {
   // Grant Fairness "include" toggle. NULL = use the default (included); 0/1
   // once the operator ticks. Scoped to the Fairness analysis only.
   ensureColumn('stakeholders', 'fairness_include', 'INTEGER')
+  // Comp inputs for Grant Fairness calibration / new-hire sizing. Operator-
+  // entered on the Fairness roster. salary = base cash; salary_midpoint = the
+  // role's benchmark midpoint (compa-ratio = salary / midpoint).
+  ensureColumn('stakeholders', 'salary', 'REAL')
+  ensureColumn('stakeholders', 'salary_midpoint', 'REAL')
   // Pool ideas (future-grant events) can carry a job title + level so the
   // Grant Fairness recommendation slots them into the right level section.
   ensureColumn('pool_events', 'job_title', 'TEXT')

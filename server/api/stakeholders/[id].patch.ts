@@ -9,7 +9,7 @@ export default defineEventHandler(async (event) => {
   if (!id) throw createError({ statusCode: 400, message: 'id required' })
   const body = await readBody<Record<string, any>>(event)
 
-  const fields = ['title', 'job_level', 'fairness_include']
+  const fields = ['title', 'job_level', 'fairness_include', 'salary', 'salary_midpoint']
   const updates: string[] = []
   const params: any[] = []
   for (const f of fields) {
@@ -19,6 +19,10 @@ export default defineEventHandler(async (event) => {
       if (f === 'fairness_include') {
         // Boolean-ish -> 0/1; null clears back to the default.
         params.push(v == null ? null : (v ? 1 : 0))
+      } else if (f === 'salary' || f === 'salary_midpoint') {
+        // Numeric; empty/invalid clears to NULL.
+        const n = v == null || v === '' ? null : Number(v)
+        params.push(n != null && Number.isFinite(n) ? n : null)
       } else {
         // Normalise empty strings to NULL so a cleared field reverts to "unset".
         params.push(v === '' || v == null ? null : String(v).trim())
