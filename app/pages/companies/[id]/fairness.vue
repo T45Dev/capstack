@@ -75,6 +75,23 @@ const included = computed(() => (data.value?.holders || []).filter(h => h.includ
 const recLevels = computed(() =>
   (data.value?.levels || []).map(l => ({ ...l, holders: included.value.filter(h => h.level === l.level) })),
 )
+// Pool ideas are anonymous (no job level), so rather than slot them into a
+// level and flag under/over, we show where their proposed size LANDS — the
+// level band their resulting % falls into.
+const ideaRecs = computed(() => included.value.filter(h => h.source === 'idea'))
+function levelForPct(pct: number): string | null {
+  const levels = data.value?.levels || []
+  if (!levels.length) return null
+  const inBand = levels.find(l => pct >= l.post.lo && pct <= l.post.hi)
+  if (inBand) return inBand.level
+  // No exact band — name the closest level by target.
+  let best: { level: string; d: number } | null = null
+  for (const l of levels) {
+    const d = Math.abs(pct - l.post.target)
+    if (!best || d < best.d) best = { level: l.level, d }
+  }
+  return best ? `~${best.level}` : null
+}
 const selName = computed(() => data.value?.rounds.find(r => r.code === data.value?.selectedRoundCode)?.name || '—')
 
 // Calc-tooltip strings — actual numbers behind each derived value.
@@ -186,7 +203,7 @@ const tabs = [
     />
 
     <!-- TAB 1: Optionholders roster -->
-    <UiCard v-else-if="tab === 'roster'" :padded="false" subtitle="Untick to drop a holder from the fairness analysis. Title and level edit inline.">
+    <UiCard v-else-if="tab === 'roster'" :padded="false" class="max-w-4xl" subtitle="Untick to drop a holder from the fairness analysis. Title and level edit inline.">
       <table class="w-full text-sm">
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
@@ -230,7 +247,7 @@ const tabs = [
     </UiCard>
 
     <!-- TAB 2: Current holdings, fully diluted to the selected round -->
-    <UiCard v-else-if="tab === 'holdings'" :padded="false" :subtitle="`Fully diluted to ${selName}${data.includeFuture ? ' · incl. proposed + ideas' : ''}`">
+    <UiCard v-else-if="tab === 'holdings'" :padded="false" class="max-w-5xl" :subtitle="`Fully diluted to ${selName}${data.includeFuture ? ' · incl. proposed + ideas' : ''}`">
       <table class="w-full text-sm num">
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
@@ -264,6 +281,7 @@ const tabs = [
 
     <!-- TAB 3: Recommended grant model -->
     <template v-else-if="tab === 'recommend'">
+      <div class="max-w-3xl">
       <div class="rounded-lg border border-ink-200 bg-ink-50/60 px-4 py-2.5 mb-5 flex items-start gap-2">
         <Info :size="15" class="text-ink-400 mt-0.5 shrink-0" />
         <p class="text-xs text-ink-600 leading-relaxed">{{ data.methodology }}</p>
@@ -312,6 +330,41 @@ const tabs = [
           </table>
         </UiCard>
 
+        <!-- Pool ideas: not compared against a band — shown as recommended
+             placements (where the idea's size lands them). -->
+        <UiCard v-if="ideaRecs.length" :padded="false" class="mb-5">
+          <template #header>
+            <div class="flex items-center justify-between gap-3 w-full flex-wrap">
+              <h2 class="text-sm font-semibold text-ink-900">Pool ideas <span class="text-ink-400 font-normal">· {{ ideaRecs.length }}</span></h2>
+              <span class="text-[11px] text-ink-500">recommended placement</span>
+            </div>
+          </template>
+          <table class="w-full text-sm num">
+            <thead>
+              <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
+                <th class="text-left font-medium px-4 py-2">Idea</th>
+                <th class="text-right font-medium px-3 py-2">Options</th>
+                <th class="text-right font-medium px-3 py-2">Resulting %</th>
+                <th class="text-left font-medium px-3 py-2 pl-6">Recommended level</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="h in ideaRecs" :key="`idea:${h.name}`" class="border-b border-ink-100 last:border-0">
+                <td class="px-4 py-1.5 text-ink-900">
+                  {{ h.name }}
+                  <span class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle border-amber-300 bg-amber-50 text-amber-700">Idea</span>
+                </td>
+                <td class="px-3 py-1.5 text-right font-medium text-brand">+{{ fmtShares(h.grantShares) }}</td>
+                <td class="px-3 py-1.5 text-right text-ink-600"><UiCalcTip :formula="fPost(h)">{{ fmtPct(h.postPct, 3) }}</UiCalcTip></td>
+                <td class="px-3 py-1.5 pl-6">
+                  <span v-if="levelForPct(h.postPct)" class="inline-block text-[11px] px-2 py-0.5 rounded border border-ink-200 bg-ink-50 text-ink-700">{{ levelForPct(h.postPct) }}</span>
+                  <span v-else class="text-ink-400">—</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </UiCard>
+
         <div class="flex items-center justify-between rounded-lg border border-ink-300 bg-white px-4 py-3 num">
           <span class="text-sm font-medium text-ink-700">Total recommended new options</span>
           <span class="text-xl font-semibold" :class="data.recommendedTotalAddl > 0 ? 'text-brand' : 'text-ink-500'">
@@ -322,6 +375,7 @@ const tabs = [
           Basis includes {{ fmtShares(data.ideasShares) }} pool ideas already reserved.
         </p>
       </template>
+      </div>
     </template>
   </div>
   <div v-else-if="pending" class="py-20 text-center text-ink-400 text-sm">Loading…</div>
