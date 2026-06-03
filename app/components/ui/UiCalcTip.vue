@@ -7,7 +7,8 @@
 // bounding rect so it never clips inside a scrolling/overflow-hidden table.
 // `formula` may contain newlines for multi-step math. When no formula is
 // supplied the slot renders bare (no affordance), so it's safe to wrap values
-// that aren't always derived.
+// that aren't always derived. We deliberately do NOT set a native `title`
+// attribute — it would render the browser's own tooltip on top of this one.
 import { ref } from 'vue'
 
 const props = withDefaults(defineProps<{
@@ -39,7 +40,6 @@ function hide() { show.value = false }
     v-if="formula"
     class="cursor-help"
     :class="underline ? 'derived' : ''"
-    :title="formula"
     tabindex="0"
     @mouseenter="place"
     @mouseleave="hide"

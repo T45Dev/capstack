@@ -200,12 +200,15 @@ const rows = computed<DilRow[]>(() => {
       type: d.type || null,
       preShares,
       postShares,
-      prePct: pre > 0 ? preShares / pre : 0,
+      // Same numerator (post/final shares) in BOTH columns; only the
+      // denominator changes (preFDS → postFDS), so Δ isolates the pure
+      // dilution from the round's new shares growing the FDS.
+      prePct: pre > 0 ? postShares / pre : 0,
       postPct: post > 0 ? postShares / post : 0,
       preValue,
       postValue,
       deltaShares: postShares - preShares,
-      deltaPct: (post > 0 ? postShares / post : 0) - (pre > 0 ? preShares / pre : 0),
+      deltaPct: (post > 0 ? postShares / post : 0) - (pre > 0 ? postShares / pre : 0),
       deltaValue: postValue - preValue,
       isNewRound: String(d.stakeholderId).startsWith('new:') || String(d.stakeholderId).startsWith('idea:'),
       isFuture: false,
@@ -286,20 +289,19 @@ const rows = computed<DilRow[]>(() => {
 // Bumped to v3 so the new Invested-$ column widths don't get
 // short-circuited by a v2 entry in localStorage.
 const table = useSortableTable({
-  key: 'capstack:dilution:v3',
+  key: 'capstack:dilution:v4',
   defaultSort: { key: 'deltaPct', dir: 'asc' },
   columns: [
     { key: 'name',         label: 'Stakeholder',  width: 240, sortable: true, align: 'left' },
     { key: 'preShares',    label: 'Pre shares',   width: 110, sortable: true, align: 'right' },
-    { key: 'postShares',   label: 'Post shares',  width: 110, sortable: true, align: 'right' },
     { key: 'deltaShares',  label: 'Δ shares',     width: 100, sortable: true, align: 'right' },
+    { key: 'postShares',   label: 'Post shares',  width: 110, sortable: true, align: 'right' },
     { key: 'prePct',       label: 'Pre %',        width: 80,  sortable: true, align: 'right' },
-    { key: 'postPct',      label: 'Post %',       width: 80,  sortable: true, align: 'right' },
     { key: 'deltaPct',     label: 'Δ %',          width: 80,  sortable: true, align: 'right' },
-    { key: 'invested',     label: 'Invested $',   width: 120, sortable: true, align: 'right' },
+    { key: 'postPct',      label: 'Post %',       width: 80,  sortable: true, align: 'right' },
     { key: 'preValue',     label: 'Pre $',        width: 120, sortable: true, align: 'right' },
-    { key: 'postValue',    label: 'Post $',       width: 120, sortable: true, align: 'right' },
     { key: 'deltaValue',   label: 'Δ $',          width: 120, sortable: true, align: 'right' },
+    { key: 'postValue',    label: 'Post $',       width: 120, sortable: true, align: 'right' },
   ],
 })
 
@@ -314,10 +316,9 @@ function sortIconFor(key: string) {
 // order above.
 const groupSpans = [
   { label: '', span: 1 },                       // Stakeholder
-  { label: 'Shares', span: 3 },                 // Pre / Post / Δ shares
-  { label: 'Ownership %', span: 3 },            // Pre / Post / Δ %
-  { label: 'Cost', span: 1 },                   // Invested $
-  { label: 'Value ($)', span: 3 },              // Pre / Post / Δ $
+  { label: 'Shares', span: 3 },                 // Pre / Δ / Post shares
+  { label: 'Ownership %', span: 3 },            // Pre / Δ / Post %
+  { label: 'Value ($)', span: 3 },              // Pre / Δ / Post $
 ]
 
 // ---- Δ formatters ----
@@ -353,7 +354,7 @@ const fPostFDS = computed<string | null>(() => {
     ['Notes converted', r.notes_converted || 0],
   ])
 })
-const fPreRow = (r: DilRow) => calcPct(r.preShares, preFDS.value)
+const fPreRow = (r: DilRow) => calcPct(r.isFuture ? 0 : r.postShares, preFDS.value)
 const fPostRow = (r: DilRow) => calcPct(r.postShares, postFDS.value)
 const fDeltaPctRow = (r: DilRow) => `${fmtPct(r.postPct, 2)} − ${fmtPct(r.prePct, 2)} = ${fmtDeltaPct(r.deltaPct)}`
 const fDeltaSharesRow = (r: DilRow) => `${fmtShares(r.postShares)} − ${fmtShares(r.preShares)} = ${fmtDeltaShares(r.deltaShares)}`
@@ -464,8 +465,8 @@ async function onImported() {
                   class="relative px-3 py-1.5 border-b border-ink-300"
                   :class="[
                     col.align === 'right' ? 'text-right' : 'text-left',
-                    ci === 1 || ci === 4 || ci === 7 || ci === 8 ? 'border-l' : '',
-                    ci === 2 || ci === 5 || ci === 9 ? 'text-brand-700' : '',
+                    ci === 1 || ci === 4 || ci === 7 ? 'border-l' : '',
+                    ci === 2 || ci === 5 || ci === 8 ? 'text-brand-700' : '',
                   ]"
               >
                 <button
@@ -495,26 +496,20 @@ async function onImported() {
                 >+{{ r.aliasNames.length }} linked</span>
               </td>
 
-              <!-- ---- Shares group ---- -->
+              <!-- ---- Shares group: Pre / Δ / Post ---- -->
               <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200">{{ fmtShares(r.preShares) }}</td>
-              <td class="px-3 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200">{{ fmtShares(r.postShares) }}</td>
               <td class="px-3 py-1.5 text-right font-semibold border-b border-ink-200" :class="deltaColor(r.deltaShares)"><UiCalcTip :formula="fDeltaSharesRow(r)">{{ fmtDeltaShares(r.deltaShares) }}</UiCalcTip></td>
+              <td class="px-3 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200">{{ fmtShares(r.postShares) }}</td>
 
-              <!-- ---- Ownership % group ---- -->
+              <!-- ---- Ownership % group: Pre / Δ / Post ---- -->
               <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200"><UiCalcTip :formula="fPreRow(r)">{{ fmtPct(r.prePct, 2) }}</UiCalcTip></td>
-              <td class="px-3 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200"><UiCalcTip :formula="fPostRow(r)">{{ fmtPct(r.postPct, 2) }}</UiCalcTip></td>
               <td class="px-3 py-1.5 text-right font-semibold border-b border-ink-200" :class="deltaColor(r.deltaPct)"><UiCalcTip :formula="fDeltaPctRow(r)">{{ fmtDeltaPct(r.deltaPct) }}</UiCalcTip></td>
+              <td class="px-3 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200"><UiCalcTip :formula="fPostRow(r)">{{ fmtPct(r.postPct, 2) }}</UiCalcTip></td>
 
-              <!-- ---- Cost-basis (Invested $) ---- -->
-              <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200"
-                  :title="r.avgEntryPPS ? `Avg entry price ~$${r.avgEntryPPS.toFixed(4)}/sh` : ''">
-                {{ r.invested > 0 ? fmtUSD(r.invested) : '—' }}
-              </td>
-
-              <!-- ---- Value ($) group ---- -->
+              <!-- ---- Value ($) group: Pre / Δ / Post ---- -->
               <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200"><UiCalcTip :formula="pps > 0 ? fPreVal(r) : null">{{ pps > 0 ? fmtUSD(r.preValue) : '—' }}</UiCalcTip></td>
-              <td class="px-3 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200"><UiCalcTip :formula="pps > 0 ? fPostVal(r) : null">{{ pps > 0 ? fmtUSD(r.postValue) : '—' }}</UiCalcTip></td>
               <td class="px-3 py-1.5 text-right font-semibold border-b border-ink-200" :class="deltaColor(r.deltaValue)"><UiCalcTip :formula="pps > 0 ? fDeltaValRow(r) : null">{{ pps > 0 ? fmtDeltaUSD(r.deltaValue) : '—' }}</UiCalcTip></td>
+              <td class="px-3 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200"><UiCalcTip :formula="pps > 0 ? fPostVal(r) : null">{{ pps > 0 ? fmtUSD(r.postValue) : '—' }}</UiCalcTip></td>
             </tr>
           </tbody>
         </table>
