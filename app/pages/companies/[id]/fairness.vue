@@ -10,6 +10,7 @@
 import { FileDown, Scale, Info } from 'lucide-vue-next'
 import { fmtUSD, fmtPct, fmtShares } from '~/utils/format'
 import { calcPct, calcSum, calcValueUSD } from '~/utils/calc'
+import { buildGradeStats, type RawGrade } from '~/utils/calibration'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -106,20 +107,14 @@ function levelForPct(pct: number): string | null {
 }
 const selName = computed(() => data.value?.rounds.find(r => r.code === data.value?.selectedRoundCode)?.name || '—')
 
-function median(xs: number[]): number {
-  const v = xs.filter(x => Number.isFinite(x)).sort((a, b) => a - b)
-  if (!v.length) return 0
-  const mid = Math.floor(v.length / 2)
-  return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2
-}
 function levelNum(l: string | null): number { const m = (l || '').match(/\d+/); return m ? parseInt(m[0], 10) : NaN }
 
 // Calibration: what an ISO grant has meant per grade, read off the actual
-// grants already made (source 'grant', award type ISO). Three candidate
-// "what did we hold constant" bases per grade — shares, entry %, $ at grant,
-// and $-per-$-salary — with their spread, so the data picks the basis.
-// Calibration basis: the at-hire INITIAL grant (clean new-hire signal,
-// strips later refreshes) vs ALL outstanding (accumulated). Default initial.
+// grants already made (source 'grant', award type ISO). buildGradeStats adds
+// the statistical layer — IQR outlier removal, interpolation of empty interior
+// grades, and a confidence rating.
+// Basis: the at-hire INITIAL grant (clean new-hire signal, strips later
+// refreshes) vs ALL outstanding (accumulated). Default initial.
 const calibBasis = ref<'initial' | 'outstanding'>('initial')
 function calShares(h: Holder) { return calibBasis.value === 'initial' ? h.initialShares : h.optionShares }
 function calValue(h: Holder) { return calShares(h) * h.entryPPS }
@@ -127,34 +122,17 @@ function calPct(h: Holder) { return h.entryFDS > 0 ? calShares(h) / h.entryFDS :
 const cohortYear = (h: Holder) => h.firstGrantDate ? h.firstGrantDate.slice(0, 4) : '—'
 
 const isoGrants = computed(() => (data.value?.holders || []).filter(h => h.source === 'grant' && h.isISO && h.level && calShares(h) > 0))
-const calibration = computed(() => {
-  const byLevel = new Map<string, Holder[]>()
+const gradeStats = computed(() => {
+  const byLevel = new Map<string, RawGrade>()
   for (const h of isoGrants.value) {
-    const arr = byLevel.get(h.level!) || []
-    arr.push(h); byLevel.set(h.level!, arr)
+    let g = byLevel.get(h.level!)
+    if (!g) { g = { level: h.level!, points: [] }; byLevel.set(h.level!, g) }
+    g.points.push({ name: h.name, shares: calShares(h), pct: calPct(h), value: calValue(h), mult: h.salary ? calValue(h) / h.salary : null })
   }
-  const out = [...byLevel.entries()].map(([level, hs]) => {
-    const shares = hs.map(calShares)
-    const pcts = hs.map(calPct)
-    const vals = hs.map(calValue)
-    const mults = hs.filter(h => h.salary).map(h => calValue(h) / (h.salary as number))
-    return {
-      level, count: hs.length,
-      medShares: median(shares), loShares: Math.min(...shares), hiShares: Math.max(...shares),
-      medPct: median(pcts), medValue: median(vals),
-      medMultiple: mults.length ? median(mults) : null, multCount: mults.length,
-      points: hs.map(h => ({ name: h.name, shares: calShares(h) })),
-    }
-  })
-  out.sort((a, b) => {
-    const na = levelNum(a.level), nb = levelNum(b.level)
-    if (Number.isFinite(na) && Number.isFinite(nb)) return nb - na
-    return a.level.localeCompare(b.level)
-  })
-  return out
+  return buildGradeStats([...byLevel.values()])
 })
 // Shared x-axis max for the range bars (largest grant across all grades).
-const calibMax = computed(() => Math.max(1, ...calibration.value.map(g => g.hiShares)))
+const calibMax = computed(() => Math.max(1, ...gradeStats.value.map(g => g.hi)))
 const calX = (v: number) => calibMax.value > 0 ? (v / calibMax.value) * 100 : 0
 // Per-person ISO detail, grade desc then hire year asc (so drift reads top-down).
 const isoDetail = computed(() => [...isoGrants.value].sort((a, b) => {
@@ -163,6 +141,11 @@ const isoDetail = computed(() => [...isoGrants.value].sort((a, b) => {
   return cohortYear(a).localeCompare(cohortYear(b)) || calShares(b) - calShares(a)
 }))
 const fmtMult = (m: number | null) => m == null ? '—' : `${m.toFixed(2)}×`
+const confMeta: Record<string, { label: string; cls: string }> = {
+  high: { label: 'High', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  medium: { label: 'Medium', cls: 'bg-amber-50 text-amber-800 border-amber-300' },
+  low: { label: 'Low', cls: 'bg-ink-100 text-ink-500 border-ink-200' },
+}
 
 // Calc-tooltip strings — actual numbers behind each derived value.
 function fTotal(h: Holder): string | null {
@@ -499,57 +482,63 @@ const tabs = [
           <span class="text-ink-400">{{ calibBasis === 'initial' ? 'earliest grant only — strips later refreshes' : 'every grant they still hold, accumulated' }}</span>
         </div>
 
-        <div v-if="!calibration.length" class="text-sm text-ink-500 border border-dashed border-ink-300 rounded-lg p-8 text-center">
+        <div v-if="!gradeStats.length" class="text-sm text-ink-500 border border-dashed border-ink-300 rounded-lg p-8 text-center">
           Assign grades (Level) to your ISO optionholders on the <span class="font-medium">Optionholders</span> tab to calibrate.
         </div>
 
         <template v-else>
           <!-- Comp-style range chart: a floating bar per grade spanning the
-               min–max of actual grants, median tick, individual dots. -->
-          <UiCard :padded="false" class="mb-5" subtitle="Recommended grant range by grade — min–median–max of actual ISO grants on the current basis">
+               min–max of actual grants (outliers removed), median tick,
+               individual dots (outliers faded), interpolated grades dashed. -->
+          <UiCard :padded="false" class="mb-5" subtitle="Recommended grant range by grade — IQR outliers removed, empty grades interpolated, confidence per grade">
             <div class="px-4 py-4 space-y-3">
-              <div v-for="g in calibration" :key="g.level" class="flex items-center gap-3">
+              <div v-for="g in gradeStats" :key="g.level" class="flex items-center gap-3">
                 <div class="w-14 shrink-0 text-right">
-                  <div class="text-sm font-medium text-ink-900">{{ g.level }}</div>
-                  <div class="text-[10px] text-ink-400">n={{ g.count }}</div>
+                  <div class="text-sm font-medium" :class="g.interpolated ? 'text-ink-400 italic' : 'text-ink-900'">{{ g.level }}</div>
+                  <div class="text-[10px] text-ink-400">{{ g.interpolated ? 'interp' : `n=${g.n}` }}</div>
                 </div>
                 <div class="flex-1 relative h-7">
                   <div class="absolute inset-x-0 top-1/2 -translate-y-1/2 h-1.5 rounded-full bg-ink-100"></div>
                   <div
-                    class="absolute top-1/2 -translate-y-1/2 h-2.5 rounded-full bg-brand-200"
-                    :style="{ left: calX(g.loShares) + '%', width: Math.max(0.5, calX(g.hiShares) - calX(g.loShares)) + '%' }"
+                    class="absolute top-1/2 -translate-y-1/2 h-2.5 rounded-full"
+                    :class="g.interpolated ? 'bg-ink-200 border border-dashed border-ink-400' : 'bg-brand-200'"
+                    :style="{ left: calX(g.lo) + '%', width: Math.max(0.5, calX(g.hi) - calX(g.lo)) + '%' }"
                   ></div>
                   <div
                     v-for="(p, pi) in g.points" :key="pi"
-                    class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-ink-400/80 ring-1 ring-white"
+                    class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rounded-full ring-1 ring-white"
+                    :class="p.outlier ? 'bg-red-300/70' : 'bg-ink-400/80'"
                     :style="{ left: calX(p.shares) + '%' }"
-                    :title="`${p.name}: ${fmtShares(p.shares)}`"
+                    :title="`${p.name}: ${fmtShares(p.shares)}${p.outlier ? ' · outlier (excluded)' : ''}`"
                   ></div>
                   <div
-                    class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-[3px] h-5 rounded bg-brand-700"
-                    :style="{ left: calX(g.medShares) + '%' }"
-                    :title="`median ${fmtShares(g.medShares)}`"
+                    class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-[3px] h-5 rounded"
+                    :class="g.interpolated ? 'bg-ink-400' : 'bg-brand-700'"
+                    :style="{ left: calX(g.med) + '%' }"
+                    :title="`median ${fmtShares(g.med)}`"
                   ></div>
                 </div>
-                <div class="w-40 shrink-0 text-right num text-[11px] text-ink-500">
-                  {{ fmtShares(g.loShares) }}–{{ fmtShares(g.hiShares) }}
-                  <span class="text-ink-900 font-medium">· {{ fmtShares(g.medShares) }}</span>
+                <span class="inline-block text-[10px] px-1.5 py-0.5 rounded border shrink-0 w-16 text-center" :class="confMeta[g.confidence].cls">{{ confMeta[g.confidence].label }}</span>
+                <div class="w-36 shrink-0 text-right num text-[11px] text-ink-500">
+                  {{ fmtShares(g.lo) }}–{{ fmtShares(g.hi) }}
+                  <span class="text-ink-900 font-medium">· {{ fmtShares(g.med) }}</span>
                 </div>
               </div>
             </div>
             <div class="px-4 pb-3 flex items-center justify-between text-[10px] text-ink-400 num border-t border-ink-100 pt-2">
               <span>0</span>
-              <span class="text-ink-500">grant size (options) · <span class="inline-block w-3 h-[3px] bg-brand-700 align-middle"></span> median · <span class="inline-block w-2 h-2 rounded-full bg-ink-400/80 align-middle"></span> each grant</span>
+              <span class="text-ink-500"><span class="inline-block w-3 h-[3px] bg-brand-700 align-middle"></span> median · <span class="inline-block w-2 h-2 rounded-full bg-ink-400/80 align-middle"></span> grant · <span class="inline-block w-2 h-2 rounded-full bg-red-300/70 align-middle"></span> outlier · dashed = interpolated</span>
               <span>{{ fmtShares(calibMax) }}</span>
             </div>
           </UiCard>
 
-          <UiCard :padded="false" class="mb-5" subtitle="Per-grade ISO benchmarks (median; range shown for shares)">
+          <UiCard :padded="false" class="mb-5" subtitle="Per-grade ISO benchmarks (median; range = min–max after outlier removal)">
             <table class="w-full text-sm num">
               <thead>
                 <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
                   <th class="text-left font-medium px-4 py-2">Grade</th>
                   <th class="text-right font-medium px-3 py-2">#</th>
+                  <th class="text-left font-medium px-3 py-2 pl-4">Confidence</th>
                   <th class="text-right font-medium px-3 py-2">Median grant</th>
                   <th class="text-right font-medium px-3 py-2">Range</th>
                   <th class="text-right font-medium px-3 py-2">Entry %</th>
@@ -558,14 +547,15 @@ const tabs = [
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="g in calibration" :key="g.level" class="even:bg-ink-50/50 hover:bg-brand-50/50 transition-colors">
-                  <td class="px-4 py-1.5 text-ink-900 font-medium">{{ g.level }}</td>
-                  <td class="px-3 py-1.5 text-right text-ink-500">{{ g.count }}</td>
-                  <td class="px-3 py-1.5 text-right text-ink-900 font-medium">{{ fmtShares(g.medShares) }}</td>
-                  <td class="px-3 py-1.5 text-right text-ink-500 text-[12px]">{{ fmtShares(g.loShares) }}–{{ fmtShares(g.hiShares) }}</td>
+                <tr v-for="g in gradeStats" :key="g.level" class="even:bg-ink-50/50 hover:bg-brand-50/50 transition-colors">
+                  <td class="px-4 py-1.5 font-medium" :class="g.interpolated ? 'text-ink-400 italic' : 'text-ink-900'">{{ g.level }}<span v-if="g.interpolated" class="ml-1 text-[9px] uppercase tracking-wide text-ink-400">interp</span></td>
+                  <td class="px-3 py-1.5 text-right text-ink-500">{{ g.interpolated ? '—' : g.n }}<span v-if="g.removed" class="text-red-400 text-[10px]" :title="`${g.removed} outlier(s) removed`"> −{{ g.removed }}</span></td>
+                  <td class="px-3 py-1.5 pl-4"><span class="inline-block text-[10px] px-1.5 py-0.5 rounded border" :class="confMeta[g.confidence].cls">{{ confMeta[g.confidence].label }}</span></td>
+                  <td class="px-3 py-1.5 text-right text-ink-900 font-medium">{{ fmtShares(g.med) }}</td>
+                  <td class="px-3 py-1.5 text-right text-ink-500 text-[12px]">{{ fmtShares(g.lo) }}–{{ fmtShares(g.hi) }}</td>
                   <td class="px-3 py-1.5 text-right text-ink-700">{{ fmtPct(g.medPct, 3) }}</td>
                   <td class="px-3 py-1.5 text-right text-ink-700">{{ g.medValue > 0 ? fmtUSD(g.medValue) : '—' }}</td>
-                  <td class="px-3 py-1.5 text-right text-ink-700">{{ fmtMult(g.medMultiple) }}<span v-if="g.medMultiple != null && g.multCount < g.count" class="text-ink-400 text-[10px]"> ({{ g.multCount }})</span></td>
+                  <td class="px-3 py-1.5 text-right text-ink-700">{{ fmtMult(g.medMult) }}</td>
                 </tr>
               </tbody>
             </table>
