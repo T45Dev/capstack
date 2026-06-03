@@ -27,6 +27,7 @@
 import { ArrowUp, ArrowDown, Upload } from 'lucide-vue-next'
 import { fmtUSD, fmtPct, fmtShares } from '~/utils/format'
 import { calcPct, calcValueUSD, calcSum } from '~/utils/calc'
+import { openRoundPostFds } from '~/utils/capTable'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -151,10 +152,13 @@ const postFDS = computed(() => {
   const base = aggregate.value?.total_shares_fds || 0
   const r = currentRound.value
   if (!r) return base
-  const issued = (r.new_money && r.share_price) ? Math.floor(r.new_money / r.share_price) : 0
-  const pool = r.option_pool_issued || 0
-  const notes = r.notes_converted || 0
-  return base + issued + pool + notes
+  return openRoundPostFds({
+    base,
+    newMoney: r.new_money,
+    sharePrice: r.share_price,
+    optionPoolIssued: r.option_pool_issued,
+    notesConverted: r.notes_converted,
+  })
 })
 
 interface DilRow {
