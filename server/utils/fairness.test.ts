@@ -130,6 +130,19 @@ describe('buildFairness', () => {
     expect(c.postPct).toBeCloseTo(0.0075)
   })
 
+  it('preserves the row source (grant default, proposed/idea passthrough)', () => {
+    const res = buildFairness(rounds, [
+      H({ name: 'G', level: 'L4', optionShares: 10_000, firstGrantDate: '2023-02-01' }),
+      H({ name: 'P', level: 'L4', optionShares: 0, proposedShares: 5_000, firstGrantDate: null, source: 'proposed' }),
+      H({ name: 'I', optionShares: 0, proposedShares: 8_000, firstGrantDate: null, source: 'idea' }),
+    ], { includeFuture: true })
+    expect(res.holders.find(h => h.name === 'G')!.source).toBe('grant')
+    expect(res.holders.find(h => h.name === 'P')!.source).toBe('proposed')
+    expect(res.holders.find(h => h.name === 'I')!.source).toBe('idea')
+    // includeFuture rolls proposed into the grant/total share count.
+    expect(res.holders.find(h => h.name === 'I')!.totalShares).toBe(8_000)
+  })
+
   it('does not flag holders without a level', () => {
     const res = buildFairness(rounds, [H({ name: 'NL', optionShares: 1000, firstGrantDate: '2023-02-01' })], {})
     expect(res.holders[0].flag).toBe('na')
