@@ -143,6 +143,7 @@ const calibration = computed(() => {
       medShares: median(shares), loShares: Math.min(...shares), hiShares: Math.max(...shares),
       medPct: median(pcts), medValue: median(vals),
       medMultiple: mults.length ? median(mults) : null, multCount: mults.length,
+      points: hs.map(h => ({ name: h.name, shares: calShares(h) })),
     }
   })
   out.sort((a, b) => {
@@ -152,6 +153,9 @@ const calibration = computed(() => {
   })
   return out
 })
+// Shared x-axis max for the range bars (largest grant across all grades).
+const calibMax = computed(() => Math.max(1, ...calibration.value.map(g => g.hiShares)))
+const calX = (v: number) => calibMax.value > 0 ? (v / calibMax.value) * 100 : 0
 // Per-person ISO detail, grade desc then hire year asc (so drift reads top-down).
 const isoDetail = computed(() => [...isoGrants.value].sort((a, b) => {
   const d = (levelNum(b.level) || 0) - (levelNum(a.level) || 0)
@@ -500,6 +504,46 @@ const tabs = [
         </div>
 
         <template v-else>
+          <!-- Comp-style range chart: a floating bar per grade spanning the
+               min–max of actual grants, median tick, individual dots. -->
+          <UiCard :padded="false" class="mb-5" subtitle="Recommended grant range by grade — min–median–max of actual ISO grants on the current basis">
+            <div class="px-4 py-4 space-y-3">
+              <div v-for="g in calibration" :key="g.level" class="flex items-center gap-3">
+                <div class="w-14 shrink-0 text-right">
+                  <div class="text-sm font-medium text-ink-900">{{ g.level }}</div>
+                  <div class="text-[10px] text-ink-400">n={{ g.count }}</div>
+                </div>
+                <div class="flex-1 relative h-7">
+                  <div class="absolute inset-x-0 top-1/2 -translate-y-1/2 h-1.5 rounded-full bg-ink-100"></div>
+                  <div
+                    class="absolute top-1/2 -translate-y-1/2 h-2.5 rounded-full bg-brand-200"
+                    :style="{ left: calX(g.loShares) + '%', width: Math.max(0.5, calX(g.hiShares) - calX(g.loShares)) + '%' }"
+                  ></div>
+                  <div
+                    v-for="(p, pi) in g.points" :key="pi"
+                    class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-ink-400/80 ring-1 ring-white"
+                    :style="{ left: calX(p.shares) + '%' }"
+                    :title="`${p.name}: ${fmtShares(p.shares)}`"
+                  ></div>
+                  <div
+                    class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-[3px] h-5 rounded bg-brand-700"
+                    :style="{ left: calX(g.medShares) + '%' }"
+                    :title="`median ${fmtShares(g.medShares)}`"
+                  ></div>
+                </div>
+                <div class="w-40 shrink-0 text-right num text-[11px] text-ink-500">
+                  {{ fmtShares(g.loShares) }}–{{ fmtShares(g.hiShares) }}
+                  <span class="text-ink-900 font-medium">· {{ fmtShares(g.medShares) }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="px-4 pb-3 flex items-center justify-between text-[10px] text-ink-400 num border-t border-ink-100 pt-2">
+              <span>0</span>
+              <span class="text-ink-500">grant size (options) · <span class="inline-block w-3 h-[3px] bg-brand-700 align-middle"></span> median · <span class="inline-block w-2 h-2 rounded-full bg-ink-400/80 align-middle"></span> each grant</span>
+              <span>{{ fmtShares(calibMax) }}</span>
+            </div>
+          </UiCard>
+
           <UiCard :padded="false" class="mb-5" subtitle="Per-grade ISO benchmarks (median; range shown for shares)">
             <table class="w-full text-sm num">
               <thead>
