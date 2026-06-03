@@ -1,21 +1,26 @@
 // Employee Grant Fairness — pure computation.
 //
-// The endpoint assembles raw data (per-round FDS from round-summary, and
-// per-employee outstanding options + comp metadata from the DB) and hands it
-// to buildFairness, which is dependency-free so it can be unit-tested.
+// The endpoint assembles raw data (per-round FDS from round-summary, plus
+// per-optionholder options/holdings/proposed + comp metadata) and hands it to
+// buildFairness, which is dependency-free so it can be unit-tested.
 //
-// Three fairness lenses per employee (see CLAUDE.md decision on dilution):
-//   - currentPct  : shares / FDS at a chosen round, shown pre- and post-round.
-//   - entryPct    : shares / FDS at the round they were first granted in
-//                   ("what you got when you joined"). Dilution-neutral, so an
-//                   early hire and an equivalent new hire compare directly.
-//   - value$      : shares × current share price.
+// Tabs the result feeds:
+//   1. Optionholders roster — every option grant holder, an include toggle,
+//      and editable title/level. Excluded holders stay in the roster but drop
+//      out of the analysis (tabs 2–3).
+//   2. Current holdings — each included holder's position fully diluted to the
+//      selected round (pre/post %), plus $ value and a per-round walk.
+//   3. Recommended grant model — per job level, CapStack reads the included
+//      holders' current ownership and recommends top-up option grants that
+//      bring under-granted people up to the level's median ownership. An
+//      "include proposed + ideas" toggle rolls not-yet-issued equity into the
+//      basis.
 //
-// Per job level, CapStack recommends a fair band straight from that level's
-// own distribution: the median is the target, and the interquartile range
-// (P25–P75) is the recommended band (for small levels, n<4, we fall back to
-// median ×[0.66, 1.5]). Employees outside their level's entry-% band are
-// flagged under/over-granted.
+// Recommended band per level = median (target) with the interquartile range
+// (P25–P75) as the fair band; levels with <4 holders fall back to median
+// ×[0.66, 1.5]. Bands and the recommendation are computed on each holder's
+// current post-round ownership; the entry % (ownership at the round you were
+// first granted in) is reported alongside as a dilution-neutral reference.
 
 export interface FairnessRound {
   code: string
@@ -27,12 +32,16 @@ export interface FairnessRound {
   postFDS: number
 }
 
-export interface RawEmployee {
+export interface RawHolder {
   stakeholderId: string | null
   name: string
   title: string | null
   level: string | null
-  shares: number
+  include: boolean
+  awardTypes: string[]
+  optionShares: number
+  heldShares: number
+  proposedShares: number
   firstGrantDate: string | null
 }
 
@@ -44,16 +53,20 @@ export interface Band {
   max: number
 }
 
-export interface FairnessEmployee extends RawEmployee {
+export interface Holder extends RawHolder {
   hireRoundCode: string | null
   hireRoundName: string | null
   entryFDS: number
   entryPct: number
-  value: number
+  grantShares: number   // options (+ proposed when includeFuture)
+  totalShares: number   // grantShares + held
   prePct: number
   postPct: number
+  value: number
   perRound: Record<string, { prePct: number; postPct: number }>
   flag: 'under' | 'in' | 'over' | 'na'
+  recommendedAddl: number
+  recommendedPct: number
 }
 
 export interface FairnessLevel {
@@ -67,10 +80,19 @@ export interface FairnessLevel {
 export interface FairnessResult {
   selectedRoundCode: string | null
   currentPPS: number
+  includeFuture: boolean
+  ideasShares: number
+  recommendedTotalAddl: number
   rounds: FairnessRound[]
   levels: FairnessLevel[]
-  employees: FairnessEmployee[]
+  holders: Holder[]
   methodology: string
+}
+
+export interface BuildOpts {
+  selectedRoundCode?: string | null
+  includeFuture?: boolean
+  ideasShares?: number
 }
 
 // Linear-interpolated percentile over a value array (need not be sorted).
@@ -96,7 +118,6 @@ export function recommendBand(values: number[]): Band {
     lo = percentile(v, 25)
     hi = percentile(v, 75)
   } else {
-    // Too few data points for a meaningful IQR — bracket the median.
     lo = target * 0.66
     hi = target * 1.5
   }
@@ -104,8 +125,7 @@ export function recommendBand(values: number[]): Band {
 }
 
 // Index of the round prevailing at a date: the latest round whose close_date
-// is on or before the date. Returns -1 if the date precedes every round (or
-// is missing). Rounds are assumed in chronological order (open last).
+// is on or before the date. Returns -1 if the date precedes every round.
 export function pickRoundIndexForDate(rounds: FairnessRound[], date: string | null): number {
   if (!date) return -1
   const d = String(date).slice(0, 10)
@@ -117,26 +137,23 @@ export function pickRoundIndexForDate(rounds: FairnessRound[], date: string | nu
   return idx
 }
 
-export function buildFairness(
-  rounds: FairnessRound[],
-  employees: RawEmployee[],
-  selectedRoundCode: string | null,
-): FairnessResult {
+export function buildFairness(rounds: FairnessRound[], rawHolders: RawHolder[], opts: BuildOpts = {}): FairnessResult {
+  const includeFuture = !!opts.includeFuture
+  const ideasShares = opts.ideasShares || 0
   const methodology =
     'Recommended band per level = median (target) with the interquartile range (P25–P75) as the fair band; '
-    + 'levels with fewer than 4 employees fall back to median ×[0.66, 1.5]. '
-    + 'Entry % = shares ÷ fully-diluted shares at the round you were first granted in (dilution-neutral). '
-    + 'Flags compare each employee’s entry % to their level’s entry-% band.'
+    + 'levels with fewer than 4 holders fall back to median ×[0.66, 1.5]. Bands and recommendations use each '
+    + 'holder’s ownership fully diluted to the selected round. A holder below their level’s band is recommended '
+    + 'a top-up grant sized to reach the level median. Entry % (ownership at the round first granted in) is shown '
+    + 'as a dilution-neutral reference.'
+    + (includeFuture ? ' Proposed grants and pool ideas are rolled into the basis.' : '')
 
-  // Pick the round driving the current pre/post columns: the requested one,
-  // else the open round, else the latest.
-  let selIdx = selectedRoundCode ? rounds.findIndex(r => r.code === selectedRoundCode) : -1
+  // Pick the round driving current pre/post: requested, else open, else latest.
+  let selIdx = opts.selectedRoundCode ? rounds.findIndex(r => r.code === opts.selectedRoundCode) : -1
   if (selIdx < 0) selIdx = rounds.findIndex(r => r.kind === 'open')
   if (selIdx < 0) selIdx = rounds.length - 1
   const sel = selIdx >= 0 ? rounds[selIdx] : null
 
-  // Current price-per-share: the selected round's price, else the most recent
-  // priced round.
   let currentPPS = sel && sel.sharePrice > 0 ? sel.sharePrice : 0
   if (!currentPPS) {
     for (let i = rounds.length - 1; i >= 0; i--) {
@@ -144,82 +161,101 @@ export function buildFairness(
     }
   }
 
-  const emps: FairnessEmployee[] = employees.map(e => {
-    const hireIdx = pickRoundIndexForDate(rounds, e.firstGrantDate)
+  const holders: Holder[] = rawHolders.map(h => {
+    const hireIdx = pickRoundIndexForDate(rounds, h.firstGrantDate)
     const hireRound = hireIdx >= 0 ? rounds[hireIdx] : (rounds[0] ?? null)
-    // Entry FDS: post-FDS of the hire round; if the grant predates all rounds,
-    // use the earliest round's pre-FDS (smallest cap). Guard against zero.
     let entryFDS = 0
     if (hireIdx >= 0) entryFDS = rounds[hireIdx].postFDS
     else if (rounds.length) entryFDS = rounds[0].preFDS || rounds[0].postFDS
     if (!entryFDS && sel) entryFDS = sel.postFDS
 
-    const entryPct = entryFDS > 0 ? e.shares / entryFDS : 0
-    const prePct = sel && sel.preFDS > 0 ? e.shares / sel.preFDS : 0
-    const postPct = sel && sel.postFDS > 0 ? e.shares / sel.postFDS : 0
+    const grantShares = h.optionShares + (includeFuture ? h.proposedShares : 0)
+    const totalShares = grantShares + h.heldShares
+    const entryPct = entryFDS > 0 ? grantShares / entryFDS : 0
+    const prePct = sel && sel.preFDS > 0 ? totalShares / sel.preFDS : 0
+    const postPct = sel && sel.postFDS > 0 ? totalShares / sel.postFDS : 0
 
     const perRound: Record<string, { prePct: number; postPct: number }> = {}
-    for (const r of rounds) {
-      perRound[r.code] = {
-        prePct: r.preFDS > 0 ? e.shares / r.preFDS : 0,
-        postPct: r.postFDS > 0 ? e.shares / r.postFDS : 0,
+    for (const rd of rounds) {
+      perRound[rd.code] = {
+        prePct: rd.preFDS > 0 ? totalShares / rd.preFDS : 0,
+        postPct: rd.postFDS > 0 ? totalShares / rd.postFDS : 0,
       }
     }
 
     return {
-      ...e,
+      ...h,
       hireRoundCode: hireRound?.code ?? null,
       hireRoundName: hireRound?.name ?? null,
       entryFDS,
       entryPct,
-      value: e.shares * currentPPS,
+      grantShares,
+      totalShares,
       prePct,
       postPct,
+      value: totalShares * currentPPS,
       perRound,
       flag: 'na',
+      recommendedAddl: 0,
+      recommendedPct: postPct,
     }
   })
 
-  // Group by level and recommend bands.
-  const byLevel = new Map<string, FairnessEmployee[]>()
-  for (const e of emps) {
-    if (!e.level) continue
-    const arr = byLevel.get(e.level) || []
-    arr.push(e)
-    byLevel.set(e.level, arr)
+  // Analysis (bands, flags, recommendation) runs over INCLUDED holders only.
+  const included = holders.filter(h => h.include)
+  const postFDS = sel?.postFDS || 0
+
+  const byLevel = new Map<string, Holder[]>()
+  for (const h of included) {
+    if (!h.level) continue
+    const arr = byLevel.get(h.level) || []
+    arr.push(h)
+    byLevel.set(h.level, arr)
   }
 
   const levels: FairnessLevel[] = []
+  let recommendedTotalAddl = 0
   for (const [level, group] of byLevel) {
     const entry = recommendBand(group.map(g => g.entryPct))
     const post = recommendBand(group.map(g => g.postPct))
     const value = recommendBand(group.map(g => g.value))
     levels.push({ level, count: group.length, entry, post, value })
-    // Flag each member against the entry-% band.
     for (const g of group) {
-      if (g.entryPct < entry.lo) g.flag = 'under'
-      else if (g.entryPct > entry.hi) g.flag = 'over'
-      else g.flag = 'in'
+      if (g.postPct < post.lo) {
+        g.flag = 'under'
+        // Top-up to the level median ownership, in option shares.
+        const targetShares = post.target * postFDS
+        g.recommendedAddl = Math.max(0, Math.round(targetShares - g.totalShares))
+      } else if (g.postPct > post.hi) {
+        g.flag = 'over'
+      } else {
+        g.flag = 'in'
+      }
+      g.recommendedPct = postFDS > 0 ? (g.totalShares + g.recommendedAddl) / postFDS : 0
+      recommendedTotalAddl += g.recommendedAddl
     }
   }
-  // Highest-equity levels first.
-  levels.sort((a, b) => b.entry.target - a.entry.target)
+  levels.sort((a, b) => b.post.target - a.post.target)
 
-  // Stable employee order: by level rank (per the sorted levels), then entry desc.
+  // Roster order: included first, then by level rank, then ownership desc.
   const levelRank = new Map(levels.map((l, i) => [l.level, i]))
-  emps.sort((a, b) => {
+  holders.sort((a, b) => {
+    if (a.include !== b.include) return a.include ? -1 : 1
     const ra = a.level ? (levelRank.get(a.level) ?? 999) : 1000
     const rb = b.level ? (levelRank.get(b.level) ?? 999) : 1000
     if (ra !== rb) return ra - rb
-    return b.entryPct - a.entryPct
+    return b.postPct - a.postPct
   })
 
   return {
     selectedRoundCode: sel?.code ?? null,
     currentPPS,
+    includeFuture,
+    ideasShares,
+    recommendedTotalAddl,
     rounds,
     levels,
-    employees: emps,
+    holders,
     methodology,
   }
 }

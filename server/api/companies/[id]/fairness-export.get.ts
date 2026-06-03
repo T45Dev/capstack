@@ -1,28 +1,28 @@
 import ExcelJS from 'exceljs'
 import type { FairnessResult } from '~~/server/utils/fairness'
 
-// Excel export for the Employee Grant Fairness module. Mirrors the in-app
-// page: recommended equity ranges per level, the per-employee table with the
-// three fairness lenses, and a per-round pre/post dilution walk on a second
-// sheet. Built from the grant-fairness endpoint so the math stays in one
-// place. Query ?round=<code> flows through to select the current-% basis.
+// Excel export for the Grant Fairness module — one sheet per page tab plus a
+// per-round dilution walk. Built from the grant-fairness endpoint so the math
+// stays in one place. ?round= and ?includeFuture= flow through.
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
   if (!id) throw createError({ statusCode: 400, message: 'id required' })
 
-  const round = (getQuery(event).round as string) || ''
+  const q = getQuery(event)
+  const qs = new URLSearchParams()
+  if (q.round) qs.set('round', String(q.round))
+  if (q.includeFuture) qs.set('includeFuture', String(q.includeFuture))
   const data = await $fetch<FairnessResult & { company: { name: string; slug: string } }>(
-    `/api/companies/${id}/grant-fairness${round ? `?round=${encodeURIComponent(round)}` : ''}`,
+    `/api/companies/${id}/grant-fairness${qs.toString() ? `?${qs}` : ''}`,
   )
-
   const sel = data.rounds.find(r => r.code === data.selectedRoundCode)
   const selName = sel ? (sel.name || sel.code) : '—'
+  const included = data.holders.filter(h => h.include)
 
   const wb = new ExcelJS.Workbook()
   wb.creator = 'CapStack'
   wb.created = new Date()
 
-  // Shared styles
   const sectionFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FF4B5F74' } }
   const headFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFD8D7DB' } }
   const whiteBold = { bold: true, color: { argb: 'FFFFFFFF' }, name: 'Calibri', size: 11 }
@@ -32,151 +32,132 @@ export default defineEventHandler(async (event) => {
   const flagFill: Record<string, string> = { under: 'FFFFE0E0', over: 'FFFFF1CC', in: 'FFE3F4E1' }
   const flagText: Record<string, string> = { under: 'Under-granted', over: 'Over-granted', in: 'In range', na: '—' }
 
-  // ============ Sheet 1: Fairness ============
-  const ws = wb.addWorksheet('Grant Fairness', {
-    pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
-  })
-  ws.columns = [
-    { width: 26 }, { width: 20 }, { width: 12 }, { width: 14 }, { width: 16 },
-    { width: 12 }, { width: 12 }, { width: 12 }, { width: 16 }, { width: 16 }, { width: 14 },
-  ]
-  const LAST = 11
-  let r = 1
-
-  function section(text: string) {
-    ws.mergeCells(r, 1, r, LAST)
-    const c = ws.getCell(r, 1)
-    c.value = text; c.font = whiteBold; c.fill = sectionFill
-    c.alignment = { horizontal: 'left', vertical: 'middle' }
-    ws.getRow(r).height = 20
-    r++
-  }
-  function head(labels: string[]) {
+  function header(ws: ExcelJS.Worksheet, row: number, labels: string[]) {
     labels.forEach((l, i) => {
-      const c = ws.getCell(r, i + 1)
+      const c = ws.getCell(row, i + 1)
       c.value = l; c.font = blackBold; c.fill = headFill
       c.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true }
       c.border = borders
     })
-    ws.getRow(r).height = 28
-    r++
+    ws.getRow(row).height = 26
+  }
+  function banner(ws: ExcelJS.Worksheet, span: number, text: string) {
+    ws.mergeCells(1, 1, 1, span)
+    const c = ws.getCell(1, 1)
+    c.value = text; c.font = whiteBold; c.fill = sectionFill
+    c.alignment = { horizontal: 'left', vertical: 'middle' }
+    ws.getRow(1).height = 20
   }
 
-  // Title
-  ws.mergeCells(r, 1, r, LAST)
-  const title = ws.getCell(r, 1)
-  title.value = 'EMPLOYEE GRANT FAIRNESS'
-  title.font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' }, name: 'Calibri' }
-  title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A8A' } }
-  title.alignment = { horizontal: 'center', vertical: 'middle' }
-  ws.getRow(r).height = 28
-  r++
-  ws.mergeCells(r, 1, r, LAST)
-  const sub = ws.getCell(r, 1)
-  sub.value = `${data.company.name}  —  current basis: ${selName}  —  ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`
-  sub.font = { italic: true, size: 11, name: 'Calibri', color: { argb: 'FF1E293B' } }
-  sub.alignment = { horizontal: 'center' }
-  r++
-  ws.mergeCells(r, 1, r, LAST)
-  const meth = ws.getCell(r, 1)
-  meth.value = data.methodology
-  meth.font = { italic: true, size: 9, name: 'Calibri', color: { argb: 'FF64748B' } }
-  meth.alignment = { horizontal: 'left', wrapText: true, vertical: 'top' }
-  ws.getRow(r).height = 42
-  r += 2
+  // ---- Sheet 1: Optionholders roster ----
+  const ws1 = wb.addWorksheet('Optionholders')
+  ws1.columns = [{ width: 26 }, { width: 14 }, { width: 22 }, { width: 12 }, { width: 10 }, { width: 16 }, { width: 14 }, { width: 16 }]
+  banner(ws1, 8, `OPTIONHOLDERS — ${data.company.name}`)
+  header(ws1, 2, ['Name', 'Award type', 'Title', 'Level', 'Include', 'Options', 'Other holdings', 'Total'])
+  let r1 = 3
+  for (const h of data.holders) {
+    ws1.getCell(r1, 1).value = h.name
+    ws1.getCell(r1, 2).value = h.awardTypes.join(', ') || '—'
+    ws1.getCell(r1, 3).value = h.title || ''
+    ws1.getCell(r1, 4).value = h.level || '—'
+    ws1.getCell(r1, 5).value = h.include ? 'Yes' : 'No'
+    ws1.getCell(r1, 6).value = h.optionShares; ws1.getCell(r1, 6).numFmt = '#,##0'
+    ws1.getCell(r1, 7).value = h.heldShares; ws1.getCell(r1, 7).numFmt = '#,##0'
+    ws1.getCell(r1, 8).value = h.optionShares + h.heldShares; ws1.getCell(r1, 8).numFmt = '#,##0'
+    if (!h.include) ws1.getCell(r1, 5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEEEEE' } }
+    for (let c = 1; c <= 8; c++) ws1.getCell(r1, c).border = borders
+    r1++
+  }
 
-  // Section A — recommended ranges by level
-  section('RECOMMENDED EQUITY RANGES BY LEVEL')
-  head([
-    'Level', '# Emp', 'Entry % Target', 'Entry % Low', 'Entry % High',
-    'Post % Target', 'Post % Low', 'Post % High', '$ Target', '$ Low', '$ High',
-  ])
+  // ---- Sheet 2: Current holdings, fully diluted to the selected round ----
+  const ws2 = wb.addWorksheet('Holdings (FD)')
+  ws2.columns = [{ width: 26 }, { width: 12 }, { width: 14 }, { width: 14 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 16 }]
+  banner(ws2, 8, `CURRENT HOLDINGS — fully diluted to ${selName}${data.includeFuture ? ' (incl. proposed + ideas)' : ''}`)
+  header(ws2, 2, ['Name', 'Level', 'Options', 'Total shares', 'Pre %', 'Post %', 'Entry %', '$ value'])
+  let r2 = 3
+  for (const h of included) {
+    ws2.getCell(r2, 1).value = h.name
+    ws2.getCell(r2, 2).value = h.level || '—'
+    ws2.getCell(r2, 3).value = h.grantShares; ws2.getCell(r2, 3).numFmt = '#,##0'
+    ws2.getCell(r2, 4).value = h.totalShares; ws2.getCell(r2, 4).numFmt = '#,##0'
+    ws2.getCell(r2, 5).value = h.prePct; ws2.getCell(r2, 5).numFmt = '0.000%'
+    ws2.getCell(r2, 6).value = h.postPct; ws2.getCell(r2, 6).numFmt = '0.000%'
+    ws2.getCell(r2, 7).value = h.entryPct; ws2.getCell(r2, 7).numFmt = '0.000%'
+    ws2.getCell(r2, 8).value = h.value; ws2.getCell(r2, 8).numFmt = '"$"#,##0'
+    for (let c = 1; c <= 8; c++) ws2.getCell(r2, c).border = borders
+    r2++
+  }
+
+  // ---- Sheet 3: Recommended grant model ----
+  const ws3 = wb.addWorksheet('Recommended grants')
+  ws3.columns = [{ width: 26 }, { width: 12 }, { width: 14 }, { width: 12 }, { width: 16 }, { width: 16 }, { width: 14 }]
+  banner(ws3, 7, `RECOMMENDED GRANT MODEL — basis ${selName}${data.includeFuture ? ' (incl. proposed + ideas)' : ''}`)
+  // Ranges by level
+  header(ws3, 2, ['Level', '# Holders', 'Target post %', 'Fair range', '', '', ''])
+  let r3 = 3
   for (const l of data.levels) {
-    ws.getCell(r, 1).value = l.level
-    ws.getCell(r, 2).value = l.count
-    const pcts = [l.entry.target, l.entry.lo, l.entry.hi, l.post.target, l.post.lo, l.post.hi]
-    pcts.forEach((v, i) => { const c = ws.getCell(r, 3 + i); c.value = v; c.numFmt = '0.000%' })
-    const dollars = [l.value.target, l.value.lo, l.value.hi]
-    dollars.forEach((v, i) => { const c = ws.getCell(r, 9 + i); c.value = v; c.numFmt = '"$"#,##0' })
-    for (let c = 1; c <= LAST; c++) ws.getCell(r, c).border = borders
-    r++
+    ws3.getCell(r3, 1).value = l.level
+    ws3.getCell(r3, 2).value = l.count
+    ws3.getCell(r3, 3).value = l.post.target; ws3.getCell(r3, 3).numFmt = '0.000%'
+    ws3.getCell(r3, 4).value = `${(l.post.lo * 100).toFixed(3)}% – ${(l.post.hi * 100).toFixed(3)}%`
+    for (let c = 1; c <= 4; c++) ws3.getCell(r3, c).border = borders
+    r3++
   }
-  if (!data.levels.length) {
-    ws.mergeCells(r, 1, r, LAST)
-    ws.getCell(r, 1).value = 'No job levels assigned yet — set each employee’s Job Level on the Grant Fairness page.'
-    ws.getCell(r, 1).font = { italic: true, color: { argb: 'FF94A3B8' }, name: 'Calibri', size: 10 }
-    r++
+  r3 += 1
+  header(ws3, r3, ['Name', 'Level', 'Current post %', 'Fairness', 'Recommended + options', 'Resulting post %', ''])
+  r3++
+  for (const h of included.filter(h => h.level)) {
+    ws3.getCell(r3, 1).value = h.name
+    ws3.getCell(r3, 2).value = h.level || '—'
+    ws3.getCell(r3, 3).value = h.postPct; ws3.getCell(r3, 3).numFmt = '0.000%'
+    const f = ws3.getCell(r3, 4)
+    f.value = flagText[h.flag] ?? '—'
+    if (h.flag !== 'na') f.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: flagFill[h.flag] } }
+    ws3.getCell(r3, 5).value = h.recommendedAddl || 0; ws3.getCell(r3, 5).numFmt = '#,##0'
+    ws3.getCell(r3, 6).value = h.recommendedPct; ws3.getCell(r3, 6).numFmt = '0.000%'
+    for (let c = 1; c <= 6; c++) ws3.getCell(r3, c).border = borders
+    r3++
   }
-  r++
+  // Totals
+  ws3.getCell(r3, 1).value = 'TOTAL RECOMMENDED NEW OPTIONS'
+  ws3.getCell(r3, 1).font = blackBold
+  ws3.mergeCells(r3, 1, r3, 4)
+  ws3.getCell(r3, 5).value = data.recommendedTotalAddl; ws3.getCell(r3, 5).numFmt = '#,##0'; ws3.getCell(r3, 5).font = blackBold
+  for (let c = 1; c <= 6; c++) ws3.getCell(r3, c).border = borders
 
-  // Section B — employees
-  section('EMPLOYEES')
-  head([
-    'Employee', 'Title', 'Level', 'Hire Round', 'Outstanding Options',
-    'Entry %', `Pre % (${selName})`, `Post % (${selName})`, 'Equity $ Value', 'Fairness', '',
-  ])
-  for (const e of data.employees) {
-    ws.getCell(r, 1).value = e.name
-    ws.getCell(r, 2).value = e.title || ''
-    ws.getCell(r, 3).value = e.level || '—'
-    ws.getCell(r, 4).value = e.hireRoundName || '—'
-    ws.getCell(r, 5).value = e.shares; ws.getCell(r, 5).numFmt = '#,##0'
-    ws.getCell(r, 6).value = e.entryPct; ws.getCell(r, 6).numFmt = '0.000%'
-    ws.getCell(r, 7).value = e.prePct; ws.getCell(r, 7).numFmt = '0.000%'
-    ws.getCell(r, 8).value = e.postPct; ws.getCell(r, 8).numFmt = '0.000%'
-    ws.getCell(r, 9).value = e.value; ws.getCell(r, 9).numFmt = '"$"#,##0'
-    const f = ws.getCell(r, 10)
-    f.value = flagText[e.flag] ?? '—'
-    if (e.flag !== 'na') f.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: flagFill[e.flag] } }
-    for (let c = 1; c <= LAST; c++) ws.getCell(r, c).border = borders
-    r++
-  }
-
-  // ============ Sheet 2: Dilution Walk (pre/post per round) ============
-  const ws2 = wb.addWorksheet('Dilution Walk', {
-    pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
-  })
-  const walkCols = [{ width: 26 }, { width: 12 }]
-  for (let i = 0; i < data.rounds.length; i++) walkCols.push({ width: 11 }, { width: 11 })
-  ws2.columns = walkCols
-  const walkLast = 2 + data.rounds.length * 2
-
-  ws2.mergeCells(1, 1, 1, walkLast)
-  const wt = ws2.getCell(1, 1)
-  wt.value = 'OWNERSHIP % BY ROUND — PRE & POST (current outstanding options as the numerator)'
-  wt.font = whiteBold; wt.fill = sectionFill
-  wt.alignment = { horizontal: 'left', vertical: 'middle' }
-  ws2.getRow(1).height = 20
-
-  // Two header rows: round names spanning their two columns, then Pre/Post.
-  ws2.getCell(2, 1).value = 'Employee'; ws2.getCell(2, 1).font = blackBold; ws2.getCell(2, 1).fill = headFill; ws2.getCell(2, 1).border = borders
-  ws2.getCell(2, 2).value = 'Level'; ws2.getCell(2, 2).font = blackBold; ws2.getCell(2, 2).fill = headFill; ws2.getCell(2, 2).border = borders
-  ws2.mergeCells(2, 1, 3, 1); ws2.mergeCells(2, 2, 3, 2)
+  // ---- Sheet 4: Dilution walk (pre/post per round) ----
+  const ws4 = wb.addWorksheet('Dilution Walk')
+  const cols4: Partial<ExcelJS.Column>[] = [{ width: 26 }, { width: 12 }]
+  for (let i = 0; i < data.rounds.length; i++) cols4.push({ width: 11 }, { width: 11 })
+  ws4.columns = cols4
+  const last4 = 2 + data.rounds.length * 2
+  banner(ws4, last4, 'OWNERSHIP % BY ROUND — PRE & POST')
+  ws4.getCell(2, 1).value = 'Name'; ws4.getCell(2, 2).value = 'Level'
+  ws4.mergeCells(2, 1, 3, 1); ws4.mergeCells(2, 2, 3, 2)
+  for (const c of [1, 2]) { const cell = ws4.getCell(2, c); cell.font = blackBold; cell.fill = headFill; cell.border = borders }
   data.rounds.forEach((rd, i) => {
     const c0 = 3 + i * 2
-    ws2.mergeCells(2, c0, 2, c0 + 1)
-    const rc = ws2.getCell(2, c0)
-    rc.value = rd.name || rd.code
-    rc.font = blackBold; rc.fill = headFill
-    rc.alignment = { horizontal: 'center', vertical: 'middle' }
-    rc.border = borders
-    ws2.getCell(2, c0 + 1).border = borders
-    const pre = ws2.getCell(3, c0); pre.value = 'Pre'; pre.font = blackBold; pre.fill = headFill; pre.border = borders
-    const post = ws2.getCell(3, c0 + 1); post.value = 'Post'; post.font = blackBold; post.fill = headFill; post.border = borders
+    ws4.mergeCells(2, c0, 2, c0 + 1)
+    const rc = ws4.getCell(2, c0)
+    rc.value = rd.name || rd.code; rc.font = blackBold; rc.fill = headFill
+    rc.alignment = { horizontal: 'center' }; rc.border = borders
+    ws4.getCell(2, c0 + 1).border = borders
+    const pre = ws4.getCell(3, c0); pre.value = 'Pre'; pre.font = blackBold; pre.fill = headFill; pre.border = borders
+    const post = ws4.getCell(3, c0 + 1); post.value = 'Post'; post.font = blackBold; post.fill = headFill; post.border = borders
   })
-  let wr = 4
-  for (const e of data.employees) {
-    ws2.getCell(wr, 1).value = e.name
-    ws2.getCell(wr, 2).value = e.level || '—'
+  let r4 = 4
+  for (const h of included) {
+    ws4.getCell(r4, 1).value = h.name
+    ws4.getCell(r4, 2).value = h.level || '—'
+    ws4.getCell(r4, 1).border = borders
+    ws4.getCell(r4, 2).border = borders
     data.rounds.forEach((rd, i) => {
       const c0 = 3 + i * 2
-      const pr = e.perRound[rd.code]
-      const pre = ws2.getCell(wr, c0); pre.value = pr?.prePct ?? 0; pre.numFmt = '0.000%'; pre.border = borders
-      const post = ws2.getCell(wr, c0 + 1); post.value = pr?.postPct ?? 0; post.numFmt = '0.000%'; post.border = borders
+      const pr = h.perRound[rd.code]
+      const pre = ws4.getCell(r4, c0); pre.value = pr?.prePct ?? 0; pre.numFmt = '0.000%'; pre.border = borders
+      const post = ws4.getCell(r4, c0 + 1); post.value = pr?.postPct ?? 0; post.numFmt = '0.000%'; post.border = borders
     })
-    ws2.getCell(wr, 1).border = borders
-    ws2.getCell(wr, 2).border = borders
-    wr++
+    r4++
   }
 
   const buffer = await wb.xlsx.writeBuffer() as Buffer

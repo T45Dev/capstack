@@ -1,20 +1,14 @@
 import { db } from '~~/server/utils/db'
-import { buildFairness, type FairnessRound, type RawEmployee } from '~~/server/utils/fairness'
+import { buildFairness, type FairnessRound, type RawHolder } from '~~/server/utils/fairness'
 
-// Employee Grant Fairness data for a company. Per-round fully-diluted shares
-// are reused from the round-summary endpoint (single source of truth for the
-// cumulative FDS walk); per-employee outstanding options + comp metadata come
-// straight from the DB. The heavy lifting is in buildFairness (pure/tested).
+// Employee Grant Fairness data. Per-round FDS is reused from the
+// round-summary endpoint (single source of truth for the cumulative walk);
+// per-optionholder options/holdings/proposed + comp metadata come from the DB.
+// The math lives in buildFairness (pure/tested).
 //
-// Query: ?round=<code> selects which round drives the current pre/post columns
-// (defaults to the open round, else the latest).
-
-function isEmployee(type: string | null | undefined): boolean {
-  const t = (type || '').toLowerCase()
-  if (!t.includes('employee')) return false
-  return !t.includes('ex-') && !t.includes('ex ') && !t.includes('former')
-}
-
+// Query:
+//   ?round=<code>       selects the round driving the current pre/post columns
+//   ?includeFuture=1    rolls proposed grants + pool ideas into the basis
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
   if (!id) throw createError({ statusCode: 400, message: 'id required' })
@@ -22,7 +16,11 @@ export default defineEventHandler(async (event) => {
   const company = db().prepare('SELECT id, name, slug FROM companies WHERE id = ?').get(id) as any
   if (!company) throw createError({ statusCode: 404, message: 'Company not found' })
 
-  // Per-round cumulative FDS + share price, in chronological order (open last).
+  const q = getQuery(event)
+  const includeFuture = q.includeFuture === '1' || q.includeFuture === 'true'
+  const selectedRound = (q.round as string) || null
+
+  // Per-round cumulative FDS + share price, chronological (open last).
   const summary = await $fetch<{ rounds: any[] }>(`/api/companies/${id}/round-summary`)
   const rcols = summary?.rounds ?? []
   const rounds: FairnessRound[] = rcols.map((rc, i) => ({
@@ -31,48 +29,84 @@ export default defineEventHandler(async (event) => {
     kind: rc.kind,
     closeDate: rc.close_date ?? null,
     sharePrice: Number(rc.share_price) || 0,
-    // pre-money FDS for round X = cumulative FDS through round X-1
     preFDS: i > 0 ? (Number(rcols[i - 1].total_shares_fds) || 0) : (Number(rc.total_shares_fds) || 0),
     postFDS: Number(rc.total_shares_fds) || 0,
   }))
 
-  // Outstanding option grants joined to their stakeholder (for title/level).
-  const rows = db().prepare(`
-    SELECT g.stakeholder_id, g.recipient_name, g.recipient_type,
-           g.issue_date, g.vesting_start, g.quantity,
-           g.quantity_issued, g.quantity_exercised, g.quantity_forfeited, g.quantity_expired,
-           s.name AS s_name, s.title AS s_title, s.job_level AS s_level
-    FROM grants g
-    LEFT JOIN stakeholders s ON s.id = g.stakeholder_id
-    WHERE g.company_id = ? AND g.status = 'outstanding'
-  `).all(id) as any[]
+  // Stakeholder comp metadata (title / level / include).
+  const sMeta = new Map<string, { name: string; title: string | null; level: string | null; include: boolean }>()
+  for (const s of db().prepare(`SELECT id, name, title, job_level, fairness_include FROM stakeholders WHERE company_id = ?`).all(id) as any[]) {
+    sMeta.set(s.id, {
+      name: s.name,
+      title: s.title || null,
+      level: s.job_level || null,
+      include: s.fairness_include == null ? true : !!s.fairness_include,
+    })
+  }
 
-  // Aggregate per employee (by stakeholder when linked, else by name).
-  const map = new Map<string, RawEmployee>()
-  for (const row of rows) {
-    if (!isEmployee(row.recipient_type)) continue
+  // Held shares (common / preferred / warrants) per stakeholder.
+  const heldBy = new Map<string, number>()
+  for (const h of db().prepare(`SELECT stakeholder_id, shares FROM holdings WHERE company_id = ?`).all(id) as any[]) {
+    if (!h.stakeholder_id) continue
+    heldBy.set(h.stakeholder_id, (heldBy.get(h.stakeholder_id) || 0) + (h.shares || 0))
+  }
+
+  // Aggregate outstanding option grants per optionholder.
+  type Agg = { stakeholderId: string | null; recipientName: string; awardTypes: Set<string>; optionShares: number; firstGrantDate: string | null }
+  const map = new Map<string, Agg>()
+  const keyOf = (sid: string | null, name: string) => sid || `name:${name}`
+  for (const row of db().prepare(`
+    SELECT stakeholder_id, recipient_name, award_type, issue_date, vesting_start,
+           quantity, quantity_issued, quantity_exercised, quantity_forfeited, quantity_expired
+    FROM grants WHERE company_id = ? AND status = 'outstanding'
+  `).all(id) as any[]) {
     const issued = row.quantity_issued ?? row.quantity ?? 0
     const out = issued - (row.quantity_exercised || 0) - (row.quantity_forfeited || 0) - (row.quantity_expired || 0)
     if (out <= 0) continue
-    const key = row.stakeholder_id || `name:${row.recipient_name}`
+    const key = keyOf(row.stakeholder_id, row.recipient_name)
     const date: string | null = row.issue_date || row.vesting_start || null
-    const cur = map.get(key)
-    if (cur) {
-      cur.shares += out
-      if (date && (!cur.firstGrantDate || date < cur.firstGrantDate)) cur.firstGrantDate = date
-    } else {
-      map.set(key, {
-        stakeholderId: row.stakeholder_id || null,
-        name: row.s_name || row.recipient_name || '(unknown)',
-        title: row.s_title || null,
-        level: row.s_level || null,
-        shares: out,
-        firstGrantDate: date,
-      })
+    let a = map.get(key)
+    if (!a) {
+      a = { stakeholderId: row.stakeholder_id || null, recipientName: row.recipient_name || '(unknown)', awardTypes: new Set(), optionShares: 0, firstGrantDate: null }
+      map.set(key, a)
     }
+    a.optionShares += out
+    if (row.award_type) a.awardTypes.add(String(row.award_type).toUpperCase())
+    if (date && (!a.firstGrantDate || date < a.firstGrantDate)) a.firstGrantDate = date
   }
 
-  const selectedRound = (getQuery(event).round as string) || null
-  const result = buildFairness(rounds, [...map.values()], selectedRound)
+  // Proposed grants per optionholder (for the include-future basis).
+  const proposedBy = new Map<string, number>()
+  for (const row of db().prepare(`SELECT stakeholder_id, recipient_name, quantity FROM grants WHERE company_id = ? AND status = 'proposed'`).all(id) as any[]) {
+    const key = keyOf(row.stakeholder_id, row.recipient_name)
+    proposedBy.set(key, (proposedBy.get(key) || 0) + (row.quantity || 0))
+  }
+
+  // Pool ideas (anonymous future grants/reserves) — a single aggregate.
+  let ideasShares = 0
+  try {
+    const ideas = await $fetch<any[]>(`/api/companies/${id}/pool-events`)
+    for (const ie of (ideas || [])) {
+      if (ie.type === 'grant' || ie.type === 'reserve') ideasShares += ie.shares || 0
+    }
+  } catch { /* pool-events optional */ }
+
+  const holders: RawHolder[] = [...map.entries()].map(([key, a]) => {
+    const meta = a.stakeholderId ? sMeta.get(a.stakeholderId) : null
+    return {
+      stakeholderId: a.stakeholderId,
+      name: meta?.name || a.recipientName,
+      title: meta?.title ?? null,
+      level: meta?.level ?? null,
+      include: meta ? meta.include : true,
+      awardTypes: [...a.awardTypes].sort(),
+      optionShares: a.optionShares,
+      heldShares: a.stakeholderId ? (heldBy.get(a.stakeholderId) || 0) : 0,
+      proposedShares: proposedBy.get(key) || 0,
+      firstGrantDate: a.firstGrantDate,
+    }
+  })
+
+  const result = buildFairness(rounds, holders, { selectedRoundCode: selectedRound, includeFuture, ideasShares })
   return { company: { id: company.id, name: company.name, slug: company.slug }, ...result }
 })

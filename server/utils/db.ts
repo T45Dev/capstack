@@ -342,6 +342,9 @@ function migrate(d: Database.Database): void {
   // (e.g. "L3", "Senior", "VP") and groups employees for range comparison.
   ensureColumn('stakeholders', 'title', 'TEXT')
   ensureColumn('stakeholders', 'job_level', 'TEXT')
+  // Grant Fairness "include" toggle. NULL = use the default (included); 0/1
+  // once the operator ticks. Scoped to the Fairness analysis only.
+  ensureColumn('stakeholders', 'fairness_include', 'INTEGER')
   // Stamped on the first successful Carta import. The import UI uses it
   // to decide between "Welcome" and "Re-import" framing; nothing else
   // gates on it now that the setup wizard is gone.
