@@ -679,18 +679,24 @@ async function commitImport(withResolutions = false) {
 // Inline date edit for grant events on the timeline. When a grant came in
 // without an issue date (no plan sheet matched, or the date column was
 // labeled something we didn't catch), the operator can pick a date right
-// on the timeline cell and we PATCH the grant. Refreshes the grants data
-// so the timeline re-renders with the new date in chronological order.
-async function commitGrantDate(grantId: string, isoDate: string): Promise<void> {
-  if (!grantId) return
+// on the timeline cell and we PATCH the grant. The date maps to the field
+// that drives THAT event — issue / exercise / forfeit / expire — so editing a
+// lifecycle row sets its own date rather than the grant's issue date.
+// Refreshes the grants data so the timeline re-sorts with the new date.
+async function commitEventDate(e: TimelineEvent, isoDate: string): Promise<void> {
+  if (!e.grantId) return
+  const field = e.id.startsWith('exercise:') ? 'last_exercised_date'
+    : e.id.startsWith('forfeit:') ? 'forfeited_date'
+    : e.id.startsWith('expire:') ? 'expired_date'
+    : 'issue_date'
   try {
-    await $fetch(`/api/grants/${grantId}`, {
+    await $fetch(`/api/grants/${e.grantId}`, {
       method: 'PATCH',
-      body: { issue_date: isoDate || null },
+      body: { [field]: isoDate || null },
     })
     await refreshGrants()
   } catch (e) {
-    console.error('Failed to update grant issue_date', e)
+    console.error('Failed to update grant date', e)
   }
 }
 
@@ -1002,13 +1008,13 @@ const chart = computed(() => {
                     <label
                       class="block min-w-[110px]"
                       :class="e.dateIsPlaceholder ? 'cell-edit border-warn/30' : ''"
-                      :title="e.dateIsPlaceholder ? 'Placeholder — no issue date on the source grant. Type one to set it.' : 'Grant issue date — edit to update.'"
+                      :title="e.dateIsPlaceholder ? 'Placeholder — no date on the source grant. Type one to set it.' : 'Event date — edit to update.'"
                     >
                       <DateInput
                         variant="bare"
                         :model-value="e.dateIsPlaceholder ? null : e.date"
                         placeholder="MM/DD/YYYY"
-                        @update:model-value="(v) => commitGrantDate(e.grantId!, v || '')"
+                        @update:model-value="(v) => commitEventDate(e, v || '')"
                       />
                     </label>
                     <span v-if="e.dateIsPlaceholder" class="ml-0.5 text-[9px] uppercase tracking-wide text-warn/80">est</span>

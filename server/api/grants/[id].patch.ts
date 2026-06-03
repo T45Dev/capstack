@@ -12,6 +12,7 @@ export default defineEventHandler(async (event) => {
     // Per-grant detail from the Carta option-plan sheet — editable so the
     // operator can correct values if the import misread something.
     'quantity_issued', 'quantity_exercised', 'quantity_forfeited', 'quantity_expired',
+    'last_exercised_date', 'forfeited_date', 'expired_date',
     'award_type', 'acceleration', 'vesting_schedule_id',
     'job_title', 'job_level',
   ]
