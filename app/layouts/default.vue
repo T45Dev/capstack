@@ -78,10 +78,11 @@ const tabs = computed(() => companyId.value ? [
   { to: `/companies/${companyId.value}/cap-table`,    label: 'Rounds',             icon: FileSpreadsheet },
   { to: `/companies/${companyId.value}/shareholders`, label: 'Shareholders',       icon: Users },
   { to: `/companies/${companyId.value}/grants`,       label: 'Option Grants',      icon: Award },
-  { to: `/companies/${companyId.value}/fairness`,     label: 'Grant Fairness',     icon: Scale },
   { to: `/companies/${companyId.value}/dilution`,     label: 'Overall Dilution',   icon: GitCompare },
   { to: `/companies/${companyId.value}/pool`,         label: 'Option Pool Impact', icon: TrendingDown },
   { to: `/companies/${companyId.value}/scenarios`,    label: 'Exit Scenarios',     icon: FlaskConical },
+  // Its own section below the cap-table / exit analysis flow.
+  { to: `/companies/${companyId.value}/fairness`,     label: 'Grant Fairness',     icon: Scale, dividerBefore: true },
   { to: `/companies/${companyId.value}/settings`,     label: 'Settings',           icon: Settings },
 ] : [])
 
@@ -104,22 +105,23 @@ const importHref = computed(() => companyId.value ? `/companies/${companyId.valu
         :class="navCollapsed ? 'w-14' : 'w-56'"
       >
         <nav class="px-2 py-3 flex flex-col gap-0.5">
-          <NuxtLink
-            v-for="t in tabs"
-            :key="t.to"
-            :to="t.to"
-            class="inline-flex items-center gap-2 px-2.5 py-1.5 text-[12.5px] rounded-md transition-colors"
-            :class="[
-              route.path === t.to
-                ? 'bg-brand text-white shadow-sm'
-                : 'text-ink-700 hover:text-ink-900 hover:bg-ink-100',
-              navCollapsed ? 'justify-center' : '',
-            ]"
-            :title="navCollapsed ? t.label : undefined"
-          >
-            <component :is="t.icon" :size="14" />
-            <span v-if="!navCollapsed">{{ t.label }}</span>
-          </NuxtLink>
+          <template v-for="t in tabs" :key="t.to">
+            <div v-if="t.dividerBefore" class="border-t border-ink-200 my-2" />
+            <NuxtLink
+              :to="t.to"
+              class="inline-flex items-center gap-2 px-2.5 py-1.5 text-[12.5px] rounded-md transition-colors"
+              :class="[
+                route.path === t.to
+                  ? 'bg-brand text-white shadow-sm'
+                  : 'text-ink-700 hover:text-ink-900 hover:bg-ink-100',
+                navCollapsed ? 'justify-center' : '',
+              ]"
+              :title="navCollapsed ? t.label : undefined"
+            >
+              <component :is="t.icon" :size="14" />
+              <span v-if="!navCollapsed">{{ t.label }}</span>
+            </NuxtLink>
+          </template>
           <div class="border-t border-ink-200 my-2" />
           <NuxtLink
             v-if="importHref"
