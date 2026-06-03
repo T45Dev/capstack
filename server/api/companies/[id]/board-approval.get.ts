@@ -210,6 +210,29 @@ export default defineEventHandler(async (event) => {
     cell.numFmt = 'm/d/yy'
   }
 
+  // ---- Formula helpers ----
+  // Cells carry live Excel formulas so the sheet recalculates when an
+  // operator edits an input. We still pass a `result` so viewers that don't
+  // recalc on open (and our own tests) show the right number immediately.
+  function colLetter(n: number): string {
+    let s = ''
+    while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26) }
+    return s
+  }
+  const cellAddr = (col: number, row: number) => `${colLetter(col)}${row}`
+  const absAddr = (col: number, row: number) => `$${colLetter(col)}$${row}`
+  const setFormula = (row: number, col: number, formula: string, result: number) => {
+    ws.getCell(row, col).value = { formula, result }
+  }
+
+  // The % FD column divides by the Post-Round FDS cell, which is written in
+  // the footer below these rows. Collect them and resolve once we know that
+  // cell's address (forward references are valid in Excel).
+  const pctCells: { row: number; col: number; numerator: string; result: number }[] = []
+  const setPct = (row: number, col: number, numerator: string, result: number) => {
+    pctCells.push({ row, col, numerator, result })
+  }
+
   let r = 1
 
   // ---- Title block ----
@@ -264,6 +287,7 @@ export default defineEventHandler(async (event) => {
   ])
   r++
 
+  const sec1First = r
   for (const g of proposedGrants) {
     const { last, first } = splitName(g.recipient_name)
     ws.getCell(r, 1).value = last
@@ -276,11 +300,13 @@ export default defineEventHandler(async (event) => {
       ws.getCell(r, 5).numFmt = '"$"#,##0.0000'
     }
     ws.getCell(r, 6).value = vestingDesc(g.vest_months, g.cliff_months)
-    ws.getCell(r, 7).value = postFDS > 0 ? g.quantity / postFDS : 0
     ws.getCell(r, 7).numFmt = '0.000%'
+    setPct(r, 7, cellAddr(4, r), postFDS > 0 ? g.quantity / postFDS : 0)
     applyBorders(r, 1, 7)
     r++
   }
+  const sec1Last = r - 1
+  const sec1Count = proposedGrants.length
 
   // Total row
   ws.mergeCells(r, 1, r, 3)
@@ -292,7 +318,8 @@ export default defineEventHandler(async (event) => {
   totalLabel.border = allBorders
 
   const totalQty = ws.getCell(r, 4)
-  totalQty.value = proposedTotal
+  if (sec1Count > 0) totalQty.value = { formula: `SUM(${cellAddr(4, sec1First)}:${cellAddr(4, sec1Last)})`, result: proposedTotal }
+  else totalQty.value = 0
   totalQty.numFmt = '#,##0'
   totalQty.font = whiteBold
   totalQty.fill = sectionFill
@@ -305,12 +332,12 @@ export default defineEventHandler(async (event) => {
     cell.border = allBorders
   }
 
-  const totalPctPost = ws.getCell(r, 7)
-  totalPctPost.value = postFDS > 0 ? proposedTotal / postFDS : 0
-  totalPctPost.numFmt = '0.000%'
-  totalPctPost.font = whiteBold
-  totalPctPost.fill = sectionFill
-  totalPctPost.border = allBorders
+  const sec1TotalRow = r
+  ws.getCell(r, 7).numFmt = '0.000%'
+  ws.getCell(r, 7).font = whiteBold
+  ws.getCell(r, 7).fill = sectionFill
+  ws.getCell(r, 7).border = allBorders
+  setPct(sec1TotalRow, 7, cellAddr(4, sec1TotalRow), postFDS > 0 ? proposedTotal / postFDS : 0)
   r += 2
 
   // ---- Section 2: Total ownership summary for new grantees ----
@@ -335,6 +362,7 @@ export default defineEventHandler(async (event) => {
   }).sort((a, b) => b.total - a.total)
 
   let sumNew = 0, sumOut = 0, sumCommon = 0, sumPref = 0, sumTotal = 0
+  const sec2First = r
   for (const row of sec2Rows) {
     const { g, existingOptions, common, preferred, total } = row
     const { last, first } = splitName(g.recipient_name)
@@ -344,10 +372,11 @@ export default defineEventHandler(async (event) => {
     ws.getCell(r, 4).value = existingOptions
     ws.getCell(r, 5).value = common
     ws.getCell(r, 6).value = preferred
-    ws.getCell(r, 7).value = total
+    // Total Securities = New + Outstanding + Common + Preferred
+    setFormula(r, 7, `${cellAddr(3, r)}+${cellAddr(4, r)}+${cellAddr(5, r)}+${cellAddr(6, r)}`, total)
     for (let c = 3; c <= 7; c++) ws.getCell(r, c).numFmt = '#,##0'
-    ws.getCell(r, 8).value = postFDS > 0 ? total / postFDS : 0
     ws.getCell(r, 8).numFmt = '0.000%'
+    setPct(r, 8, cellAddr(7, r), postFDS > 0 ? total / postFDS : 0)
     setDateCell(r, 9, g.vesting_start)
     ws.getCell(r, 10).value = scheduleLabel(g)
     ws.getCell(r, 11).value = g.notes || ''
@@ -361,6 +390,8 @@ export default defineEventHandler(async (event) => {
     sumTotal += total
     r++
   }
+  const sec2Last = r - 1
+  const sec2Count = sec2Rows.length
 
   // Total row for section 2
   ws.mergeCells(r, 1, r, 2)
@@ -373,19 +404,21 @@ export default defineEventHandler(async (event) => {
 
   const sec2Values = [sumNew, sumOut, sumCommon, sumPref, sumTotal]
   sec2Values.forEach((v, i) => {
-    const c = ws.getCell(r, 3 + i)
-    c.value = v
+    const col = 3 + i
+    const c = ws.getCell(r, col)
+    if (sec2Count > 0) c.value = { formula: `SUM(${cellAddr(col, sec2First)}:${cellAddr(col, sec2Last)})`, result: v }
+    else c.value = 0
     c.numFmt = '#,##0'
     c.font = whiteBold
     c.fill = sectionFill
     c.border = allBorders
   })
-  const sec2PctPost = ws.getCell(r, 8)
-  sec2PctPost.value = postFDS > 0 ? sumTotal / postFDS : 0
-  sec2PctPost.numFmt = '0.000%'
-  sec2PctPost.font = whiteBold
-  sec2PctPost.fill = sectionFill
-  sec2PctPost.border = allBorders
+  const sec2TotalRow = r
+  ws.getCell(r, 8).numFmt = '0.000%'
+  ws.getCell(r, 8).font = whiteBold
+  ws.getCell(r, 8).fill = sectionFill
+  ws.getCell(r, 8).border = allBorders
+  setPct(sec2TotalRow, 8, cellAddr(7, sec2TotalRow), postFDS > 0 ? sumTotal / postFDS : 0)
   for (let c = 9; c <= LAST_COL; c++) {
     const cell = ws.getCell(r, c)
     cell.font = whiteBold
@@ -439,6 +472,7 @@ export default defineEventHandler(async (event) => {
   for (const g of proposedGrants) agg[catOf(g.recipient_type)].newG += g.quantity
 
   let catPrior = 0, catNew = 0, catForf = 0, catOut = 0, catEx = 0, catTotal = 0
+  const sec3First = r
   for (const label of CATEGORIES) {
     const a = agg[label]
     const prior = a.issued
@@ -451,10 +485,11 @@ export default defineEventHandler(async (event) => {
     ws.getCell(r, 4).value = forf
     ws.getCell(r, 5).value = a.outstanding
     ws.getCell(r, 6).value = a.exercised
-    ws.getCell(r, 7).value = total
+    // Total = Outstanding + Exercised + New + Forfeited (Forfeited is stored negative)
+    setFormula(r, 7, `${cellAddr(5, r)}+${cellAddr(6, r)}+${cellAddr(3, r)}+${cellAddr(4, r)}`, total)
     for (let c = 2; c <= 7; c++) ws.getCell(r, c).numFmt = '#,##0;(#,##0)'
-    ws.getCell(r, 8).value = postFDS > 0 ? total / postFDS : 0
     ws.getCell(r, 8).numFmt = '0.000%'
+    setPct(r, 8, cellAddr(7, r), postFDS > 0 ? total / postFDS : 0)
     applyBorders(r, 1, 8)
 
     // Explanatory note when a category is a net source to the pool
@@ -473,61 +508,86 @@ export default defineEventHandler(async (event) => {
   }
 
   // Total allocated row
+  const sec3Last = r - 1
   const totRowVals = [catPrior, catNew, catForf, catOut, catEx, catTotal]
   ws.getCell(r, 1).value = 'TOTAL ALLOCATED'
   ws.getCell(r, 1).font = whiteBold
   ws.getCell(r, 1).fill = sectionFill
   ws.getCell(r, 1).border = allBorders
   totRowVals.forEach((v, i) => {
-    const c = ws.getCell(r, 2 + i)
-    c.value = v
+    const col = 2 + i
+    const c = ws.getCell(r, col)
+    c.value = { formula: `SUM(${cellAddr(col, sec3First)}:${cellAddr(col, sec3Last)})`, result: v }
     c.numFmt = '#,##0;(#,##0)'
     c.font = whiteBold
     c.fill = sectionFill
     c.border = allBorders
   })
-  ws.getCell(r, 8).value = postFDS > 0 ? catTotal / postFDS : 0
+  const allocRow = r
   ws.getCell(r, 8).numFmt = '0.000%'
   ws.getCell(r, 8).font = whiteBold
   ws.getCell(r, 8).fill = sectionFill
   ws.getCell(r, 8).border = allBorders
+  setPct(allocRow, 8, cellAddr(7, allocRow), postFDS > 0 ? catTotal / postFDS : 0)
   r += 2
 
-  // Authorized + remaining + total FD
-  function summaryRow(label: string, value: number) {
+  // Authorized + remaining + the two FDS basis cells.
+  // Writes the label across cols 1-6 and returns the row so callers can
+  // populate the value (col 7) and % (col 8) with formulas.
+  function labelRow(label: string): number {
     ws.mergeCells(r, 1, r, 6)
     const lab = ws.getCell(r, 1)
     lab.value = label
     lab.font = blackBold
     lab.alignment = { horizontal: 'left', vertical: 'middle' }
     lab.border = allBorders
-    const v = ws.getCell(r, 7)
-    v.value = value
-    v.numFmt = '#,##0'
-    v.font = blackBold
-    v.border = allBorders
-    ws.getCell(r, 8).value = postFDS > 0 ? value / postFDS : 0
-    ws.getCell(r, 8).numFmt = '0.000%'
-    ws.getCell(r, 8).border = allBorders
-    r++
+    return r++
   }
 
-  summaryRow('TOTAL OPTIONS AUTHORIZED', poolAuthorized)
-  summaryRow('TOTAL OPTIONS REMAINING AFTER ABOVE GRANTS', Math.max(0, poolAuthorized - catTotal))
-  // Total FD just for reference (no percent of itself).
-  ws.mergeCells(r, 1, r, 6)
-  const fdLab = ws.getCell(r, 1)
-  fdLab.value = 'TOTAL FULLY DILUTED SECURITIES'
-  fdLab.font = blackBold
-  fdLab.alignment = { horizontal: 'left', vertical: 'middle' }
-  fdLab.border = allBorders
-  const fdVal = ws.getCell(r, 7)
-  fdVal.value = preFDS
-  fdVal.numFmt = '#,##0'
-  fdVal.font = blackBold
-  fdVal.border = allBorders
-  ws.getCell(r, 8).border = allBorders
-  r += 2
+  // TOTAL OPTIONS AUTHORIZED — input
+  const authRow = labelRow('TOTAL OPTIONS AUTHORIZED')
+  ws.getCell(authRow, 7).value = poolAuthorized
+  ws.getCell(authRow, 7).numFmt = '#,##0'
+  ws.getCell(authRow, 7).font = blackBold
+  ws.getCell(authRow, 7).border = allBorders
+  ws.getCell(authRow, 8).numFmt = '0.000%'
+  ws.getCell(authRow, 8).border = allBorders
+  setPct(authRow, 8, cellAddr(7, authRow), postFDS > 0 ? poolAuthorized / postFDS : 0)
+
+  // TOTAL OPTIONS REMAINING = Authorized − Allocated
+  const remRow = labelRow('TOTAL OPTIONS REMAINING AFTER ABOVE GRANTS')
+  const remaining = Math.max(0, poolAuthorized - catTotal)
+  setFormula(remRow, 7, `MAX(${cellAddr(7, authRow)}-${cellAddr(7, allocRow)},0)`, remaining)
+  ws.getCell(remRow, 7).numFmt = '#,##0'
+  ws.getCell(remRow, 7).font = blackBold
+  ws.getCell(remRow, 7).border = allBorders
+  ws.getCell(remRow, 8).numFmt = '0.000%'
+  ws.getCell(remRow, 8).border = allBorders
+  setPct(remRow, 8, cellAddr(7, remRow), postFDS > 0 ? remaining / postFDS : 0)
+
+  // Pre-Round FDS — the board's "Total Fully Diluted Securities" reference.
+  const preRow = labelRow('TOTAL FULLY DILUTED SECURITIES (PRE-ROUND)')
+  ws.getCell(preRow, 7).value = preFDS
+  ws.getCell(preRow, 7).numFmt = '#,##0'
+  ws.getCell(preRow, 7).font = blackBold
+  ws.getCell(preRow, 7).border = allBorders
+  ws.getCell(preRow, 8).border = allBorders
+
+  // Post-Round FDS — the basis every % column divides by.
+  const postFDSRow = labelRow('POST-ROUND FULLY DILUTED SECURITIES')
+  ws.getCell(postFDSRow, 7).value = postFDS
+  ws.getCell(postFDSRow, 7).numFmt = '#,##0'
+  ws.getCell(postFDSRow, 7).font = blackBold
+  ws.getCell(postFDSRow, 7).border = allBorders
+  ws.getCell(postFDSRow, 8).border = allBorders
+  r++
+
+  // Resolve every deferred % cell now that the Post-Round FDS cell exists.
+  const postRef = postFDS > 0 ? absAddr(7, postFDSRow) : null
+  for (const p of pctCells) {
+    if (postRef) ws.getCell(p.row, p.col).value = { formula: `IFERROR(${p.numerator}/${postRef},0)`, result: p.result }
+    else ws.getCell(p.row, p.col).value = p.result
+  }
 
   // ---- Definitions ----
   setSectionHeader(r, 'DEFINITIONS')
