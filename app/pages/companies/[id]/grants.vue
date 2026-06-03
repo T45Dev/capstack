@@ -67,6 +67,10 @@ const { data: vestingSchedules } = await useFetch<VestingSchedule[]>(() => `/api
 // values are typed in. Pool Impact page uses the same logic; both
 // pages MUST agree on Authorized or the headline stats diverge.
 const { data: roundSummary } = await useFetch<{ rounds: any[] }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
+// Pool "ideas" (anonymous future grants/reserves from the Pool Impact page).
+// Surfaced as read-only rows in the Proposed table, flagged "Idea", so the
+// operator sees modeled-but-not-yet-granted equity alongside real proposals.
+const { data: poolEvents } = await useFetch<any[]>(() => `/api/companies/${id.value}/pool-events`, { watch: [id], default: () => [] })
 // Pull cap-table so the toggle's % / $ views have an FDS denominator and a PPS,
 // AND so we can surface each proposed grantee's existing position (common,
 // preferred, outstanding options).
@@ -442,6 +446,34 @@ const sortedOutstanding = computed(() => {
   })
 })
 
+// Pool ideas → proposed-row shape (read-only). Each idea is listed
+// INDIVIDUALLY by its own name (no grouping). Anonymous = no existing
+// position, so pre = 0 and post = the idea's own shares.
+const ideaRows = computed(() => {
+  const postDenom = postFDS.value
+  const ppsPost   = postPPS.value
+  return (poolEvents.value || [])
+    .filter(ie => ie.type === 'grant' || ie.type === 'reserve')
+    .map(ie => {
+      const newShares = ie.shares || 0
+      return {
+        id: `idea:${ie.id}`,
+        isIdea: true,
+        status: 'proposed',
+        recipient_name: ie.name || 'Idea',
+        award_type: ie.kind || null,
+        quantity: newShares,
+        strike: null, issue_date: null, vesting_start: null, vesting_schedule_name: null, notes: ie.notes || null,
+        existing_options: 0, existing_common: 0, existing_pref: 0, existing_cn: 0, existing_total: 0,
+        prop_pre_shares: 0, prop_new_shares: newShares, prop_post_shares: newShares,
+        prop_pre_pct: 0,
+        prop_new_pct:  postDenom > 0 ? newShares / postDenom : 0,
+        prop_post_pct: postDenom > 0 ? newShares / postDenom : 0,
+        prop_pre_value: 0, prop_new_value: newShares * ppsPost, prop_post_value: newShares * ppsPost,
+      }
+    })
+})
+
 const sortedProposed = computed(() => {
   // All ownership %s denominate against postFDS (see sortedOutstanding).
   const postDenom = postFDS.value
@@ -472,7 +504,7 @@ const sortedProposed = computed(() => {
   })
   const k = proposedTable.sort.key
   const sign = proposedTable.sort.dir === 'asc' ? 1 : -1
-  return [...rows].sort((a, b) => {
+  return [...rows, ...ideaRows.value].sort((a, b) => {
     const av = (a as any)[k], bv = (b as any)[k]
     if (av == null && bv == null) return 0
     if (av == null) return 1
@@ -503,7 +535,12 @@ const editingId = ref<string | null>(null)
 const adding = ref(false)
 const saving = ref(false)
 
+// Pool-idea rows are read-only here (they live on the Pool Impact page);
+// their synthetic id is prefixed "idea:". Guard every mutating action.
+function isIdeaRow(g: { id: string }) { return String(g.id).startsWith('idea:') }
+
 function startEdit(g: Grant) {
+  if (isIdeaRow(g)) return
   adding.value = false
   editingId.value = g.id
 }
@@ -543,7 +580,7 @@ async function quickPatch(g: Grant, patch: Record<string, any>) {
 const noteEditId = ref<string | null>(null)
 const noteDraft = ref('')
 function startNoteEdit(g: Grant) {
-  if (editingId.value === g.id) return
+  if (isIdeaRow(g) || editingId.value === g.id) return
   noteEditId.value = g.id
   noteDraft.value = g.notes || ''
 }
@@ -557,7 +594,7 @@ async function commitNote(g: Grant) {
 // --- inline Vesting-date cell ---
 const vestEditId = ref<string | null>(null)
 function startVestEdit(g: Grant) {
-  if (editingId.value === g.id) return
+  if (isIdeaRow(g) || editingId.value === g.id) return
   vestEditId.value = g.id
 }
 async function commitVest(g: Grant, raw: string) {
@@ -613,6 +650,7 @@ async function cancel(g: Grant) {
 }
 
 async function promote(g: Grant) {
+  if (isIdeaRow(g)) return
   await $fetch(`/api/grants/${g.id}`, { method: 'PATCH', body: { status: 'outstanding' } })
   await refresh()
 }
@@ -624,6 +662,7 @@ async function demote(g: Grant) {
 }
 
 async function destroy(g: Grant) {
+  if (isIdeaRow(g)) return
   if (!confirm(`Permanently delete grant for ${g.recipient_name}? (history will not be retained)`)) return
   await $fetch(`/api/grants/${g.id}`, { method: 'DELETE' })
   await refresh()
@@ -919,12 +958,12 @@ const fieldLabels: Record<string, string> = {
               <tr v-else class="group">
                 <template v-for="c in outstandingVisibleCols" :key="c.key">
                   <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-brand-50/40" :title="g.recipient_name">
-                    <span>{{ g.recipient_name }}</span>
                     <span
                       v-if="g.award_type"
-                      class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle"
+                      class="mr-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle"
                       :class="awardTypeClass(g.award_type)"
                     >{{ g.award_type }}</span>
+                    <span>{{ g.recipient_name }}</span>
                     <span v-if="!g.linked_stakeholder" class="ml-1 text-[9px] uppercase tracking-wide text-amber-700">unlinked</span>
                   </td>
                   <td v-else-if="c.key === 'strike'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">{{ fmtPricePerShare(g.strike) }}</td>
@@ -962,7 +1001,7 @@ const fieldLabels: Record<string, string> = {
       </div>
 
       <div class="min-w-0" :style="secondStyle">
-      <UiCard :title="`Proposed (${proposed.length})`" subtitle="Draft grants — promote to make them live" :padded="false">
+      <UiCard :title="`Proposed (${proposed.length})${ideaRows.length ? ` · ${ideaRows.length} idea${ideaRows.length === 1 ? '' : 's'}` : ''}`" subtitle="Draft grants — promote to make them live. Pool ideas appear here flagged “Idea”." :padded="false">
         <template #header>
           <TableUnitsToggle storage-key="capstack:grants:proposed:units" />
           <button
@@ -986,7 +1025,7 @@ const fieldLabels: Record<string, string> = {
             </div>
           </details>
         </template>
-        <div v-if="!proposed.length && !adding" class="text-sm text-ink-500 px-4 py-6 text-center">No proposed grants. Click "Propose grant" to draft one.</div>
+        <div v-if="!proposed.length && !ideaRows.length && !adding" class="text-sm text-ink-500 px-4 py-6 text-center">No proposed grants. Click "Propose grant" to draft one.</div>
         <div v-else class="overflow-x-auto table-scroll table-sticky-head">
           <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
@@ -1031,12 +1070,16 @@ const fieldLabels: Record<string, string> = {
               <tr v-else class="group">
                 <template v-for="c in proposedVisibleCols" :key="c.key">
                   <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-brand-50/40" :title="g.recipient_name">
-                    <span>{{ g.recipient_name }}</span>
                     <span
                       v-if="g.award_type"
-                      class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle"
+                      class="mr-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle"
                       :class="awardTypeClass(g.award_type)"
                     >{{ g.award_type }}</span>
+                    <span
+                      v-if="g.isIdea"
+                      class="mr-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle border-amber-300 bg-amber-50 text-amber-700"
+                    >Idea</span>
+                    <span>{{ g.recipient_name }}</span>
                   </td>
                   <td v-else-if="c.key === 'existing_options'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">
                     <span v-if="g.existing_options">{{ fmtShares(g.existing_options) }}</span>
@@ -1075,8 +1118,9 @@ const fieldLabels: Record<string, string> = {
                     <span v-else class="text-ink-400">—</span>
                   </td>
                   <td v-else-if="c.key === 'vesting_start'" class="px-2 py-1 text-ink-600 border-b border-ink-200 group-hover:bg-brand-50/40">
+                    <span v-if="g.isIdea" class="text-ink-400">—</span>
                     <input
-                      v-if="vestEditId === g.id"
+                      v-else-if="vestEditId === g.id"
                       type="date"
                       :value="g.vesting_start || ''"
                       class="w-full bg-white border border-brand-300 rounded px-1.5 py-1 text-[12px] num focus:outline-none focus:ring-1 focus:ring-brand-500"
@@ -1091,8 +1135,9 @@ const fieldLabels: Record<string, string> = {
                     </button>
                   </td>
                   <td v-else-if="c.key === 'notes'" class="px-2 py-1 text-ink-600 border-b border-ink-200 group-hover:bg-brand-50/40">
+                    <span v-if="g.isIdea" class="truncate" :title="g.notes || ''">{{ g.notes || '—' }}</span>
                     <input
-                      v-if="noteEditId === g.id"
+                      v-else-if="noteEditId === g.id"
                       v-model="noteDraft"
                       type="text"
                       class="w-full bg-white border border-brand-300 rounded px-1.5 py-1 text-[12px] focus:outline-none focus:ring-1 focus:ring-brand-500"
@@ -1107,9 +1152,12 @@ const fieldLabels: Record<string, string> = {
                     </button>
                   </td>
                   <td v-else-if="c.key === 'actions'" class="px-2 py-1 text-right border-b border-ink-200 whitespace-nowrap group-hover:bg-brand-50/40">
-                    <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded" @click="startEdit(g)" title="Edit"><Edit3 :size="13" /></button>
-                    <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded" @click="promote(g)" title="Promote to outstanding"><ArrowUpCircle :size="13" /></button>
-                    <button class="text-ink-500 hover:text-red-600 px-1 py-0.5 rounded" @click="destroy(g)" title="Delete"><Trash2 :size="13" /></button>
+                    <template v-if="!g.isIdea">
+                      <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded" @click="startEdit(g)" title="Edit"><Edit3 :size="13" /></button>
+                      <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded" @click="promote(g)" title="Promote to outstanding"><ArrowUpCircle :size="13" /></button>
+                      <button class="text-ink-500 hover:text-red-600 px-1 py-0.5 rounded" @click="destroy(g)" title="Delete"><Trash2 :size="13" /></button>
+                    </template>
+                    <NuxtLink v-else :to="`/companies/${id}/pool`" class="text-[10px] text-amber-700 hover:underline" title="Pool idea — manage on Option Pool Impact">on Pool ↗</NuxtLink>
                   </td>
                 </template>
               </tr>

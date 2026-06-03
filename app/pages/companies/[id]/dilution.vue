@@ -263,13 +263,16 @@ const rows = computed<DilRow[]>(() => {
         avgEntryPPS: null,
       })
     }
-    // Idea grants → single synthetic row, anonymous bucket.
-    if (ideaConsumingShares.value > 0) {
-      const shares = ideaConsumingShares.value
+    // Idea grants/reserves → one row each, listed individually by name
+    // (no longer rolled into a single "Future ideas" bucket).
+    for (const ie of (ideas.value || [])) {
+      if (ie.type !== 'grant' && ie.type !== 'reserve') continue
+      const shares = ie.shares || 0
+      if (shares <= 0) continue
       const postValue = shares * sharePrice
       out.push({
-        stakeholderId: 'ideas:aggregate',
-        name: `Future ideas (${ideaCount.value})`,
+        stakeholderId: `idea:${ie.id}`,
+        name: ie.name || 'Idea',
         type: 'idea',
         preShares: 0,
         postShares: shares,
