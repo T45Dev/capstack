@@ -119,26 +119,7 @@ const proposedByStakeholder = computed(() => {
 })
 
 // Idea grants/reserves total. pool_events doesn't carry a stakeholder
-// link so we aggregate everything into one synthetic row labeled
-// "Future ideas (N)".
-const ideaConsumingShares = computed(() => {
-  return (ideas.value || []).reduce((sum, ie) => {
-    if (ie.type === 'grant' || ie.type === 'reserve') return sum + (ie.shares || 0)
-    return sum
-  }, 0)
-})
-const ideaCount = computed(() =>
-  (ideas.value || []).filter((ie: any) => ie.type === 'grant' || ie.type === 'reserve').length,
-)
-
-// Total proposed shares — for the header chip and per-stakeholder
-// numerator augmentation when the toggle is on. These do NOT grow the
-// denominator (they draw from pool capacity already in total_shares_fds).
-const proposedTotal = computed(() => {
-  let total = 0
-  for (const p of proposedByStakeholder.value.values()) total += p.shares
-  return total
-})
+// link so each idea is emitted as its own row (listed by name) below.
 // PRE FDS = the Previous-Round aggregate's Total FDS (everything before
 // the open round). Matches PreviousRoundCard.
 const preFDS = computed(() => aggregate.value?.total_shares_fds || 0)
@@ -429,9 +410,6 @@ async function onImported() {
           <label class="inline-flex items-center gap-2 cursor-pointer select-none text-xs text-ink-700 bg-white border border-ink-300 rounded-md px-3 py-1.5 hover:border-ink-400">
             <input type="checkbox" v-model="includeFuture" class="brand-brand-500" />
             <span>Include proposed + ideas in post</span>
-            <span class="text-[10px] text-ink-400 num">
-              ({{ fmtShares(proposedTotal) }} prop · {{ fmtShares(ideaConsumingShares) }} ideas)
-            </span>
           </label>
         </div>
       </div>

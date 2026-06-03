@@ -1001,7 +1001,7 @@ const fieldLabels: Record<string, string> = {
       </div>
 
       <div class="min-w-0" :style="secondStyle">
-      <UiCard :title="`Proposed (${proposed.length})${ideaRows.length ? ` · ${ideaRows.length} idea${ideaRows.length === 1 ? '' : 's'}` : ''}`" subtitle="Draft grants — promote to make them live. Pool ideas appear here flagged “Idea”." :padded="false">
+      <UiCard title="Proposed" subtitle="Draft grants — promote to make them live. Pool ideas appear here flagged “Idea”." :padded="false">
         <template #header>
           <TableUnitsToggle storage-key="capstack:grants:proposed:units" />
           <button
