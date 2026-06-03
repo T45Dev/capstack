@@ -10,6 +10,7 @@
 // cell, and the API auto-creates the stakeholder.
 import { Trash2, Plus, AlertTriangle } from 'lucide-vue-next'
 import { fmtUSD, fmtShares, fmtPricePerShare } from '~/utils/format'
+import { calcSum } from '~/utils/calc'
 
 const props = defineProps<{ companyId: string }>()
 const emit = defineEmits<{ refreshed: [] }>()
@@ -224,6 +225,27 @@ function sumDeltaClass(delta: number, newMoney: number): string {
   if (Math.abs(delta) < 1) return 'text-ok'
   return 'text-warn'
 }
+
+// Calc-tooltip strings — actual numbers behind each derived cell.
+function fCnTotal(inv: MatrixInvestor): string | null {
+  const cn = cnFor(inv.id)
+  if (!cn?.total) return null
+  return calcSum([['Principal', cn.principal || 0], ['Accrued', cn.accrued || 0]], fmtUSD)
+}
+function fTotalShares(inv: MatrixInvestor): string | null {
+  const parts: Array<[string, number]> = []
+  for (const r of data.value?.rounds || []) {
+    const s = cellShares(r.id, inv.id)
+    if (s > 0) parts.push([r.name || r.code, s])
+  }
+  return parts.length ? calcSum(parts) : null
+}
+function fRoundReconcile(r: MatrixRound): string {
+  const alloc = data.value?.sums[r.id]?.allocated_shares ?? 0
+  const exp = r.preferred_issued || 0
+  const d = data.value?.sums[r.id]?.delta_shares ?? 0
+  return `Allocated ${fmtShares(alloc)} − expects ${fmtShares(exp)} = ${fmtShares(d)}`
+}
 </script>
 
 <template>
@@ -333,9 +355,8 @@ function sumDeltaClass(delta: number, newMoney: number): string {
                  same row. -->
             <td class="px-3 py-1.5 text-right bg-amber-50/30">
               <template v-if="cnFor(inv.id)?.total">
-                <div class="text-[13px] num font-medium text-amber-800"
-                  :title="`${cnFor(inv.id)?.notes ?? 0} note${(cnFor(inv.id)?.notes ?? 0) === 1 ? '' : 's'} · principal ${fmtUSD(cnFor(inv.id)?.principal ?? 0)} + accrued ${fmtUSD(cnFor(inv.id)?.accrued ?? 0)}`">
-                  {{ fmtUSD(cnFor(inv.id)?.total ?? 0) }}
+                <div class="text-[13px] num font-medium text-amber-800">
+                  <UiCalcTip :formula="fCnTotal(inv)">{{ fmtUSD(cnFor(inv.id)?.total ?? 0) }}</UiCalcTip>
                 </div>
                 <div v-if="(cnFor(inv.id)?.notes ?? 0) > 1" class="text-[10px] text-amber-600 mt-0.5">{{ cnFor(inv.id)?.notes }} notes</div>
               </template>
@@ -343,7 +364,7 @@ function sumDeltaClass(delta: number, newMoney: number): string {
             </td>
             <td class="px-3 py-1.5 text-right text-[13px]">
               <template v-if="totalSharesForInvestor(inv) > 0">
-                <div class="num font-semibold text-ink-900">{{ fmtShares(totalSharesForInvestor(inv)) }}</div>
+                <div class="num font-semibold text-ink-900"><UiCalcTip :formula="fTotalShares(inv)">{{ fmtShares(totalSharesForInvestor(inv)) }}</UiCalcTip></div>
               </template>
               <template v-else-if="cnFor(inv.id)?.total">
                 <span class="text-[11px] text-amber-700 italic">CN only</span>
@@ -414,7 +435,7 @@ function sumDeltaClass(delta: number, newMoney: number): string {
               class="px-3 py-2 text-right font-semibold text-[13px]"
               :class="[r.kind === 'open' ? 'bg-brand-soft/30' : '', sumDeltaClass(data.sums[r.id]?.delta_shares ?? 0, r.preferred_issued)]"
             >
-              {{ fmtShares(data.sums[r.id]?.allocated_shares ?? 0) }}
+              <UiCalcTip :formula="fRoundReconcile(r)">{{ fmtShares(data.sums[r.id]?.allocated_shares ?? 0) }}</UiCalcTip>
             </td>
             <!-- CN column stays in $ — convertible notes are paper
                  money that hasn't converted to shares yet. -->
@@ -443,11 +464,13 @@ function sumDeltaClass(delta: number, newMoney: number): string {
               class="px-3 py-1.5 text-right"
               :class="[r.kind === 'open' ? 'bg-brand-soft/20' : '', sumDeltaClass(data.sums[r.id]?.delta_shares ?? 0, r.preferred_issued)]"
             >
-              <span v-if="Math.abs(data.sums[r.id]?.delta_shares ?? 0) < 1">✓ reconciled</span>
-              <span v-else class="inline-flex items-center gap-1">
-                <AlertTriangle :size="10" />
-                {{ fmtShares(data.sums[r.id]?.delta_shares ?? 0) }} sh
-              </span>
+              <UiCalcTip :formula="fRoundReconcile(r)">
+                <span v-if="Math.abs(data.sums[r.id]?.delta_shares ?? 0) < 1">✓ reconciled</span>
+                <span v-else class="inline-flex items-center gap-1">
+                  <AlertTriangle :size="10" />
+                  {{ fmtShares(data.sums[r.id]?.delta_shares ?? 0) }} sh
+                </span>
+              </UiCalcTip>
             </td>
             <td class="px-3 py-1.5 bg-amber-50/20"></td>
             <td colspan="2"></td>

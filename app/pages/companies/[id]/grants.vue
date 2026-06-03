@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle, UploadCloud, AlertTriangle, CheckCircle2, X } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtDate, fmtPricePerShare, normalizeDate } from '~/utils/format'
+import { calcSum } from '~/utils/calc'
 
 // Badge color per explicit award type (ISO/NSO/RSU). Blank → no badge.
 function awardTypeClass(t: string | null | undefined): string {
@@ -240,6 +241,12 @@ const poolAuthorized = computed(() => {
 const outOfPool = computed(() => totalOutstanding.value + totalExercised.value)
 const availableShares = computed(() => poolAuthorized.value - outOfPool.value)
 const futureAvailable = computed(() => availableShares.value - totalProposed.value)
+
+// Calc-tooltip strings for the pool summary stats.
+const fOutOfPool = computed(() => calcSum([['Active grants', totalOutstanding.value], ['Exercised', totalExercised.value]]))
+const fAvailable = computed(() => `Authorized ${fmtShares(poolAuthorized.value)} − outstanding ${fmtShares(outOfPool.value)} = ${fmtShares(availableShares.value)}`)
+const fFutureAvailable = computed(() => `Available ${fmtShares(availableShares.value)} − proposed ${fmtShares(totalProposed.value)} = ${fmtShares(futureAvailable.value)}`)
+const fForfExp = computed(() => calcSum([['Forfeited', totalForfeited.value], ['Expired', totalExpired.value]]))
 // Kept for the FDS denominator below (its old semantic: Authorized minus
 // everything carved-out, including proposed). Same value as futureAvailable.
 const poolAvailable = futureAvailable
@@ -808,19 +815,14 @@ const fieldLabels: Record<string, string> = {
           >{{ fmtShares(poolAuthorized) }}</span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">−</span>
-        <div
-          class="flex flex-col items-start"
-          :title="totalExercised > 0
-            ? `Active grants ${fmtShares(totalOutstanding)} + Exercised options ${fmtShares(totalExercised)} — both out of the pool (exercised converted to Common stock).`
-            : ''"
-        >
+        <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Outstanding</span>
-          <span class="text-2xl font-semibold">{{ fmtShares(outOfPool) }}</span>
+          <span class="text-2xl font-semibold"><UiCalcTip :formula="fOutOfPool">{{ fmtShares(outOfPool) }}</UiCalcTip></span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">=</span>
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Available</span>
-          <span class="text-2xl font-semibold" :class="availableShares < 0 ? 'text-red-700' : 'text-ok'">{{ fmtShares(availableShares) }}</span>
+          <span class="text-2xl font-semibold" :class="availableShares < 0 ? 'text-red-700' : 'text-ok'"><UiCalcTip :formula="fAvailable">{{ fmtShares(availableShares) }}</UiCalcTip></span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">−</span>
         <div class="flex flex-col items-start">
@@ -830,7 +832,7 @@ const fieldLabels: Record<string, string> = {
         <span class="text-2xl text-ink-400 pb-1">=</span>
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Future Available</span>
-          <span class="text-2xl font-semibold" :class="futureAvailable < 0 ? 'text-red-700' : 'text-ok'">{{ fmtShares(futureAvailable) }}</span>
+          <span class="text-2xl font-semibold" :class="futureAvailable < 0 ? 'text-red-700' : 'text-ok'"><UiCalcTip :formula="fFutureAvailable">{{ fmtShares(futureAvailable) }}</UiCalcTip></span>
         </div>
       </div>
       <!-- Lifetime decomposition. Where every option ever issued is
@@ -851,9 +853,9 @@ const fieldLabels: Record<string, string> = {
           <span class="text-ink-500" title="Exercised → Common Stock (left the pool entirely)">Exercised</span>
           <span class="font-medium" :class="totalExercised > 0 ? 'text-brand-700' : 'text-ink-400'">{{ fmtShares(totalExercised) }}</span>
         </div>
-        <div class="flex items-end gap-1.5" :title="`Forfeited (unvested at termination) ${fmtShares(totalForfeited)} + Expired (vested but unexercised) ${fmtShares(totalExpired)} — both returned to Available`">
+        <div class="flex items-end gap-1.5">
           <span class="text-ink-500">Forfeited/Expired</span>
-          <span class="font-medium" :class="totalForfeitedOrExpired > 0 ? 'text-red-700' : 'text-ink-400'">{{ fmtShares(totalForfeitedOrExpired) }}</span>
+          <span class="font-medium" :class="totalForfeitedOrExpired > 0 ? 'text-red-700' : 'text-ink-400'"><UiCalcTip :formula="fForfExp">{{ fmtShares(totalForfeitedOrExpired) }}</UiCalcTip></span>
         </div>
       </div>
     </div>

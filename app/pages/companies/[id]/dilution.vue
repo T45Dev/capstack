@@ -26,6 +26,7 @@
 // ideas draw from pool capacity already inside postFDS).
 import { ArrowUp, ArrowDown, Upload } from 'lucide-vue-next'
 import { fmtUSD, fmtPct, fmtShares } from '~/utils/format'
+import { calcPct, calcValueUSD, calcSum } from '~/utils/calc'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -351,6 +352,27 @@ function fmtDeltaUSD(n: number): string {
   return (n > 0 ? '+' : '') + fmtUSD(n)
 }
 
+// Calc-tooltip strings — the raw arithmetic with this row's actual numbers.
+const fPostFDS = computed<string | null>(() => {
+  const r = currentRound.value
+  if (!r) return null
+  const base = aggregate.value?.total_shares_fds || 0
+  const issued = (r.new_money && r.share_price) ? Math.floor(r.new_money / r.share_price) : 0
+  return calcSum([
+    ['Prior FDS', base],
+    ['New preferred', issued],
+    ['Option pool', r.option_pool_issued || 0],
+    ['Notes converted', r.notes_converted || 0],
+  ])
+})
+const fPreRow = (r: DilRow) => calcPct(r.preShares, preFDS.value)
+const fPostRow = (r: DilRow) => calcPct(r.postShares, postFDS.value)
+const fDeltaPctRow = (r: DilRow) => `${fmtPct(r.postPct, 2)} − ${fmtPct(r.prePct, 2)} = ${fmtDeltaPct(r.deltaPct)}`
+const fDeltaSharesRow = (r: DilRow) => `${fmtShares(r.postShares)} − ${fmtShares(r.preShares)} = ${fmtDeltaShares(r.deltaShares)}`
+const fPreVal = (r: DilRow) => calcValueUSD(r.preShares, pps.value)
+const fPostVal = (r: DilRow) => calcValueUSD(r.postShares, pps.value)
+const fDeltaValRow = (r: DilRow) => `${fmtUSD(r.postValue)} − ${fmtUSD(r.preValue)} = ${fmtDeltaUSD(r.deltaValue)}`
+
 // ---- Import modal for preferred shareholders ----
 const importOpen = ref(false)
 async function onImported() {
@@ -418,7 +440,7 @@ async function onImported() {
         <span class="text-ink-300">·</span>
         <span>
           <span class="uppercase tracking-wider">Post FDS</span>
-          <span class="ml-1 text-ink-700">{{ fmtShares(postFDS) }}</span>
+          <span class="ml-1 text-ink-700"><UiCalcTip :formula="fPostFDS">{{ fmtShares(postFDS) }}</UiCalcTip></span>
           <span class="ml-0.5 text-ink-400">({{ currentRoundName }})</span>
         </span>
         <span v-if="pps > 0" class="text-ink-300">·</span>
@@ -491,12 +513,12 @@ async function onImported() {
               <!-- ---- Shares group ---- -->
               <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200">{{ fmtShares(r.preShares) }}</td>
               <td class="px-3 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200">{{ fmtShares(r.postShares) }}</td>
-              <td class="px-3 py-1.5 text-right font-semibold border-b border-ink-200" :class="deltaColor(r.deltaShares)">{{ fmtDeltaShares(r.deltaShares) }}</td>
+              <td class="px-3 py-1.5 text-right font-semibold border-b border-ink-200" :class="deltaColor(r.deltaShares)"><UiCalcTip :formula="fDeltaSharesRow(r)">{{ fmtDeltaShares(r.deltaShares) }}</UiCalcTip></td>
 
               <!-- ---- Ownership % group ---- -->
-              <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200">{{ fmtPct(r.prePct, 2) }}</td>
-              <td class="px-3 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200">{{ fmtPct(r.postPct, 2) }}</td>
-              <td class="px-3 py-1.5 text-right font-semibold border-b border-ink-200" :class="deltaColor(r.deltaPct)">{{ fmtDeltaPct(r.deltaPct) }}</td>
+              <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200"><UiCalcTip :formula="fPreRow(r)">{{ fmtPct(r.prePct, 2) }}</UiCalcTip></td>
+              <td class="px-3 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200"><UiCalcTip :formula="fPostRow(r)">{{ fmtPct(r.postPct, 2) }}</UiCalcTip></td>
+              <td class="px-3 py-1.5 text-right font-semibold border-b border-ink-200" :class="deltaColor(r.deltaPct)"><UiCalcTip :formula="fDeltaPctRow(r)">{{ fmtDeltaPct(r.deltaPct) }}</UiCalcTip></td>
 
               <!-- ---- Cost-basis (Invested $) ---- -->
               <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200"
@@ -505,9 +527,9 @@ async function onImported() {
               </td>
 
               <!-- ---- Value ($) group ---- -->
-              <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200">{{ pps > 0 ? fmtUSD(r.preValue) : '—' }}</td>
-              <td class="px-3 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200">{{ pps > 0 ? fmtUSD(r.postValue) : '—' }}</td>
-              <td class="px-3 py-1.5 text-right font-semibold border-b border-ink-200" :class="deltaColor(r.deltaValue)">{{ pps > 0 ? fmtDeltaUSD(r.deltaValue) : '—' }}</td>
+              <td class="px-3 py-1.5 text-right text-ink-700 border-l border-b border-ink-200"><UiCalcTip :formula="pps > 0 ? fPreVal(r) : null">{{ pps > 0 ? fmtUSD(r.preValue) : '—' }}</UiCalcTip></td>
+              <td class="px-3 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200"><UiCalcTip :formula="pps > 0 ? fPostVal(r) : null">{{ pps > 0 ? fmtUSD(r.postValue) : '—' }}</UiCalcTip></td>
+              <td class="px-3 py-1.5 text-right font-semibold border-b border-ink-200" :class="deltaColor(r.deltaValue)"><UiCalcTip :formula="pps > 0 ? fDeltaValRow(r) : null">{{ pps > 0 ? fmtDeltaUSD(r.deltaValue) : '—' }}</UiCalcTip></td>
             </tr>
           </tbody>
         </table>

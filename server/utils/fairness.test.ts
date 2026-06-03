@@ -78,6 +78,8 @@ describe('buildFairness', () => {
   it('computes entry %, current pre/post vs the open round, and $ value', () => {
     const res = buildFairness(rounds, base, {})
     expect(res.selectedRoundCode).toBe('R3')
+    expect(res.selectedPreFDS).toBe(2_000_000)
+    expect(res.selectedPostFDS).toBe(4_000_000)
     expect(res.currentPPS).toBe(2)
 
     const a = res.holders.find(h => h.name === 'A')!
