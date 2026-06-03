@@ -21,7 +21,7 @@ const { data: grantsData, refresh: refreshGrants } = await useFetch(() => `/api/
 const { data: ideas, refresh: refreshIdeas } = await useFetch<any[]>(() => `/api/companies/${id.value}/pool-events`, { watch: [id], default: () => [] })
 // Round-summary supplies per-round option_pool_issued + close_date, which
 // is what drives the chronological pool top-up events on the timeline.
-const { data: roundSummary } = await useFetch<{ rounds: Array<{ round_id: string; code: string; name: string | null; close_date: string | null; option_pool_issued: number }> }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
+const { data: roundSummary } = await useFetch<{ rounds: Array<{ round_id: string; code: string; name: string | null; kind: 'formation' | 'closed' | 'open'; close_date: string | null; option_pool_issued: number; total_shares_fds: number }> }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
 
 // Visuals (pie + line graph) are collapsible — they eat vertical space
 // on smaller screens so the operator wants the option to fold them
@@ -57,6 +57,23 @@ const fdsIncludingPool = computed(() => {
   const outstanding = (capTable.value.grants || []).filter((g: any) => g.status === 'outstanding').reduce((a: number, g: any) => a + g.quantity, 0)
   const poolAuthorized = (grantsData.value?.pools || []).reduce((a: number, p: any) => a + (p.authorized || 0), 0)
   return heldShares + outstanding + poolAuthorized
+})
+
+// Denominator for the idea's %-of-FDS conversion. Use the modeled fully
+// diluted total from the financings model — the last round's cumulative
+// total_shares_fds (open round sorts last) — so an idea's % matches the FDS
+// shown on Financings / Dilution / Fairness. fdsIncludingPool only counts
+// cap-table actuals (held + outstanding + authorized pool) and excludes the
+// modeled financing shares (new preferred + notes converted), which made the
+// idea's share count read low. Falls back to the actuals when no rounds exist.
+const modeledFDS = computed(() => {
+  const rounds = roundSummary.value?.rounds || []
+  if (rounds.length) {
+    const open = rounds.find(r => r.kind === 'open')
+    const basis = open ?? rounds[rounds.length - 1]
+    if (basis && basis.total_shares_fds > 0) return basis.total_shares_fds
+  }
+  return fdsIncludingPool.value
 })
 
 // ---- Build the unified timeline ----
@@ -451,20 +468,20 @@ const IDEA_SUBTYPES: Array<{ value: EventType; label: string; hint: string }> = 
 //   pct    = shares/fds  = value / (pps × fds)
 //   value  = shares × pps = pct × pps × fds
 function syncFromShares() {
-  const fds = fdsIncludingPool.value
+  const fds = modeledFDS.value
   const pps = currentPPS.value
   form.pct = fds > 0 ? form.shares / fds : 0
   form.value = pps > 0 ? form.shares * pps : 0
 }
 function syncFromPct() {
-  const fds = fdsIncludingPool.value
+  const fds = modeledFDS.value
   const pps = currentPPS.value
   form.shares = Math.round(form.pct * fds)
   form.value = pps > 0 ? form.shares * pps : 0
 }
 function syncFromValue() {
   const pps = currentPPS.value
-  const fds = fdsIncludingPool.value
+  const fds = modeledFDS.value
   form.shares = pps > 0 ? Math.round(form.value / pps) : 0
   form.pct = fds > 0 ? form.shares / fds : 0
 }
@@ -1129,7 +1146,7 @@ const chart = computed(() => {
                 <NumberInput v-model="form.value" prefix="$" :digits="0" :disabled="inputMode !== 'value'" />
               </label>
             </div>
-            <p class="mt-1.5 text-[10px] text-ink-500">% denominator: current FDS incl. pool ({{ fmtShares(fdsIncludingPool) }}). $ uses current PPS ({{ fmtUSD(currentPPS) }}).</p>
+            <p class="mt-1.5 text-[10px] text-ink-500">% denominator: modeled fully diluted ({{ fmtShares(modeledFDS) }}). $ uses current PPS ({{ fmtUSD(currentPPS) }}).</p>
           </div>
 
           <template v-if="form.type === 'grant'">
