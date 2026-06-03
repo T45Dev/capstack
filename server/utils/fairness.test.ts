@@ -175,6 +175,19 @@ describe('buildFairness', () => {
     expect(res.holders.find(h => h.name === 'Single')!.initialShares).toBe(8_000) // fallback
   })
 
+  it('defaults editKind/editId to the stakeholder, and preserves overrides', () => {
+    const res = buildFairness(rounds, [
+      H({ name: 'Emp', stakeholderId: 'st1', optionShares: 1000, firstGrantDate: '2023-02-01' }),
+      H({ name: 'Idea', stakeholderId: null, proposedShares: 2000, source: 'idea', editKind: 'idea', editId: 'pe9' }),
+    ], { includeFuture: true })
+    const emp = res.holders.find(h => h.name === 'Emp')!
+    expect(emp.editKind).toBe('stakeholder')
+    expect(emp.editId).toBe('st1')
+    const idea = res.holders.find(h => h.name === 'Idea')!
+    expect(idea.editKind).toBe('idea')
+    expect(idea.editId).toBe('pe9')
+  })
+
   it('does not flag holders without a level', () => {
     const res = buildFairness(rounds, [H({ name: 'NL', optionShares: 1000, firstGrantDate: '2023-02-01' })], {})
     expect(res.holders[0].flag).toBe('na')

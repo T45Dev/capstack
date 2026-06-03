@@ -87,25 +87,27 @@ export default defineEventHandler(async (event) => {
   // the recipient + award type too, so proposed-only people (not already
   // holding an outstanding grant) can be surfaced as their own rows.
   const proposedBy = new Map<string, number>()
-  const proposedDetail = new Map<string, { stakeholderId: string | null; name: string; kinds: Set<string> }>()
-  for (const row of db().prepare(`SELECT stakeholder_id, recipient_name, award_type, quantity FROM grants WHERE company_id = ? AND status = 'proposed'`).all(id) as any[]) {
+  const proposedDetail = new Map<string, { stakeholderId: string | null; grantId: string; name: string; kinds: Set<string>; jobTitle: string | null; jobLevel: string | null }>()
+  for (const row of db().prepare(`SELECT id, stakeholder_id, recipient_name, award_type, quantity, job_title, job_level FROM grants WHERE company_id = ? AND status = 'proposed'`).all(id) as any[]) {
     const key = keyOf(row.stakeholder_id, row.recipient_name)
     proposedBy.set(key, (proposedBy.get(key) || 0) + (row.quantity || 0))
     let d = proposedDetail.get(key)
-    if (!d) { d = { stakeholderId: row.stakeholder_id || null, name: row.recipient_name || 'Proposed grant', kinds: new Set() }; proposedDetail.set(key, d) }
+    if (!d) { d = { stakeholderId: row.stakeholder_id || null, grantId: row.id, name: row.recipient_name || 'Proposed grant', kinds: new Set(), jobTitle: row.job_title || null, jobLevel: row.job_level || null }; proposedDetail.set(key, d) }
     if (row.award_type) { const t = classifyAwardType(row.award_type); if (t) d.kinds.add(t) }
+    if (!d.jobLevel && row.job_level) d.jobLevel = row.job_level
+    if (!d.jobTitle && row.job_title) d.jobTitle = row.job_title
   }
 
   // Pool ideas (anonymous future grants/reserves) — kept individually so each
   // is its own row, plus an aggregate for the methodology note.
   let ideasShares = 0
-  const ideaList: Array<{ name: string; shares: number; kind: string | null; title: string | null; level: string | null }> = []
+  const ideaList: Array<{ id: string; name: string; shares: number; kind: string | null; title: string | null; level: string | null }> = []
   try {
     const ideas = await $fetch<any[]>(`/api/companies/${id}/pool-events`)
     for (const ie of (ideas || [])) {
       if (ie.type === 'grant' || ie.type === 'reserve') {
         ideasShares += ie.shares || 0
-        ideaList.push({ name: ie.name || 'Idea', shares: ie.shares || 0, kind: ie.kind || null, title: ie.job_title || null, level: ie.job_level || null })
+        ideaList.push({ id: ie.id, name: ie.name || 'Idea', shares: ie.shares || 0, kind: ie.kind || null, title: ie.job_title || null, level: ie.job_level || null })
       }
     }
   } catch { /* pool-events optional */ }
@@ -140,8 +142,9 @@ export default defineEventHandler(async (event) => {
       holders.push({
         stakeholderId: d.stakeholderId,
         name: meta?.name || d.name,
-        title: meta?.title ?? null,
-        level: meta?.level ?? null,
+        // Linked → use the stakeholder's grade; otherwise the grant's own.
+        title: meta?.title ?? d.jobTitle ?? null,
+        level: meta?.level ?? d.jobLevel ?? null,
         include: meta ? meta.include : true,
         awardTypes: [...d.kinds].sort(),
         optionShares: 0,
@@ -151,6 +154,9 @@ export default defineEventHandler(async (event) => {
         salary: meta?.salary ?? null,
         salaryMidpoint: meta?.salaryMidpoint ?? null,
         source: 'proposed',
+        // Edit on the stakeholder when linked, else on the proposed grant row.
+        editKind: d.stakeholderId ? 'stakeholder' : 'grant',
+        editId: d.stakeholderId ?? d.grantId,
       })
     }
     for (const idea of ideaList) {
@@ -166,6 +172,8 @@ export default defineEventHandler(async (event) => {
         proposedShares: idea.shares,
         firstGrantDate: null,
         source: 'idea',
+        editKind: 'idea',
+        editId: idea.id,
       })
     }
   }
