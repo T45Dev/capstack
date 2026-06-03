@@ -10,7 +10,9 @@
 import { FileDown, Scale, Info } from 'lucide-vue-next'
 import { fmtUSD, fmtPct, fmtShares } from '~/utils/format'
 import { calcPct, calcSum, calcValueUSD } from '~/utils/calc'
-import { buildGradeStats, type RawGrade } from '~/utils/calibration'
+import { buildGradeStats, median, type RawGrade } from '~/utils/calibration'
+
+interface MarketBand { n: number; min: number | null; p25: number | null; med: number | null; p75: number | null; max: number | null }
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -31,6 +33,8 @@ interface Holder {
   source: 'grant' | 'proposed' | 'idea'
   editKind: 'stakeholder' | 'grant' | 'idea'
   editId: string | null
+  benchmarkRole: string | null
+  benchmark: MarketBand | null
   awardTypes: string[]
   optionShares: number
   heldShares: number
@@ -69,6 +73,7 @@ interface FairnessData {
   rounds: Array<{ code: string; name: string; kind: string }>
   levels: Level[]
   holders: Holder[]
+  benchmarkRoles: string[]
   methodology: string
 }
 
@@ -133,7 +138,47 @@ const gradeStats = computed(() => {
 })
 // Shared x-axis max for the range bars (largest grant across all grades).
 const calibMax = computed(() => Math.max(1, ...gradeStats.value.map(g => g.hi)))
-const calX = (v: number) => calibMax.value > 0 ? (v / calibMax.value) * 100 : 0
+const calX = (v: number) => calibMax.value > 0 ? Math.min(100, (v / calibMax.value) * 100) : 0
+
+// Market overlay: aggregate the Thelander band per grade (median of the
+// grade members' role bands), in % of FDS. Market shares = % × post-B FDS.
+const postFDS = computed(() => data.value?.selectedPostFDS || 0)
+const marketByGrade = computed(() => {
+  const m = new Map<string, { p25: number; med: number; p75: number; roles: string[] }>()
+  const byLevel = new Map<string, Holder[]>()
+  for (const h of isoGrants.value) {
+    if (!h.benchmark?.med) continue
+    const arr = byLevel.get(h.level!) || []; arr.push(h); byLevel.set(h.level!, arr)
+  }
+  for (const [level, hs] of byLevel) {
+    m.set(level, {
+      p25: median(hs.map(h => h.benchmark!.p25 ?? h.benchmark!.med!)),
+      med: median(hs.map(h => h.benchmark!.med!)),
+      p75: median(hs.map(h => h.benchmark!.p75 ?? h.benchmark!.med!)),
+      roles: [...new Set(hs.map(h => h.benchmarkRole!).filter(Boolean))],
+    })
+  }
+  return m
+})
+const marketShares = (pct: number) => Math.round(pct * postFDS.value)
+// Where a person's entry % sits vs their role's market band.
+function marketPos(h: Holder): 'under' | 'in' | 'over' | null {
+  if (!h.benchmark?.med) return null
+  const e = calPct(h)
+  if (h.benchmark.p25 != null && e < h.benchmark.p25) return 'under'
+  if (h.benchmark.p75 != null && e > h.benchmark.p75) return 'over'
+  return 'in'
+}
+const posMeta: Record<string, { label: string; cls: string }> = {
+  under: { label: 'Below mkt', cls: 'bg-red-50 text-red-700 border-red-200' },
+  in: { label: 'In band', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  over: { label: 'Above mkt', cls: 'bg-amber-50 text-amber-800 border-amber-300' },
+}
+async function saveBenchmark(h: Holder, value: string) {
+  if (!h.stakeholderId) return
+  await $fetch(`/api/stakeholders/${h.stakeholderId}`, { method: 'PATCH', body: { benchmark_role: value } })
+  await refresh()
+}
 // Per-person ISO detail, grade desc then hire year asc (so drift reads top-down).
 const isoDetail = computed(() => [...isoGrants.value].sort((a, b) => {
   const d = (levelNum(b.level) || 0) - (levelNum(a.level) || 0)
@@ -283,6 +328,7 @@ const tabs = [
             <th class="text-left font-medium px-3 py-2 w-20">Level</th>
             <th class="text-right font-medium px-3 py-2 w-28">Salary</th>
             <th class="text-right font-medium px-3 py-2 w-28">Midpoint</th>
+            <th class="text-left font-medium px-3 py-2 w-48">Market role</th>
             <th class="text-right font-medium px-3 py-2 num">Options</th>
           </tr>
         </thead>
@@ -318,6 +364,17 @@ const tabs = [
             <td class="px-3 py-1.5">
               <input :class="[amberInput, 'text-right']" :value="h.salaryMidpoint ?? ''" :disabled="!h.stakeholderId" placeholder="—" inputmode="numeric"
                      @change="(ev) => saveSalary(h, 'salary_midpoint', (ev.target as HTMLInputElement).value)">
+            </td>
+            <td class="px-3 py-1.5">
+              <select
+                :class="[amberInput, 'pr-1']"
+                :value="h.benchmarkRole || ''"
+                :disabled="!h.stakeholderId"
+                @change="(ev) => saveBenchmark(h, (ev.target as HTMLSelectElement).value)"
+              >
+                <option value="">—</option>
+                <option v-for="r in data.benchmarkRoles" :key="r" :value="r">{{ r }}</option>
+              </select>
             </td>
             <td class="px-3 py-1.5 text-right num text-ink-800">{{ fmtShares(h.optionShares) }}</td>
           </tr>
@@ -517,6 +574,18 @@ const tabs = [
                     :style="{ left: calX(g.med) + '%' }"
                     :title="`median ${fmtShares(g.med)}`"
                   ></div>
+                  <!-- Market overlay (Thelander): faint band P25–P75, diamond at median. -->
+                  <template v-if="marketByGrade.get(g.level)?.med">
+                    <div
+                      class="absolute top-0 h-1.5 rounded-full bg-violet-300/40"
+                      :style="{ left: calX(marketShares(marketByGrade.get(g.level)!.p25)) + '%', width: Math.max(0.5, calX(marketShares(marketByGrade.get(g.level)!.p75)) - calX(marketShares(marketByGrade.get(g.level)!.p25))) + '%' }"
+                    ></div>
+                    <div
+                      class="absolute top-[3px] -translate-x-1/2 w-2 h-2 rotate-45 bg-violet-600"
+                      :style="{ left: calX(marketShares(marketByGrade.get(g.level)!.med)) + '%' }"
+                      :title="`market median ${fmtPct(marketByGrade.get(g.level)!.med, 3)} (${marketByGrade.get(g.level)!.roles.join(', ')})`"
+                    ></div>
+                  </template>
                 </div>
                 <span class="inline-block text-[10px] px-1.5 py-0.5 rounded border shrink-0 w-16 text-center" :class="confMeta[g.confidence].cls">{{ confMeta[g.confidence].label }}</span>
                 <div class="w-36 shrink-0 text-right num text-[11px] text-ink-500">
@@ -527,7 +596,7 @@ const tabs = [
             </div>
             <div class="px-4 pb-3 flex items-center justify-between text-[10px] text-ink-400 num border-t border-ink-100 pt-2">
               <span>0</span>
-              <span class="text-ink-500"><span class="inline-block w-3 h-[3px] bg-brand-700 align-middle"></span> median · <span class="inline-block w-2 h-2 rounded-full bg-ink-400/80 align-middle"></span> grant · <span class="inline-block w-2 h-2 rounded-full bg-red-300/70 align-middle"></span> outlier · dashed = interpolated</span>
+              <span class="text-ink-500"><span class="inline-block w-3 h-[3px] bg-brand-700 align-middle"></span> median · <span class="inline-block w-2 h-2 rounded-full bg-ink-400/80 align-middle"></span> grant · <span class="inline-block w-2 h-2 rotate-45 bg-violet-600 align-middle"></span> market (Thelander) · dashed = interpolated</span>
               <span>{{ fmtShares(calibMax) }}</span>
             </div>
           </UiCard>
@@ -542,6 +611,7 @@ const tabs = [
                   <th class="text-right font-medium px-3 py-2">Median grant</th>
                   <th class="text-right font-medium px-3 py-2">Range</th>
                   <th class="text-right font-medium px-3 py-2">Entry %</th>
+                  <th class="text-right font-medium px-3 py-2">Market %</th>
                   <th class="text-right font-medium px-3 py-2">$ at grant</th>
                   <th class="text-right font-medium px-3 py-2">$ / salary</th>
                 </tr>
@@ -554,6 +624,7 @@ const tabs = [
                   <td class="px-3 py-1.5 text-right text-ink-900 font-medium">{{ fmtShares(g.med) }}</td>
                   <td class="px-3 py-1.5 text-right text-ink-500 text-[12px]">{{ fmtShares(g.lo) }}–{{ fmtShares(g.hi) }}</td>
                   <td class="px-3 py-1.5 text-right text-ink-700">{{ fmtPct(g.medPct, 3) }}</td>
+                  <td class="px-3 py-1.5 text-right text-violet-700">{{ marketByGrade.get(g.level)?.med ? fmtPct(marketByGrade.get(g.level)!.med, 3) : '—' }}</td>
                   <td class="px-3 py-1.5 text-right text-ink-700">{{ g.medValue > 0 ? fmtUSD(g.medValue) : '—' }}</td>
                   <td class="px-3 py-1.5 text-right text-ink-700">{{ fmtMult(g.medMult) }}</td>
                 </tr>
@@ -570,6 +641,8 @@ const tabs = [
                   <th class="text-right font-medium px-3 py-2 w-16">Year</th>
                   <th class="text-right font-medium px-3 py-2">Granted</th>
                   <th class="text-right font-medium px-3 py-2">Entry %</th>
+                  <th class="text-right font-medium px-3 py-2">Market med %</th>
+                  <th class="text-left font-medium px-3 py-2 pl-4">vs market</th>
                   <th class="text-right font-medium px-3 py-2">$ at grant</th>
                   <th class="text-right font-medium px-3 py-2">Salary</th>
                   <th class="text-right font-medium px-3 py-2">$ / salary</th>
@@ -582,6 +655,11 @@ const tabs = [
                   <td class="px-3 py-1.5 text-right text-ink-500">{{ cohortYear(h) }}</td>
                   <td class="px-3 py-1.5 text-right text-ink-900 font-medium">{{ fmtShares(calShares(h)) }}</td>
                   <td class="px-3 py-1.5 text-right text-ink-600"><UiCalcTip :formula="calcPct(calShares(h), h.entryFDS)">{{ fmtPct(calPct(h), 3) }}</UiCalcTip></td>
+                  <td class="px-3 py-1.5 text-right text-violet-700" :title="h.benchmarkRole || ''">{{ h.benchmark?.med ? fmtPct(h.benchmark.med, 3) : '—' }}</td>
+                  <td class="px-3 py-1.5 pl-4">
+                    <span v-if="marketPos(h)" class="inline-block text-[10px] px-1.5 py-0.5 rounded border" :class="posMeta[marketPos(h)!].cls">{{ posMeta[marketPos(h)!].label }}</span>
+                    <span v-else class="text-ink-300 text-[11px]">—</span>
+                  </td>
                   <td class="px-3 py-1.5 text-right text-ink-600"><UiCalcTip :formula="h.entryPPS > 0 ? calcValueUSD(calShares(h), h.entryPPS) : null">{{ h.entryPPS > 0 ? fmtUSD(calValue(h)) : '—' }}</UiCalcTip></td>
                   <td class="px-3 py-1.5 text-right text-ink-600">{{ h.salary ? fmtUSD(h.salary) : '—' }}</td>
                   <td class="px-3 py-1.5 text-right text-ink-700">{{ h.salary ? fmtMult(calValue(h) / h.salary) : '—' }}</td>

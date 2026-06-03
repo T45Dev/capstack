@@ -350,6 +350,8 @@ function migrate(d: Database.Database): void {
   // role's benchmark midpoint (compa-ratio = salary / midpoint).
   ensureColumn('stakeholders', 'salary', 'REAL')
   ensureColumn('stakeholders', 'salary_midpoint', 'REAL')
+  // Thelander survey role this person maps to, for the market-equity overlay.
+  ensureColumn('stakeholders', 'benchmark_role', 'TEXT')
   // Pool ideas (future-grant events) can carry a job title + level so the
   // Grant Fairness recommendation slots them into the right level section.
   ensureColumn('pool_events', 'job_title', 'TEXT')
