@@ -34,13 +34,15 @@ export default defineEventHandler(async (event) => {
   }))
 
   // Stakeholder comp metadata (title / level / include).
-  const sMeta = new Map<string, { name: string; title: string | null; level: string | null; include: boolean }>()
-  for (const s of db().prepare(`SELECT id, name, title, job_level, fairness_include FROM stakeholders WHERE company_id = ?`).all(id) as any[]) {
+  const sMeta = new Map<string, { name: string; title: string | null; level: string | null; include: boolean; salary: number | null; salaryMidpoint: number | null }>()
+  for (const s of db().prepare(`SELECT id, name, title, job_level, fairness_include, salary, salary_midpoint FROM stakeholders WHERE company_id = ?`).all(id) as any[]) {
     sMeta.set(s.id, {
       name: s.name,
       title: s.title || null,
       level: s.job_level || null,
       include: s.fairness_include == null ? true : !!s.fairness_include,
+      salary: s.salary ?? null,
+      salaryMidpoint: s.salary_midpoint ?? null,
     })
   }
 
@@ -115,6 +117,8 @@ export default defineEventHandler(async (event) => {
       heldShares: a.stakeholderId ? (heldBy.get(a.stakeholderId) || 0) : 0,
       proposedShares: proposedBy.get(key) || 0,
       firstGrantDate: a.firstGrantDate,
+      salary: meta?.salary ?? null,
+      salaryMidpoint: meta?.salaryMidpoint ?? null,
       source: 'grant' as const,
     }
   })
@@ -137,6 +141,8 @@ export default defineEventHandler(async (event) => {
         heldShares: d.stakeholderId ? (heldBy.get(d.stakeholderId) || 0) : 0,
         proposedShares: proposedBy.get(key) || 0,
         firstGrantDate: null,
+        salary: meta?.salary ?? null,
+        salaryMidpoint: meta?.salaryMidpoint ?? null,
         source: 'proposed',
       })
     }

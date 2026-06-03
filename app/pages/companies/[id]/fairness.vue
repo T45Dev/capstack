@@ -14,7 +14,7 @@ import { calcPct, calcSum, calcValueUSD } from '~/utils/calc'
 const route = useRoute()
 const id = computed(() => route.params.id as string)
 
-const tab = ref<'roster' | 'holdings' | 'recommend'>('roster')
+const tab = ref<'roster' | 'holdings' | 'recommend' | 'calibration'>('roster')
 const selectedRound = ref<string>('')
 const includeFuture = ref(false)
 const FUTURE_KEY = 'capstack:fairness:includeFuture'
@@ -36,7 +36,13 @@ interface Holder {
   totalShares: number
   hireRoundName: string | null
   entryFDS: number
+  entryPPS: number
+  entryValue: number
   entryPct: number
+  isISO: boolean
+  salary: number | null
+  salaryMidpoint: number | null
+  compaRatio: number | null
   prePct: number
   postPct: number
   value: number
@@ -96,6 +102,51 @@ function levelForPct(pct: number): string | null {
 }
 const selName = computed(() => data.value?.rounds.find(r => r.code === data.value?.selectedRoundCode)?.name || '—')
 
+function median(xs: number[]): number {
+  const v = xs.filter(x => Number.isFinite(x)).sort((a, b) => a - b)
+  if (!v.length) return 0
+  const mid = Math.floor(v.length / 2)
+  return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2
+}
+function levelNum(l: string | null): number { const m = (l || '').match(/\d+/); return m ? parseInt(m[0], 10) : NaN }
+
+// Calibration: what an ISO grant has meant per grade, read off the actual
+// grants already made (source 'grant', award type ISO). Three candidate
+// "what did we hold constant" bases per grade — shares, entry %, $ at grant,
+// and $-per-$-salary — with their spread, so the data picks the basis.
+const isoGrants = computed(() => (data.value?.holders || []).filter(h => h.source === 'grant' && h.isISO && h.level && h.optionShares > 0))
+const calibration = computed(() => {
+  const byLevel = new Map<string, Holder[]>()
+  for (const h of isoGrants.value) {
+    const arr = byLevel.get(h.level!) || []
+    arr.push(h); byLevel.set(h.level!, arr)
+  }
+  const out = [...byLevel.entries()].map(([level, hs]) => {
+    const shares = hs.map(h => h.optionShares)
+    const pcts = hs.map(h => h.entryFDS > 0 ? h.optionShares / h.entryFDS : 0)
+    const vals = hs.map(h => h.entryValue)
+    const mults = hs.filter(h => h.salary).map(h => h.entryValue / (h.salary as number))
+    return {
+      level, count: hs.length,
+      medShares: median(shares), loShares: Math.min(...shares), hiShares: Math.max(...shares),
+      medPct: median(pcts), medValue: median(vals),
+      medMultiple: mults.length ? median(mults) : null, multCount: mults.length,
+    }
+  })
+  out.sort((a, b) => {
+    const na = levelNum(a.level), nb = levelNum(b.level)
+    if (Number.isFinite(na) && Number.isFinite(nb)) return nb - na
+    return a.level.localeCompare(b.level)
+  })
+  return out
+})
+// Per-person ISO detail, grade desc then grant size desc.
+const isoDetail = computed(() => [...isoGrants.value].sort((a, b) => {
+  const d = (levelNum(b.level) || 0) - (levelNum(a.level) || 0)
+  return d !== 0 ? d : b.optionShares - a.optionShares
+}))
+const fmtMult = (m: number | null) => m == null ? '—' : `${m.toFixed(2)}×`
+
 // Calc-tooltip strings — actual numbers behind each derived value.
 function fTotal(h: Holder): string | null {
   const parts: Array<[string, number]> = [['Options', h.optionShares]]
@@ -130,7 +181,7 @@ const flagMeta: Record<string, { label: string; cls: string }> = {
   na: { label: '—', cls: 'bg-ink-100 text-ink-500 border-ink-200' },
 }
 
-async function saveField(h: Holder, field: 'title' | 'job_level', value: string) {
+async function saveField(h: Holder, field: 'title' | 'job_level' | 'salary' | 'salary_midpoint', value: string) {
   if (!h.stakeholderId) return
   await $fetch(`/api/stakeholders/${h.stakeholderId}`, { method: 'PATCH', body: { [field]: value } })
   await refresh()
@@ -152,6 +203,7 @@ const tabs = [
   { key: 'roster', label: 'Optionholders' },
   { key: 'holdings', label: 'Current holdings' },
   { key: 'recommend', label: 'Recommended grants' },
+  { key: 'calibration', label: 'Calibration' },
 ] as const
 </script>
 
@@ -205,20 +257,22 @@ const tabs = [
     />
 
     <!-- TAB 1: Optionholders roster -->
-    <UiCard v-else-if="tab === 'roster'" :padded="false" class="max-w-4xl" subtitle="Untick to drop a holder from the fairness analysis. Title and level edit inline.">
+    <UiCard v-else-if="tab === 'roster'" :padded="false" class="max-w-5xl" subtitle="Untick to drop a holder from the fairness analysis. Title, level, salary + midpoint edit inline (salary feeds the Calibration tab).">
       <table class="w-full text-sm">
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
             <th class="text-center font-medium px-3 py-2 w-16">Include</th>
             <th class="text-left font-medium px-4 py-2">Optionholder</th>
-            <th class="text-left font-medium px-3 py-2 w-24">Award</th>
-            <th class="text-left font-medium px-3 py-2 w-48">Title</th>
-            <th class="text-left font-medium px-3 py-2 w-28">Level</th>
+            <th class="text-left font-medium px-3 py-2 w-20">Award</th>
+            <th class="text-left font-medium px-3 py-2 w-44">Title</th>
+            <th class="text-left font-medium px-3 py-2 w-20">Level</th>
+            <th class="text-right font-medium px-3 py-2 w-28">Salary</th>
+            <th class="text-right font-medium px-3 py-2 w-28">Midpoint</th>
             <th class="text-right font-medium px-3 py-2 num">Options</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="h in data.holders" :key="h.stakeholderId || `${h.source}:${h.name}`" class="border-b border-ink-100 last:border-0 hover:bg-ink-50/40" :class="h.include ? '' : 'opacity-55'">
+          <tr v-for="h in data.holders" :key="h.stakeholderId || `${h.source}:${h.name}`" class="even:bg-ink-50/50 hover:bg-brand-50/50 transition-colors" :class="h.include ? '' : 'opacity-55'">
             <td class="px-3 py-1.5 text-center">
               <input
                 type="checkbox"
@@ -241,6 +295,14 @@ const tabs = [
             <td class="px-3 py-1.5">
               <input :class="amberInput" :value="h.level || ''" :disabled="!h.stakeholderId" placeholder="level"
                      @change="(ev) => saveField(h, 'job_level', (ev.target as HTMLInputElement).value)">
+            </td>
+            <td class="px-3 py-1.5">
+              <input :class="[amberInput, 'text-right']" :value="h.salary ?? ''" :disabled="!h.stakeholderId" placeholder="—" inputmode="numeric"
+                     @change="(ev) => saveField(h, 'salary', (ev.target as HTMLInputElement).value)">
+            </td>
+            <td class="px-3 py-1.5">
+              <input :class="[amberInput, 'text-right']" :value="h.salaryMidpoint ?? ''" :disabled="!h.stakeholderId" placeholder="—" inputmode="numeric"
+                     @change="(ev) => saveField(h, 'salary_midpoint', (ev.target as HTMLInputElement).value)">
             </td>
             <td class="px-3 py-1.5 text-right num text-ink-800">{{ fmtShares(h.optionShares) }}</td>
           </tr>
@@ -377,6 +439,83 @@ const tabs = [
           Basis includes {{ fmtShares(data.ideasShares) }} pool ideas already reserved.
         </p>
       </template>
+      </div>
+    </template>
+
+    <!-- TAB 4: Calibration — what an ISO grant has meant per grade, from
+         the grants already made. The basis with the tightest spread is the
+         one the company has implicitly held constant. -->
+    <template v-else-if="tab === 'calibration'">
+      <div class="max-w-5xl">
+        <div class="rounded-lg border border-ink-200 bg-ink-50/60 px-4 py-2.5 mb-5 flex items-start gap-2">
+          <Info :size="15" class="text-ink-400 mt-0.5 shrink-0" />
+          <p class="text-xs text-ink-600 leading-relaxed">
+            ISO option grants only (NSO holders are excluded). Per grade: median grant size, ownership at hire
+            (entry %), $ value at grant (shares × the hire round’s price), and equity-$ per $ of salary. Whichever
+            column is tightest within a grade is the basis your past grants held constant — the candidate for a
+            new-hire rule. Enter salaries on the Optionholders tab to light up the multiple.
+          </p>
+        </div>
+
+        <div v-if="!calibration.length" class="text-sm text-ink-500 border border-dashed border-ink-300 rounded-lg p-8 text-center">
+          Assign grades (Level) to your ISO optionholders on the <span class="font-medium">Optionholders</span> tab to calibrate.
+        </div>
+
+        <template v-else>
+          <UiCard :padded="false" class="mb-5" subtitle="Per-grade ISO benchmarks (median; range shown for shares)">
+            <table class="w-full text-sm num">
+              <thead>
+                <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
+                  <th class="text-left font-medium px-4 py-2">Grade</th>
+                  <th class="text-right font-medium px-3 py-2">#</th>
+                  <th class="text-right font-medium px-3 py-2">Median grant</th>
+                  <th class="text-right font-medium px-3 py-2">Range</th>
+                  <th class="text-right font-medium px-3 py-2">Entry %</th>
+                  <th class="text-right font-medium px-3 py-2">$ at grant</th>
+                  <th class="text-right font-medium px-3 py-2">$ / salary</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="g in calibration" :key="g.level" class="even:bg-ink-50/50 hover:bg-brand-50/50 transition-colors">
+                  <td class="px-4 py-1.5 text-ink-900 font-medium">{{ g.level }}</td>
+                  <td class="px-3 py-1.5 text-right text-ink-500">{{ g.count }}</td>
+                  <td class="px-3 py-1.5 text-right text-ink-900 font-medium">{{ fmtShares(g.medShares) }}</td>
+                  <td class="px-3 py-1.5 text-right text-ink-500 text-[12px]">{{ fmtShares(g.loShares) }}–{{ fmtShares(g.hiShares) }}</td>
+                  <td class="px-3 py-1.5 text-right text-ink-700">{{ fmtPct(g.medPct, 3) }}</td>
+                  <td class="px-3 py-1.5 text-right text-ink-700">{{ g.medValue > 0 ? fmtUSD(g.medValue) : '—' }}</td>
+                  <td class="px-3 py-1.5 text-right text-ink-700">{{ fmtMult(g.medMultiple) }}<span v-if="g.medMultiple != null && g.multCount < g.count" class="text-ink-400 text-[10px]"> ({{ g.multCount }})</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </UiCard>
+
+          <UiCard :padded="false" subtitle="Every ISO grant, by grade — spot the outliers">
+            <table class="w-full text-sm num">
+              <thead>
+                <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
+                  <th class="text-right font-medium px-3 py-2 w-16">Grade</th>
+                  <th class="text-left font-medium px-4 py-2">Optionholder</th>
+                  <th class="text-right font-medium px-3 py-2">Granted</th>
+                  <th class="text-right font-medium px-3 py-2">Entry %</th>
+                  <th class="text-right font-medium px-3 py-2">$ at grant</th>
+                  <th class="text-right font-medium px-3 py-2">Salary</th>
+                  <th class="text-right font-medium px-3 py-2">$ / salary</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="h in isoDetail" :key="h.stakeholderId || h.name" class="even:bg-ink-50/50 hover:bg-brand-50/50 transition-colors">
+                  <td class="px-3 py-1.5 text-right text-ink-700">{{ h.level }}</td>
+                  <td class="px-4 py-1.5 text-ink-900">{{ h.name }}</td>
+                  <td class="px-3 py-1.5 text-right text-ink-900 font-medium">{{ fmtShares(h.optionShares) }}</td>
+                  <td class="px-3 py-1.5 text-right text-ink-600"><UiCalcTip :formula="calcPct(h.optionShares, h.entryFDS)">{{ fmtPct(h.entryFDS > 0 ? h.optionShares / h.entryFDS : 0, 3) }}</UiCalcTip></td>
+                  <td class="px-3 py-1.5 text-right text-ink-600"><UiCalcTip :formula="h.entryPPS > 0 ? calcValueUSD(h.optionShares, h.entryPPS) : null">{{ h.entryValue > 0 ? fmtUSD(h.entryValue) : '—' }}</UiCalcTip></td>
+                  <td class="px-3 py-1.5 text-right text-ink-600">{{ h.salary ? fmtUSD(h.salary) : '—' }}</td>
+                  <td class="px-3 py-1.5 text-right text-ink-700">{{ h.salary ? fmtMult(h.entryValue / h.salary) : '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </UiCard>
+        </template>
       </div>
     </template>
   </div>
