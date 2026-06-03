@@ -166,6 +166,15 @@ describe('buildFairness', () => {
     expect(y.compaRatio).toBeNull()
   })
 
+  it('exposes initialShares, falling back to total when unset', () => {
+    const res = buildFairness(rounds, [
+      H({ name: 'Refreshed', optionShares: 12_000, initialShares: 5_000, firstGrantDate: '2023-02-01' }),
+      H({ name: 'Single', optionShares: 8_000, firstGrantDate: '2023-02-01' }),
+    ], {})
+    expect(res.holders.find(h => h.name === 'Refreshed')!.initialShares).toBe(5_000)
+    expect(res.holders.find(h => h.name === 'Single')!.initialShares).toBe(8_000) // fallback
+  })
+
   it('does not flag holders without a level', () => {
     const res = buildFairness(rounds, [H({ name: 'NL', optionShares: 1000, firstGrantDate: '2023-02-01' })], {})
     expect(res.holders[0].flag).toBe('na')

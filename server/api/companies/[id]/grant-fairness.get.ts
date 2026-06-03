@@ -55,7 +55,7 @@ export default defineEventHandler(async (event) => {
   }
 
   // Aggregate outstanding option grants per optionholder.
-  type Agg = { stakeholderId: string | null; recipientName: string; awardTypes: Set<string>; optionShares: number; firstGrantDate: string | null }
+  type Agg = { stakeholderId: string | null; recipientName: string; awardTypes: Set<string>; optionShares: number; firstGrantDate: string | null; initialShares: number }
   const map = new Map<string, Agg>()
   const keyOf = (sid: string | null, name: string) => sid || `name:${name}`
   for (const row of db().prepare(`
@@ -70,12 +70,17 @@ export default defineEventHandler(async (event) => {
     const date: string | null = row.issue_date || row.vesting_start || null
     let a = map.get(key)
     if (!a) {
-      a = { stakeholderId: row.stakeholder_id || null, recipientName: row.recipient_name || '(unknown)', awardTypes: new Set(), optionShares: 0, firstGrantDate: null }
+      a = { stakeholderId: row.stakeholder_id || null, recipientName: row.recipient_name || '(unknown)', awardTypes: new Set(), optionShares: 0, firstGrantDate: null, initialShares: 0 }
       map.set(key, a)
     }
     a.optionShares += out
     if (row.award_type) { const t = classifyAwardType(row.award_type); if (t) a.awardTypes.add(t) }
-    if (date && (!a.firstGrantDate || date < a.firstGrantDate)) a.firstGrantDate = date
+    // Initial grant = the granted (issued) size of the earliest-dated grant —
+    // isolates the at-hire grant from later refreshes for calibration.
+    if (date) {
+      if (!a.firstGrantDate || date < a.firstGrantDate) { a.firstGrantDate = date; a.initialShares = issued }
+      else if (date === a.firstGrantDate) a.initialShares += issued
+    }
   }
 
   // Proposed grants per optionholder (for the include-future basis). Track
@@ -118,6 +123,7 @@ export default defineEventHandler(async (event) => {
       heldShares: a.stakeholderId ? (heldBy.get(a.stakeholderId) || 0) : 0,
       proposedShares: proposedBy.get(key) || 0,
       firstGrantDate: a.firstGrantDate,
+      initialShares: a.initialShares,
       salary: meta?.salary ?? null,
       salaryMidpoint: meta?.salaryMidpoint ?? null,
       source: 'grant' as const,

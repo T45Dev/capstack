@@ -43,6 +43,7 @@ export interface RawHolder {
   heldShares: number
   proposedShares: number
   firstGrantDate: string | null
+  initialShares?: number     // granted size of the earliest grant (new-hire signal)
   salary?: number | null
   salaryMidpoint?: number | null
   // Where this row comes from: a live outstanding grant, a not-yet-issued
@@ -66,6 +67,7 @@ export interface Holder extends RawHolder {
   entryFDS: number
   entryPPS: number          // share price at the hire round
   entryValue: number        // optionShares × entryPPS — $ value at grant
+  initialShares: number     // earliest grant's size (falls back to optionShares)
   entryPct: number
   isISO: boolean            // award types include ISO (drives calibration scope)
   compaRatio: number | null // salary / midpoint, when both known
@@ -207,6 +209,7 @@ export function buildFairness(rounds: FairnessRound[], rawHolders: RawHolder[], 
       entryFDS,
       entryPPS,
       entryValue,
+      initialShares: (h.initialShares && h.initialShares > 0) ? h.initialShares : h.optionShares,
       entryPct,
       isISO: h.awardTypes.includes('ISO'),
       compaRatio,

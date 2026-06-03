@@ -35,9 +35,11 @@ interface Holder {
   grantShares: number
   totalShares: number
   hireRoundName: string | null
+  firstGrantDate: string | null
   entryFDS: number
   entryPPS: number
   entryValue: number
+  initialShares: number
   entryPct: number
   isISO: boolean
   salary: number | null
@@ -114,7 +116,15 @@ function levelNum(l: string | null): number { const m = (l || '').match(/\d+/); 
 // grants already made (source 'grant', award type ISO). Three candidate
 // "what did we hold constant" bases per grade — shares, entry %, $ at grant,
 // and $-per-$-salary — with their spread, so the data picks the basis.
-const isoGrants = computed(() => (data.value?.holders || []).filter(h => h.source === 'grant' && h.isISO && h.level && h.optionShares > 0))
+// Calibration basis: the at-hire INITIAL grant (clean new-hire signal,
+// strips later refreshes) vs ALL outstanding (accumulated). Default initial.
+const calibBasis = ref<'initial' | 'outstanding'>('initial')
+function calShares(h: Holder) { return calibBasis.value === 'initial' ? h.initialShares : h.optionShares }
+function calValue(h: Holder) { return calShares(h) * h.entryPPS }
+function calPct(h: Holder) { return h.entryFDS > 0 ? calShares(h) / h.entryFDS : 0 }
+const cohortYear = (h: Holder) => h.firstGrantDate ? h.firstGrantDate.slice(0, 4) : '—'
+
+const isoGrants = computed(() => (data.value?.holders || []).filter(h => h.source === 'grant' && h.isISO && h.level && calShares(h) > 0))
 const calibration = computed(() => {
   const byLevel = new Map<string, Holder[]>()
   for (const h of isoGrants.value) {
@@ -122,10 +132,10 @@ const calibration = computed(() => {
     arr.push(h); byLevel.set(h.level!, arr)
   }
   const out = [...byLevel.entries()].map(([level, hs]) => {
-    const shares = hs.map(h => h.optionShares)
-    const pcts = hs.map(h => h.entryFDS > 0 ? h.optionShares / h.entryFDS : 0)
-    const vals = hs.map(h => h.entryValue)
-    const mults = hs.filter(h => h.salary).map(h => h.entryValue / (h.salary as number))
+    const shares = hs.map(calShares)
+    const pcts = hs.map(calPct)
+    const vals = hs.map(calValue)
+    const mults = hs.filter(h => h.salary).map(h => calValue(h) / (h.salary as number))
     return {
       level, count: hs.length,
       medShares: median(shares), loShares: Math.min(...shares), hiShares: Math.max(...shares),
@@ -140,10 +150,11 @@ const calibration = computed(() => {
   })
   return out
 })
-// Per-person ISO detail, grade desc then grant size desc.
+// Per-person ISO detail, grade desc then hire year asc (so drift reads top-down).
 const isoDetail = computed(() => [...isoGrants.value].sort((a, b) => {
   const d = (levelNum(b.level) || 0) - (levelNum(a.level) || 0)
-  return d !== 0 ? d : b.optionShares - a.optionShares
+  if (d !== 0) return d
+  return cohortYear(a).localeCompare(cohortYear(b)) || calShares(b) - calShares(a)
 }))
 const fmtMult = (m: number | null) => m == null ? '—' : `${m.toFixed(2)}×`
 
@@ -447,7 +458,7 @@ const tabs = [
          one the company has implicitly held constant. -->
     <template v-else-if="tab === 'calibration'">
       <div class="max-w-5xl">
-        <div class="rounded-lg border border-ink-200 bg-ink-50/60 px-4 py-2.5 mb-5 flex items-start gap-2">
+        <div class="rounded-lg border border-ink-200 bg-ink-50/60 px-4 py-2.5 mb-4 flex items-start gap-2">
           <Info :size="15" class="text-ink-400 mt-0.5 shrink-0" />
           <p class="text-xs text-ink-600 leading-relaxed">
             ISO option grants only (NSO holders are excluded). Per grade: median grant size, ownership at hire
@@ -455,6 +466,16 @@ const tabs = [
             column is tightest within a grade is the basis your past grants held constant — the candidate for a
             new-hire rule. Enter salaries on the Optionholders tab to light up the multiple.
           </p>
+        </div>
+
+        <!-- Basis toggle: isolate the at-hire grant vs accumulated outstanding. -->
+        <div class="flex items-center gap-2 mb-4 text-xs">
+          <span class="text-ink-500">Measure</span>
+          <div class="inline-flex rounded-md border border-ink-300 overflow-hidden">
+            <button type="button" class="px-2.5 py-1" :class="calibBasis === 'initial' ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="calibBasis = 'initial'">Initial grant</button>
+            <button type="button" class="px-2.5 py-1 border-l border-ink-300" :class="calibBasis === 'outstanding' ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="calibBasis = 'outstanding'">All outstanding</button>
+          </div>
+          <span class="text-ink-400">{{ calibBasis === 'initial' ? 'earliest grant only — strips later refreshes' : 'every grant they still hold, accumulated' }}</span>
         </div>
 
         <div v-if="!calibration.length" class="text-sm text-ink-500 border border-dashed border-ink-300 rounded-lg p-8 text-center">
@@ -489,12 +510,13 @@ const tabs = [
             </table>
           </UiCard>
 
-          <UiCard :padded="false" subtitle="Every ISO grant, by grade — spot the outliers">
+          <UiCard :padded="false" subtitle="Every ISO grant, by grade then hire year — spot drift + outliers">
             <table class="w-full text-sm num">
               <thead>
                 <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
-                  <th class="text-right font-medium px-3 py-2 w-16">Grade</th>
+                  <th class="text-right font-medium px-3 py-2 w-14">Grade</th>
                   <th class="text-left font-medium px-4 py-2">Optionholder</th>
+                  <th class="text-right font-medium px-3 py-2 w-16">Year</th>
                   <th class="text-right font-medium px-3 py-2">Granted</th>
                   <th class="text-right font-medium px-3 py-2">Entry %</th>
                   <th class="text-right font-medium px-3 py-2">$ at grant</th>
@@ -506,11 +528,12 @@ const tabs = [
                 <tr v-for="h in isoDetail" :key="h.stakeholderId || h.name" class="even:bg-ink-50/50 hover:bg-brand-50/50 transition-colors">
                   <td class="px-3 py-1.5 text-right text-ink-700">{{ h.level }}</td>
                   <td class="px-4 py-1.5 text-ink-900">{{ h.name }}</td>
-                  <td class="px-3 py-1.5 text-right text-ink-900 font-medium">{{ fmtShares(h.optionShares) }}</td>
-                  <td class="px-3 py-1.5 text-right text-ink-600"><UiCalcTip :formula="calcPct(h.optionShares, h.entryFDS)">{{ fmtPct(h.entryFDS > 0 ? h.optionShares / h.entryFDS : 0, 3) }}</UiCalcTip></td>
-                  <td class="px-3 py-1.5 text-right text-ink-600"><UiCalcTip :formula="h.entryPPS > 0 ? calcValueUSD(h.optionShares, h.entryPPS) : null">{{ h.entryValue > 0 ? fmtUSD(h.entryValue) : '—' }}</UiCalcTip></td>
+                  <td class="px-3 py-1.5 text-right text-ink-500">{{ cohortYear(h) }}</td>
+                  <td class="px-3 py-1.5 text-right text-ink-900 font-medium">{{ fmtShares(calShares(h)) }}</td>
+                  <td class="px-3 py-1.5 text-right text-ink-600"><UiCalcTip :formula="calcPct(calShares(h), h.entryFDS)">{{ fmtPct(calPct(h), 3) }}</UiCalcTip></td>
+                  <td class="px-3 py-1.5 text-right text-ink-600"><UiCalcTip :formula="h.entryPPS > 0 ? calcValueUSD(calShares(h), h.entryPPS) : null">{{ h.entryPPS > 0 ? fmtUSD(calValue(h)) : '—' }}</UiCalcTip></td>
                   <td class="px-3 py-1.5 text-right text-ink-600">{{ h.salary ? fmtUSD(h.salary) : '—' }}</td>
-                  <td class="px-3 py-1.5 text-right text-ink-700">{{ h.salary ? fmtMult(h.entryValue / h.salary) : '—' }}</td>
+                  <td class="px-3 py-1.5 text-right text-ink-700">{{ h.salary ? fmtMult(calValue(h) / h.salary) : '—' }}</td>
                 </tr>
               </tbody>
             </table>
