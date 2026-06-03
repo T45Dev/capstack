@@ -6,7 +6,7 @@
 // owned by each page — see FinancingsPageHeader for the Financings page.
 import {
   FileSpreadsheet, Users, Award, GitCompare, TrendingDown,
-  FlaskConical, Upload, PanelLeftClose, PanelLeftOpen, Settings,
+  FlaskConical, Upload, PanelLeftClose, PanelLeftOpen, Settings, Scale,
 } from 'lucide-vue-next'
 const route = useRoute()
 
@@ -78,6 +78,7 @@ const tabs = computed(() => companyId.value ? [
   { to: `/companies/${companyId.value}/cap-table`,    label: 'Rounds',             icon: FileSpreadsheet },
   { to: `/companies/${companyId.value}/shareholders`, label: 'Shareholders',       icon: Users },
   { to: `/companies/${companyId.value}/grants`,       label: 'Option Grants',      icon: Award },
+  { to: `/companies/${companyId.value}/fairness`,     label: 'Grant Fairness',     icon: Scale },
   { to: `/companies/${companyId.value}/dilution`,     label: 'Overall Dilution',   icon: GitCompare },
   { to: `/companies/${companyId.value}/pool`,         label: 'Option Pool Impact', icon: TrendingDown },
   { to: `/companies/${companyId.value}/scenarios`,    label: 'Exit Scenarios',     icon: FlaskConical },

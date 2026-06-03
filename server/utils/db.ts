@@ -337,6 +337,11 @@ function migrate(d: Database.Database): void {
   // Berrada"); aggregations roll the alias's shares up under the
   // primary's row.
   ensureColumn('stakeholders', 'linked_to', 'TEXT')
+  // Employee comp metadata, used by the Grant Fairness module. Operator-typed
+  // on the Fairness page; not imported from Carta. job_level is free-form
+  // (e.g. "L3", "Senior", "VP") and groups employees for range comparison.
+  ensureColumn('stakeholders', 'title', 'TEXT')
+  ensureColumn('stakeholders', 'job_level', 'TEXT')
   // Stamped on the first successful Carta import. The import UI uses it
   // to decide between "Welcome" and "Re-import" framing; nothing else
   // gates on it now that the setup wizard is gone.
