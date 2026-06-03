@@ -8,6 +8,7 @@
 // today — the lock is implicit). Older scenarios get a lock badge.
 import { Plus, FlaskConical, Copy, Trash2, ChevronUp, ChevronDown, Lock } from 'lucide-vue-next'
 import { fmtUSD, fmtPct, fmtShares, fmtDate } from '~/utils/format'
+import { calcPct } from '~/utils/calc'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -340,7 +341,7 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
                         >idea</span>
                       </td>
                       <td v-else-if="c.key === 'postShares'" class="px-2.5 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200">{{ fmtShares(r.postShares) }}</td>
-                      <td v-else-if="c.key === 'postPct'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200">{{ result.round.postRoundFDS > 0 ? fmtPct(r.postShares / result.round.postRoundFDS, 2) : '—' }}</td>
+                      <td v-else-if="c.key === 'postPct'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200"><UiCalcTip :formula="result.round.postRoundFDS > 0 ? calcPct(r.postShares, result.round.postRoundFDS, 2) : null">{{ result.round.postRoundFDS > 0 ? fmtPct(r.postShares / result.round.postRoundFDS, 2) : '—' }}</UiCalcTip></td>
                       <td v-else-if="c.key === 'invested'" class="px-2.5 py-1.5 text-right border-b border-ink-200" :class="r.invested ? 'text-ink-700' : 'text-ink-400'">
                         {{ r.invested ? fmtUSD(r.invested) : '—' }}
                       </td>

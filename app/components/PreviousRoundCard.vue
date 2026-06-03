@@ -8,6 +8,7 @@
 // save sidesteps that and makes "did this stick?" obvious.
 import { Layers, Calculator, Save, Undo2, Check } from 'lucide-vue-next'
 import { fmtShares, fmtUSD, fmtPricePerShare } from '~/utils/format'
+import { calcSum } from '~/utils/calc'
 
 interface Props { companyId: string }
 const props = defineProps<Props>()
@@ -139,6 +140,14 @@ const poolAvailable = computed(() => {
   if (optionPoolTotal.value == null) return null
   return optionPoolTotal.value - (data.value?.pool_attributed ?? 0)
 })
+
+// Calc-tooltip strings.
+const fPostMoney = computed(() => postMoney.value == null ? null
+  : calcSum([['Pre-money', preMoney.value || 0], ['New money', newMoney.value || 0]], fmtUSD))
+const fPoolAttributed = computed(() => !data.value ? null
+  : calcSum([['Outstanding', data.value.grants_breakdown.outstanding || 0], ['Exercised', data.value.grants_breakdown.exercised || 0]]))
+const fPoolAvailable = computed(() => poolAvailable.value == null ? null
+  : `Pool ${fmtShares(optionPoolTotal.value || 0)} − attributed ${fmtShares(data.value?.pool_attributed ?? 0)} = ${fmtShares(poolAvailable.value)}`)
 </script>
 
 <template>
@@ -208,18 +217,18 @@ const poolAvailable = computed(() => {
     <div class="px-5 py-3 border-t border-ink-100 bg-ink-50/40 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-[12px]">
       <div>
         <div class="text-[10px] uppercase tracking-[0.06em] text-ink-500 font-medium">Post-money</div>
-        <div class="num font-semibold text-ink-900">{{ postMoney != null ? fmtUSD(postMoney) : '—' }}</div>
+        <div class="num font-semibold text-ink-900"><UiCalcTip :formula="fPostMoney">{{ postMoney != null ? fmtUSD(postMoney) : '—' }}</UiCalcTip></div>
       </div>
       <div>
         <div class="text-[10px] uppercase tracking-[0.06em] text-ink-500 font-medium">Pool attributed</div>
-        <div class="num font-semibold text-ink-900" :title="`Outstanding ${fmtShares(data?.grants_breakdown.outstanding || 0)} + Exercised ${fmtShares(data?.grants_breakdown.exercised || 0)}`">
-          {{ data ? fmtShares(data.pool_attributed) : '—' }}
+        <div class="num font-semibold text-ink-900">
+          <UiCalcTip :formula="fPoolAttributed">{{ data ? fmtShares(data.pool_attributed) : '—' }}</UiCalcTip>
         </div>
       </div>
       <div>
         <div class="text-[10px] uppercase tracking-[0.06em] text-ink-500 font-medium flex items-center gap-1"><Calculator :size="10" /> Available</div>
         <div class="num font-semibold" :class="(poolAvailable ?? 0) < 0 ? 'text-red-700' : 'text-ok'">
-          {{ poolAvailable != null ? fmtShares(poolAvailable) : '—' }}
+          <UiCalcTip :formula="fPoolAvailable">{{ poolAvailable != null ? fmtShares(poolAvailable) : '—' }}</UiCalcTip>
         </div>
       </div>
       <div v-if="sharePrice">

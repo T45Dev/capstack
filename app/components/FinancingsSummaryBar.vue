@@ -15,6 +15,7 @@
 // sub-line. Cells are separated by an inset left border (border-l on
 // every-but-first) for the divider look without an explicit ::before.
 import { fmtUSD, fmtShares, fmtPricePerShare, fmtDate } from '~/utils/format'
+import { calcSum } from '~/utils/calc'
 
 interface RoundLite {
   round_id: string
@@ -54,10 +55,14 @@ interface Item {
   value: string
   sub: string
   tone?: 'brand'
+  formula?: string | null
 }
 const items = computed<Item[]>(() => {
   const open = openRound.value
   const lc = lastClosed.value
+  const raiseParts = props.rounds
+    .map(r => [r.name || r.code, (r.new_money || 0) + (r.notes_financing || 0)] as [string, number])
+    .filter(([, n]) => n !== 0)
   return [
     {
       label: 'Open round',
@@ -74,6 +79,7 @@ const items = computed<Item[]>(() => {
       label: 'Post-money (open)',
       value: open ? fmtUSD(open.post_money) : '—',
       sub: 'pre + new',
+      formula: open ? calcSum([['Pre-money', open.pre_money || 0], ['New money', open.new_money || 0]], fmtUSD) : null,
     },
     {
       label: 'Share price (open)',
@@ -89,6 +95,7 @@ const items = computed<Item[]>(() => {
       label: 'Cumulative raise',
       value: fmtUSD(cumulativeRaise.value),
       sub: 'across all rounds',
+      formula: raiseParts.length ? calcSum(raiseParts, fmtUSD) : null,
     },
   ]
 })
@@ -106,9 +113,8 @@ const items = computed<Item[]>(() => {
         <div
           class="num text-[15px] font-semibold mt-0.5 truncate"
           :class="it.tone === 'brand' ? 'text-brand-edge' : 'text-ink-900'"
-          :title="it.value"
         >
-          {{ it.value }}
+          <UiCalcTip :formula="it.formula ?? null">{{ it.value }}</UiCalcTip>
         </div>
         <div class="text-[11px] text-ink-500 num mt-0.5 truncate" :title="it.sub">{{ it.sub }}</div>
       </div>

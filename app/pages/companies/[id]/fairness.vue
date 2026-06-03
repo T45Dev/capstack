@@ -9,6 +9,7 @@
 //      proposed + ideas" toggle rolls not-yet-issued equity into the basis.
 import { FileDown, Scale, Info } from 'lucide-vue-next'
 import { fmtUSD, fmtPct, fmtShares } from '~/utils/format'
+import { calcPct, calcSum, calcValueUSD } from '~/utils/calc'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -33,6 +34,7 @@ interface Holder {
   grantShares: number
   totalShares: number
   hireRoundName: string | null
+  entryFDS: number
   entryPct: number
   prePct: number
   postPct: number
@@ -46,6 +48,8 @@ interface Level { level: string; count: number; entry: Band; post: Band; value: 
 interface FairnessData {
   company: { id: string; name: string; slug: string }
   selectedRoundCode: string | null
+  selectedPreFDS: number
+  selectedPostFDS: number
   currentPPS: number
   includeFuture: boolean
   ideasShares: number
@@ -71,6 +75,27 @@ const recLevels = computed(() =>
   (data.value?.levels || []).map(l => ({ ...l, holders: included.value.filter(h => h.level === l.level) })),
 )
 const selName = computed(() => data.value?.rounds.find(r => r.code === data.value?.selectedRoundCode)?.name || '—')
+
+// Calc-tooltip strings — actual numbers behind each derived value.
+function fTotal(h: Holder): string | null {
+  const parts: Array<[string, number]> = [['Options', h.optionShares]]
+  if (data.value?.includeFuture && h.proposedShares) parts.push(['Proposed', h.proposedShares])
+  if (h.heldShares) parts.push(['Held', h.heldShares])
+  return parts.length > 1 ? calcSum(parts) : null
+}
+function fPre(h: Holder): string { return calcPct(h.totalShares, data.value?.selectedPreFDS || 0) }
+function fPost(h: Holder): string { return calcPct(h.totalShares, data.value?.selectedPostFDS || 0) }
+function fEntry(h: Holder): string {
+  return `${calcPct(h.grantShares, h.entryFDS)}${h.hireRoundName ? `  (FDS at ${h.hireRoundName})` : ''}`
+}
+function fValue(h: Holder): string { return calcValueUSD(h.totalShares, data.value?.currentPPS || 0) }
+function fRec(h: Holder, target: number): string | null {
+  if (!h.recommendedAddl) return null
+  const post = data.value?.selectedPostFDS || 0
+  const targetShares = Math.round(target * post)
+  return `Target ${fmtPct(target, 3)} × ${fmtShares(post)} = ${fmtShares(targetShares)}\n− current ${fmtShares(h.totalShares)}\n= +${fmtShares(h.recommendedAddl)}`
+}
+function fRecPct(h: Holder): string { return calcPct(h.totalShares + h.recommendedAddl, data.value?.selectedPostFDS || 0) }
 
 const flagMeta: Record<string, { label: string; cls: string }> = {
   under: { label: 'Under-granted', cls: 'bg-red-50 text-red-700 border-red-200' },
@@ -214,11 +239,11 @@ const tabs = [
             <td class="px-4 py-1.5 text-ink-900">{{ h.name }}</td>
             <td class="px-3 py-1.5 text-ink-600">{{ h.level || '—' }}</td>
             <td class="px-3 py-1.5 text-right text-ink-800">{{ fmtShares(h.grantShares) }}</td>
-            <td class="px-3 py-1.5 text-right text-ink-800">{{ fmtShares(h.totalShares) }}</td>
-            <td class="px-3 py-1.5 text-right text-ink-600">{{ fmtPct(h.prePct, 3) }}</td>
-            <td class="px-3 py-1.5 text-right text-ink-900 font-medium">{{ fmtPct(h.postPct, 3) }}</td>
-            <td class="px-3 py-1.5 text-right text-ink-500">{{ fmtPct(h.entryPct, 3) }}</td>
-            <td class="px-3 py-1.5 text-right text-ink-700">{{ fmtUSD(h.value) }}</td>
+            <td class="px-3 py-1.5 text-right text-ink-800"><UiCalcTip :formula="fTotal(h)">{{ fmtShares(h.totalShares) }}</UiCalcTip></td>
+            <td class="px-3 py-1.5 text-right text-ink-600"><UiCalcTip :formula="fPre(h)">{{ fmtPct(h.prePct, 3) }}</UiCalcTip></td>
+            <td class="px-3 py-1.5 text-right text-ink-900 font-medium"><UiCalcTip :formula="fPost(h)">{{ fmtPct(h.postPct, 3) }}</UiCalcTip></td>
+            <td class="px-3 py-1.5 text-right text-ink-500"><UiCalcTip :formula="fEntry(h)">{{ fmtPct(h.entryPct, 3) }}</UiCalcTip></td>
+            <td class="px-3 py-1.5 text-right text-ink-700"><UiCalcTip :formula="fValue(h)">{{ fmtUSD(h.value) }}</UiCalcTip></td>
           </tr>
         </tbody>
       </table>
@@ -258,14 +283,14 @@ const tabs = [
             <tbody>
               <tr v-for="h in lvl.holders" :key="h.stakeholderId || h.name" class="border-b border-ink-100 last:border-0">
                 <td class="px-4 py-1.5 text-ink-900">{{ h.name }}</td>
-                <td class="px-3 py-1.5 text-right text-ink-700">{{ fmtPct(h.postPct, 3) }}</td>
+                <td class="px-3 py-1.5 text-right text-ink-700"><UiCalcTip :formula="fPost(h)">{{ fmtPct(h.postPct, 3) }}</UiCalcTip></td>
                 <td class="px-3 py-1.5 pl-6">
                   <span class="inline-block text-[11px] px-2 py-0.5 rounded border" :class="flagMeta[h.flag].cls">{{ flagMeta[h.flag].label }}</span>
                 </td>
                 <td class="px-3 py-1.5 text-right font-medium" :class="h.recommendedAddl > 0 ? 'text-brand' : 'text-ink-400'">
-                  {{ h.recommendedAddl > 0 ? '+' + fmtShares(h.recommendedAddl) : '—' }}
+                  <UiCalcTip :formula="fRec(h, lvl.post.target)">{{ h.recommendedAddl > 0 ? '+' + fmtShares(h.recommendedAddl) : '—' }}</UiCalcTip>
                 </td>
-                <td class="px-3 py-1.5 text-right text-ink-600">{{ fmtPct(h.recommendedPct, 3) }}</td>
+                <td class="px-3 py-1.5 text-right text-ink-600"><UiCalcTip :formula="fRecPct(h)">{{ fmtPct(h.recommendedPct, 3) }}</UiCalcTip></td>
               </tr>
             </tbody>
           </table>

@@ -79,6 +79,8 @@ export interface FairnessLevel {
 
 export interface FairnessResult {
   selectedRoundCode: string | null
+  selectedPreFDS: number
+  selectedPostFDS: number
   currentPPS: number
   includeFuture: boolean
   ideasShares: number
@@ -249,6 +251,8 @@ export function buildFairness(rounds: FairnessRound[], rawHolders: RawHolder[], 
 
   return {
     selectedRoundCode: sel?.code ?? null,
+    selectedPreFDS: sel?.preFDS || 0,
+    selectedPostFDS: sel?.postFDS || 0,
     currentPPS,
     includeFuture,
     ideasShares,

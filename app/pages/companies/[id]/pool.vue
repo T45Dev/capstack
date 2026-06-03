@@ -10,7 +10,8 @@
 //                        vest (1/vest_months after the cliff, lump-sum at the
 //                        cliff date).
 import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, ChevronRight, Lightbulb, TrendingUp, TrendingDown as ArrowDownIcon, X, UploadCloud, AlertTriangle, CheckCircle2 } from 'lucide-vue-next'
-import { fmtShares, fmtPct, fmtUSD, fmtDate } from '~/utils/format'
+import { fmtShares, fmtPct, fmtUSD, fmtDate, fmtPricePerShare } from '~/utils/format'
+import { calcSum } from '~/utils/calc'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -434,6 +435,12 @@ const totals = computed(() => {
   return { poolAuthorized, outstandingShares, outOfPool, proposedShares, ideaGrants, ideaTopups, ideaForfeits, ideaExercises, floorShares, availableShares, futureAvailable, totalExercised, totalForfeited, totalExpired, totalForfeitedOrExpired, totalIssued }
 })
 
+// Calc-tooltip strings for the pool summary stats.
+const fOutOfPool = computed(() => calcSum([['Active grants', totals.value.outstandingShares], ['Exercised', totals.value.totalExercised]]))
+const fAvailable = computed(() => `Authorized ${fmtShares(totals.value.poolAuthorized)} − outstanding ${fmtShares(totals.value.outOfPool)} = ${fmtShares(totals.value.availableShares)}`)
+const fFutureAvailable = computed(() => `Available ${fmtShares(totals.value.availableShares)} − proposed ${fmtShares(totals.value.proposedShares)} − ideas ${fmtShares(totals.value.ideaGrants)} = ${fmtShares(totals.value.futureAvailable)}`)
+const fForfExp = computed(() => calcSum([['Forfeited', totals.value.totalForfeited], ['Expired', totals.value.totalExpired]]))
+
 // ---- Idea modal ----
 const showModal = ref(false)
 const editingIdea = ref<any>(null)
@@ -495,6 +502,16 @@ watch(() => form.value,  () => { if (inputMode.value === 'value')  syncFromValue
 const pctPercent = computed<number | null>({
   get: () => form.pct ? form.pct * 100 : 0,
   set: (v) => { form.pct = (v || 0) / 100 },
+})
+
+// Live "raw calculation" line for the idea conversion — shows the actual
+// numbers behind whichever field the operator is driving.
+const ideaCalc = computed(() => {
+  const fds = modeledFDS.value
+  const pps = currentPPS.value
+  if (inputMode.value === 'pct') return `${fmtPct(form.pct, 3)} × ${fmtShares(fds)} FDS = ${fmtShares(form.shares)}`
+  if (inputMode.value === 'value') return `${fmtUSD(form.value)} ÷ ${fmtPricePerShare(pps)} = ${fmtShares(form.shares)}`
+  return `${fmtShares(form.shares)} ÷ ${fmtShares(fds)} FDS = ${fmtPct(form.pct, 3)}`
 })
 
 function openModal(idea?: any) {
@@ -805,19 +822,14 @@ const chart = computed(() => {
           <span class="text-2xl font-semibold">{{ fmtShares(totals.poolAuthorized) }}</span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">−</span>
-        <div
-          class="flex flex-col items-start"
-          :title="totals.totalExercised > 0
-            ? `Active grants ${fmtShares(totals.outstandingShares)} + Exercised options ${fmtShares(totals.totalExercised)} — both out of the pool (exercised converted to Common stock).`
-            : ''"
-        >
+        <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Outstanding</span>
-          <span class="text-2xl font-semibold">{{ fmtShares(totals.outOfPool) }}</span>
+          <span class="text-2xl font-semibold"><UiCalcTip :formula="fOutOfPool">{{ fmtShares(totals.outOfPool) }}</UiCalcTip></span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">=</span>
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Available</span>
-          <span class="text-2xl font-semibold" :class="totals.availableShares < 0 ? 'text-red-700' : 'text-ok'">{{ fmtShares(totals.availableShares) }}</span>
+          <span class="text-2xl font-semibold" :class="totals.availableShares < 0 ? 'text-red-700' : 'text-ok'"><UiCalcTip :formula="fAvailable">{{ fmtShares(totals.availableShares) }}</UiCalcTip></span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">−</span>
         <div class="flex flex-col items-start">
@@ -832,7 +844,7 @@ const chart = computed(() => {
         <span class="text-2xl text-ink-400 pb-1">=</span>
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Future Available</span>
-          <span class="text-2xl font-semibold" :class="totals.futureAvailable < 0 ? 'text-red-700' : 'text-ok'">{{ fmtShares(totals.futureAvailable) }}</span>
+          <span class="text-2xl font-semibold" :class="totals.futureAvailable < 0 ? 'text-red-700' : 'text-ok'"><UiCalcTip :formula="fFutureAvailable">{{ fmtShares(totals.futureAvailable) }}</UiCalcTip></span>
         </div>
       </div>
       <!-- Lifetime equation: Issued = Outstanding + Exercised
@@ -855,9 +867,9 @@ const chart = computed(() => {
           <span class="text-ink-500" title="Exercised → Common Stock (left the pool entirely)">Exercised</span>
           <span class="font-medium" :class="totals.totalExercised > 0 ? 'text-brand-700' : 'text-ink-400'">{{ fmtShares(totals.totalExercised) }}</span>
         </div>
-        <div class="flex items-end gap-1.5" :title="`Forfeited (unvested at termination) ${fmtShares(totals.totalForfeited)} + Expired (vested but unexercised) ${fmtShares(totals.totalExpired)} — both returned to Available`">
+        <div class="flex items-end gap-1.5">
           <span class="text-ink-500">Forfeited/Expired</span>
-          <span class="font-medium" :class="totals.totalForfeitedOrExpired > 0 ? 'text-red-700' : 'text-ink-400'">{{ fmtShares(totals.totalForfeitedOrExpired) }}</span>
+          <span class="font-medium" :class="totals.totalForfeitedOrExpired > 0 ? 'text-red-700' : 'text-ink-400'"><UiCalcTip :formula="fForfExp">{{ fmtShares(totals.totalForfeitedOrExpired) }}</UiCalcTip></span>
         </div>
       </div>
 
@@ -1146,6 +1158,7 @@ const chart = computed(() => {
                 <NumberInput v-model="form.value" prefix="$" :digits="0" :disabled="inputMode !== 'value'" />
               </label>
             </div>
+            <p class="mt-1 text-[11px] text-ink-700 num">{{ ideaCalc }}</p>
             <p class="mt-1.5 text-[10px] text-ink-500">% denominator: modeled fully diluted ({{ fmtShares(modeledFDS) }}). $ uses current PPS ({{ fmtUSD(currentPPS) }}).</p>
           </div>
 

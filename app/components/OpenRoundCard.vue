@@ -9,6 +9,7 @@
 // discrete actions, not field edits.
 import { Sparkles, Plus, Trash2, Save, Undo2, Check } from 'lucide-vue-next'
 import { fmtShares, fmtUSD } from '~/utils/format'
+import { calcPct, calcSum, calcSharesFromMoney } from '~/utils/calc'
 import { newSharesIssued, openRoundPostFds } from '~/utils/capTable'
 
 interface Props { companyId: string }
@@ -263,6 +264,21 @@ const ownership = computed(() => {
   if (!newShares.value || !totalSharesFdsPost.value) return null
   return newShares.value / totalSharesFdsPost.value
 })
+
+// Calc-tooltip strings — the raw arithmetic with the live numbers in it.
+const fPostMoney = computed(() => postMoney.value == null ? null
+  : calcSum([['Pre-money', preMoney.value || 0], ['New money', newMoney.value || 0]], fmtUSD))
+const fNewShares = computed(() => newShares.value == null ? null
+  : calcSharesFromMoney(newMoney.value || 0, sharePrice.value || 0))
+const fTotalFds = computed(() => totalSharesFdsPost.value == null ? null
+  : calcSum([
+    ['Prior FDS', agg.value?.total_shares_fds ?? 0],
+    ['New preferred', newShares.value ?? 0],
+    ['Option pool', optionPoolIssued.value ?? 0],
+    ['Notes converted', effNotesConverted.value ?? 0],
+  ]))
+const fOwnership = computed(() => ownership.value == null ? null
+  : calcPct(newShares.value || 0, totalSharesFdsPost.value || 0, 2))
 </script>
 
 <template>
@@ -384,20 +400,20 @@ const ownership = computed(() => {
       <div class="px-5 py-3 border-t border-ink-100 grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-2 text-[12px]" :class="isOpen ? 'bg-brand-soft/40' : 'bg-ink-50/50'">
         <div>
           <div class="text-[10px] uppercase tracking-[0.06em] text-ink-500 font-medium">Post-money</div>
-          <div class="num font-semibold text-ink-900">{{ postMoney != null ? fmtUSD(postMoney) : '—' }}</div>
+          <div class="num font-semibold text-ink-900"><UiCalcTip :formula="fPostMoney">{{ postMoney != null ? fmtUSD(postMoney) : '—' }}</UiCalcTip></div>
         </div>
         <div>
           <div class="text-[10px] uppercase tracking-[0.06em] text-ink-500 font-medium">New shares</div>
-          <div class="num font-semibold text-ink-900">{{ newShares != null ? fmtShares(newShares) : '—' }}</div>
+          <div class="num font-semibold text-ink-900"><UiCalcTip :formula="fNewShares">{{ newShares != null ? fmtShares(newShares) : '—' }}</UiCalcTip></div>
         </div>
         <div>
           <div class="text-[10px] uppercase tracking-[0.06em] text-ink-500 font-medium">Total FDS <span class="text-ink-400 font-normal normal-case tracking-normal">post</span></div>
-          <div class="num font-semibold text-ink-900">{{ totalSharesFdsPost != null ? fmtShares(totalSharesFdsPost) : '—' }}</div>
+          <div class="num font-semibold text-ink-900"><UiCalcTip :formula="fTotalFds">{{ totalSharesFdsPost != null ? fmtShares(totalSharesFdsPost) : '—' }}</UiCalcTip></div>
         </div>
       </div>
 
       <div v-if="ownership != null" class="px-5 py-2 border-t border-ink-100 text-[11px] text-ink-500 num">
-        New investors will own ≈ <span class="font-medium text-ink-900">{{ (ownership * 100).toFixed(2) }}%</span> of fully-diluted post-close.
+        New investors will own ≈ <span class="font-medium text-ink-900"><UiCalcTip :formula="fOwnership">{{ (ownership * 100).toFixed(2) }}%</UiCalcTip></span> of fully-diluted post-close.
       </div>
     </template>
   </section>
