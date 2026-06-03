@@ -457,6 +457,8 @@ const form = reactive({
   vest_months: 48,
   cliff_months: 12,
   notes: '',
+  job_title: '',
+  job_level: '',
 })
 
 // Idea sub-types shown in the modal selector — order matches the spec §5.6
@@ -525,6 +527,8 @@ function openModal(idea?: any) {
     form.vest_months = idea.vest_months ?? 48
     form.cliff_months = idea.cliff_months ?? 12
     form.notes = idea.notes || ''
+    form.job_title = idea.job_title || ''
+    form.job_level = idea.job_level || ''
     inputMode.value = 'shares'
     syncFromShares()
   } else {
@@ -539,6 +543,8 @@ function openModal(idea?: any) {
     form.vest_months = 48
     form.cliff_months = 12
     form.notes = ''
+    form.job_title = ''
+    form.job_level = ''
     inputMode.value = 'shares'
   }
   showModal.value = true
@@ -559,6 +565,8 @@ async function saveIdea() {
       vest_months: isGrant ? form.vest_months : null,
       cliff_months: isGrant ? form.cliff_months : null,
       notes: form.notes || null,
+      job_title: isGrant ? (form.job_title.trim() || null) : null,
+      job_level: isGrant ? (form.job_level.trim() || null) : null,
     }
     if (editingIdea.value) {
       await $fetch(`/api/pool-events/${editingIdea.value.id}`, { method: 'PATCH', body })
@@ -1163,6 +1171,8 @@ const chart = computed(() => {
           </div>
 
           <template v-if="form.type === 'grant'">
+            <UiInput v-model="form.job_title" label="Job title" placeholder="e.g. Staff Engineer" />
+            <UiInput v-model="form.job_level" label="Level" placeholder="e.g. 6" />
             <UiInput v-model="form.vest_months" type="number" label="Vest months" />
             <UiInput v-model="form.cliff_months" type="number" label="Cliff months" />
           </template>

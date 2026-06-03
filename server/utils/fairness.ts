@@ -243,7 +243,21 @@ export function buildFairness(rounds: FairnessRound[], rawHolders: RawHolder[], 
       recommendedTotalAddl += g.recommendedAddl
     }
   }
-  levels.sort((a, b) => b.post.target - a.post.target)
+  // Order by the level number descending (e.g. 10 on top → 1), so the
+  // sections read top-down by seniority. Non-numeric levels fall back to
+  // target ownership, then alphabetical.
+  const levelNum = (l: string) => { const m = l.match(/\d+/); return m ? parseInt(m[0], 10) : NaN }
+  levels.sort((a, b) => {
+    const na = levelNum(a.level)
+    const nb = levelNum(b.level)
+    const aOk = Number.isFinite(na)
+    const bOk = Number.isFinite(nb)
+    if (aOk && bOk) return nb - na
+    if (aOk) return -1
+    if (bOk) return 1
+    if (b.post.target !== a.post.target) return b.post.target - a.post.target
+    return a.level.localeCompare(b.level)
+  })
 
   // Roster order: included first, then by level rank, then ownership desc.
   const levelRank = new Map(levels.map((l, i) => [l.level, i]))
