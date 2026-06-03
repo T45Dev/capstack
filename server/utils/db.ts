@@ -371,6 +371,10 @@ function migrate(d: Database.Database): void {
   // operator wants to see them broken out for audit.
   ensureColumn('grants', 'quantity_expired', 'INTEGER')
   ensureColumn('grants', 'award_type', 'TEXT')
+  // Grade/title on a grant itself — lets a PROPOSED grant for a future hire
+  // (no stakeholder row yet) carry a level for Grant Fairness, same as ideas.
+  ensureColumn('grants', 'job_title', 'TEXT')
+  ensureColumn('grants', 'job_level', 'TEXT')
   ensureColumn('grants', 'acceleration', 'TEXT')
   // Per-event dates on the grant row. Carta's plan sheet aggregates
   // exercises/forfeits/expirations into per-grant counts but also

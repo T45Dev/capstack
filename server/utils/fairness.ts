@@ -50,6 +50,10 @@ export interface RawHolder {
   // proposed grant, or an anonymous pool idea. Proposed/idea rows are only
   // emitted when includeFuture is on.
   source?: 'grant' | 'proposed' | 'idea'
+  // Where the row's title/level should be written: a stakeholder, a grant
+  // row (unlinked proposed), or a pool_event (idea). Drives inline editing.
+  editKind?: 'stakeholder' | 'grant' | 'idea'
+  editId?: string | null
 }
 
 export interface Band {
@@ -62,6 +66,8 @@ export interface Band {
 
 export interface Holder extends RawHolder {
   source: 'grant' | 'proposed' | 'idea'
+  editKind: 'stakeholder' | 'grant' | 'idea'
+  editId: string | null
   hireRoundCode: string | null
   hireRoundName: string | null
   entryFDS: number
@@ -204,6 +210,8 @@ export function buildFairness(rounds: FairnessRound[], rawHolders: RawHolder[], 
     return {
       ...h,
       source: h.source ?? 'grant',
+      editKind: h.editKind ?? 'stakeholder',
+      editId: h.editId ?? h.stakeholderId,
       hireRoundCode: hireRound?.code ?? null,
       hireRoundName: hireRound?.name ?? null,
       entryFDS,

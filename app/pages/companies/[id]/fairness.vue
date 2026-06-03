@@ -28,6 +28,8 @@ interface Holder {
   level: string | null
   include: boolean
   source: 'grant' | 'proposed' | 'idea'
+  editKind: 'stakeholder' | 'grant' | 'idea'
+  editId: string | null
   awardTypes: string[]
   optionShares: number
   heldShares: number
@@ -192,7 +194,22 @@ const flagMeta: Record<string, { label: string; cls: string }> = {
   na: { label: '—', cls: 'bg-ink-100 text-ink-500 border-ink-200' },
 }
 
-async function saveField(h: Holder, field: 'title' | 'job_level' | 'salary' | 'salary_midpoint', value: string) {
+// Title/level write to wherever the row's grade lives: the stakeholder, the
+// proposed grant row, or the pool idea. (stakeholders use `title`; grants and
+// pool_events use `job_title`. Everyone uses `job_level`.)
+async function saveGrade(h: Holder, which: 'title' | 'level', value: string) {
+  if (!h.editId) return
+  const v = value.trim()
+  const titleField = h.editKind === 'stakeholder' ? 'title' : 'job_title'
+  const body = which === 'title' ? { [titleField]: v } : { job_level: v }
+  const url = h.editKind === 'stakeholder' ? `/api/stakeholders/${h.editId}`
+    : h.editKind === 'grant' ? `/api/grants/${h.editId}`
+    : `/api/pool-events/${h.editId}`
+  await $fetch(url, { method: 'PATCH', body })
+  await refresh()
+}
+// Salary / midpoint live only on stakeholders.
+async function saveSalary(h: Holder, field: 'salary' | 'salary_midpoint', value: string) {
   if (!h.stakeholderId) return
   await $fetch(`/api/stakeholders/${h.stakeholderId}`, { method: 'PATCH', body: { [field]: value } })
   await refresh()
@@ -300,20 +317,20 @@ const tabs = [
             </td>
             <td class="px-3 py-1.5 text-ink-600 num text-[12px]">{{ h.awardTypes.join(', ') || '—' }}</td>
             <td class="px-3 py-1.5">
-              <input :class="amberInput" :value="h.title || ''" :disabled="!h.stakeholderId" placeholder="title"
-                     @change="(ev) => saveField(h, 'title', (ev.target as HTMLInputElement).value)">
+              <input :class="amberInput" :value="h.title || ''" :disabled="!h.editId" placeholder="title"
+                     @change="(ev) => saveGrade(h, 'title', (ev.target as HTMLInputElement).value)">
             </td>
             <td class="px-3 py-1.5">
-              <input :class="amberInput" :value="h.level || ''" :disabled="!h.stakeholderId" placeholder="level"
-                     @change="(ev) => saveField(h, 'job_level', (ev.target as HTMLInputElement).value)">
+              <input :class="amberInput" :value="h.level || ''" :disabled="!h.editId" placeholder="level"
+                     @change="(ev) => saveGrade(h, 'level', (ev.target as HTMLInputElement).value)">
             </td>
             <td class="px-3 py-1.5">
               <input :class="[amberInput, 'text-right']" :value="h.salary ?? ''" :disabled="!h.stakeholderId" placeholder="—" inputmode="numeric"
-                     @change="(ev) => saveField(h, 'salary', (ev.target as HTMLInputElement).value)">
+                     @change="(ev) => saveSalary(h, 'salary', (ev.target as HTMLInputElement).value)">
             </td>
             <td class="px-3 py-1.5">
               <input :class="[amberInput, 'text-right']" :value="h.salaryMidpoint ?? ''" :disabled="!h.stakeholderId" placeholder="—" inputmode="numeric"
-                     @change="(ev) => saveField(h, 'salary_midpoint', (ev.target as HTMLInputElement).value)">
+                     @change="(ev) => saveSalary(h, 'salary_midpoint', (ev.target as HTMLInputElement).value)">
             </td>
             <td class="px-3 py-1.5 text-right num text-ink-800">{{ fmtShares(h.optionShares) }}</td>
           </tr>

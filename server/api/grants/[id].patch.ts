@@ -13,6 +13,7 @@ export default defineEventHandler(async (event) => {
     // operator can correct values if the import misread something.
     'quantity_issued', 'quantity_exercised', 'quantity_forfeited', 'quantity_expired',
     'award_type', 'acceleration', 'vesting_schedule_id',
+    'job_title', 'job_level',
   ]
   const updates: string[] = []
   const params: any[] = []
