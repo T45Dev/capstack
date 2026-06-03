@@ -91,13 +91,13 @@ export default defineEventHandler(async (event) => {
   // Pool ideas (anonymous future grants/reserves) — kept individually so each
   // is its own row, plus an aggregate for the methodology note.
   let ideasShares = 0
-  const ideaList: Array<{ name: string; shares: number; kind: string | null }> = []
+  const ideaList: Array<{ name: string; shares: number; kind: string | null; title: string | null; level: string | null }> = []
   try {
     const ideas = await $fetch<any[]>(`/api/companies/${id}/pool-events`)
     for (const ie of (ideas || [])) {
       if (ie.type === 'grant' || ie.type === 'reserve') {
         ideasShares += ie.shares || 0
-        ideaList.push({ name: ie.name || 'Idea', shares: ie.shares || 0, kind: ie.kind || null })
+        ideaList.push({ name: ie.name || 'Idea', shares: ie.shares || 0, kind: ie.kind || null, title: ie.job_title || null, level: ie.job_level || null })
       }
     }
   } catch { /* pool-events optional */ }
@@ -144,8 +144,8 @@ export default defineEventHandler(async (event) => {
       holders.push({
         stakeholderId: null,
         name: idea.name,
-        title: null,
-        level: null,
+        title: idea.title,
+        level: idea.level,
         include: true,
         awardTypes: idea.kind ? [String(idea.kind).toUpperCase()] : [],
         optionShares: 0,

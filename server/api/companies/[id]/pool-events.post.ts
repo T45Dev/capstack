@@ -19,6 +19,8 @@ export default defineEventHandler(async (event) => {
     vest_months?: number | null
     cliff_months?: number | null
     notes?: string | null
+    job_title?: string | null
+    job_level?: string | null
   }>(event)
 
   if (!body?.event_date) throw createError({ statusCode: 400, message: 'event_date required' })
@@ -30,8 +32,8 @@ export default defineEventHandler(async (event) => {
   const eid = newId('pe')
   db().prepare(`
     INSERT INTO pool_events (
-      id, company_id, event_date, type, name, kind, shares, vest_months, cliff_months, notes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      id, company_id, event_date, type, name, kind, shares, vest_months, cliff_months, notes, job_title, job_level
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     eid, id,
     body.event_date,
@@ -42,6 +44,8 @@ export default defineEventHandler(async (event) => {
     isGrant ? (body.vest_months ?? 48) : null,
     isGrant ? (body.cliff_months ?? 12) : null,
     body.notes || null,
+    isGrant ? (body.job_title?.trim() || null) : null,
+    isGrant ? (body.job_level?.trim() || null) : null,
   )
   return db().prepare('SELECT * FROM pool_events WHERE id = ?').get(eid)
 })

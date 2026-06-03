@@ -78,7 +78,9 @@ const recLevels = computed(() =>
 // Pool ideas are anonymous (no job level), so rather than slot them into a
 // level and flag under/over, we show where their proposed size LANDS — the
 // level band their resulting % falls into.
-const ideaRecs = computed(() => included.value.filter(h => h.source === 'idea'))
+// Ideas WITHOUT a level: shown as placements (no band to compare to). Ideas
+// that have been given a level flow into their level's section instead.
+const ideaRecs = computed(() => included.value.filter(h => h.source === 'idea' && !h.level))
 function levelForPct(pct: number): string | null {
   const levels = data.value?.levels || []
   if (!levels.length) return null

@@ -345,6 +345,10 @@ function migrate(d: Database.Database): void {
   // Grant Fairness "include" toggle. NULL = use the default (included); 0/1
   // once the operator ticks. Scoped to the Fairness analysis only.
   ensureColumn('stakeholders', 'fairness_include', 'INTEGER')
+  // Pool ideas (future-grant events) can carry a job title + level so the
+  // Grant Fairness recommendation slots them into the right level section.
+  ensureColumn('pool_events', 'job_title', 'TEXT')
+  ensureColumn('pool_events', 'job_level', 'TEXT')
   // Stamped on the first successful Carta import. The import UI uses it
   // to decide between "Welcome" and "Re-import" framing; nothing else
   // gates on it now that the setup wizard is gone.

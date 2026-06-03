@@ -143,6 +143,14 @@ describe('buildFairness', () => {
     expect(res.holders.find(h => h.name === 'I')!.totalShares).toBe(8_000)
   })
 
+  it('orders level sections by level number descending (10 before 2)', () => {
+    const res = buildFairness(rounds, [
+      H({ name: 'a', level: '2', optionShares: 10_000, firstGrantDate: '2023-02-01' }),
+      H({ name: 'b', level: '10', optionShares: 10_000, firstGrantDate: '2023-02-01' }),
+    ], {})
+    expect(res.levels.map(l => l.level)).toEqual(['10', '2'])
+  })
+
   it('does not flag holders without a level', () => {
     const res = buildFairness(rounds, [H({ name: 'NL', optionShares: 1000, firstGrantDate: '2023-02-01' })], {})
     expect(res.holders[0].flag).toBe('na')
