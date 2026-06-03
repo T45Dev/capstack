@@ -1,5 +1,6 @@
 import { db } from '~~/server/utils/db'
 import { buildFairness, type FairnessRound, type RawHolder } from '~~/server/utils/fairness'
+import { classifyAwardType } from '~~/server/utils/awardType'
 
 // Employee Grant Fairness data. Per-round FDS is reused from the
 // round-summary endpoint (single source of truth for the cumulative walk);
@@ -73,7 +74,7 @@ export default defineEventHandler(async (event) => {
       map.set(key, a)
     }
     a.optionShares += out
-    if (row.award_type) a.awardTypes.add(String(row.award_type).toUpperCase())
+    if (row.award_type) { const t = classifyAwardType(row.award_type); if (t) a.awardTypes.add(t) }
     if (date && (!a.firstGrantDate || date < a.firstGrantDate)) a.firstGrantDate = date
   }
 
@@ -87,7 +88,7 @@ export default defineEventHandler(async (event) => {
     proposedBy.set(key, (proposedBy.get(key) || 0) + (row.quantity || 0))
     let d = proposedDetail.get(key)
     if (!d) { d = { stakeholderId: row.stakeholder_id || null, name: row.recipient_name || 'Proposed grant', kinds: new Set() }; proposedDetail.set(key, d) }
-    if (row.award_type) d.kinds.add(String(row.award_type).toUpperCase())
+    if (row.award_type) { const t = classifyAwardType(row.award_type); if (t) d.kinds.add(t) }
   }
 
   // Pool ideas (anonymous future grants/reserves) — kept individually so each
