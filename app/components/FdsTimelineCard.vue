@@ -4,6 +4,7 @@
 // Grant Fairness hire-basis, the Previous-Round base FDS (when present), and
 // the Option Pool Impact timeline. Lives on the Financings page.
 const props = defineProps<{ companyId: string }>()
+const emit = defineEmits<{ changed: [] }>()
 
 interface Milestone { id: string; as_of_date: string | null; label: string | null; fds: number | null; pps: number | null; option_pool: number | null }
 const { data: milestones, refresh } = await useFetch<Milestone[]>(
@@ -18,15 +19,15 @@ async function addMilestone() {
   if (!newMs.as_of_date) return
   await $fetch(`/api/companies/${props.companyId}/milestones`, { method: 'POST', body: { ...newMs } })
   Object.assign(newMs, fresh())
-  await refresh()
+  await refresh(); emit('changed')
 }
 async function patchMilestone(m: Milestone, field: 'as_of_date' | 'label' | 'fds' | 'pps' | 'option_pool', value: any) {
   await $fetch(`/api/milestones/${m.id}`, { method: 'PATCH', body: { [field]: value } })
-  await refresh()
+  await refresh(); emit('changed')
 }
 async function deleteMilestone(m: Milestone) {
   await $fetch(`/api/milestones/${m.id}`, { method: 'DELETE' })
-  await refresh()
+  await refresh(); emit('changed')
 }
 </script>
 
