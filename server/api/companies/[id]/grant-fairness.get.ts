@@ -186,5 +186,5 @@ export default defineEventHandler(async (event) => {
   }
 
   const result = buildFairness(rounds, holders, { selectedRoundCode: selectedRound, includeFuture, ideasShares })
-  return { company: { id: company.id, name: company.name, slug: company.slug }, benchmarkRoles: THELANDER_ROLES, ...result }
+  return { company: { id: company.id, name: company.name, slug: company.slug }, benchmarkRoles: THELANDER_ROLES, benchmarkBands: THELANDER_EQUITY, ...result }
 })

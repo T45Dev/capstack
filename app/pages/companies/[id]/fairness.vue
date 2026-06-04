@@ -17,7 +17,7 @@ interface MarketBand { n: number; min: number | null; p25: number | null; med: n
 const route = useRoute()
 const id = computed(() => route.params.id as string)
 
-const tab = ref<'roster' | 'holdings' | 'recommend' | 'calibration'>('roster')
+const tab = ref<'roster' | 'holdings' | 'recommend' | 'calibration' | 'newhire'>('roster')
 const selectedRound = ref<string>('')
 const includeFuture = ref(false)
 const FUTURE_KEY = 'capstack:fairness:includeFuture'
@@ -74,6 +74,7 @@ interface FairnessData {
   levels: Level[]
   holders: Holder[]
   benchmarkRoles: string[]
+  benchmarkBands: Record<string, MarketBand>
   methodology: string
 }
 
@@ -179,6 +180,46 @@ async function saveBenchmark(h: Holder, value: string) {
   await $fetch(`/api/stakeholders/${h.stakeholderId}`, { method: 'PATCH', body: { benchmark_role: value } })
   await refresh()
 }
+
+// ---- New-hire calculator ----
+// Recommend a fresh grant from: the grade's internal median %, the role's
+// market P50 %, blended, then tilted by where the cash offer sits vs midpoint.
+// Anchored in % of FDS → converted to shares at post-B FDS, so a new hire is
+// naturally diluted (same % is fewer shares as the FDS grows isn't the point;
+// the absolute share count is what we award and its % falls out of post FDS).
+const nhGrade = ref<string>('')
+const nhRole = ref<string>('')
+const nhSalary = ref<number | null>(null)
+const nhMidpoint = ref<number | null>(null)
+const nhBlend = ref<number>(50)          // % weight on MARKET (0 = all internal)
+const nhTilt = ref<'off' | 'mild' | 'strong'>('mild')
+const gradeOptions = computed(() => gradeStats.value.filter(g => !g.interpolated).map(g => g.level))
+
+const nhCalc = computed(() => {
+  const internal = gradeStats.value.find(g => g.level === nhGrade.value && !g.interpolated)?.medPct ?? null
+  const market = nhRole.value
+    ? (data.value?.benchmarkBands?.[nhRole.value]?.med ?? null)
+    : (marketByGrade.value.get(nhGrade.value)?.med ?? null)
+  // Blend; if one side is missing, lean fully on the other.
+  let w = nhBlend.value / 100
+  let blended: number | null
+  if (internal != null && market != null) blended = (1 - w) * internal + w * market
+  else blended = internal ?? market
+  if (blended == null) return null
+  // Salary tilt: +/- around midpoint. compa = salary / midpoint.
+  const beta = nhTilt.value === 'off' ? 0 : nhTilt.value === 'mild' ? 0.5 : 1
+  const compa = (nhSalary.value && nhMidpoint.value) ? nhSalary.value / nhMidpoint.value : null
+  const tilt = (beta && compa != null) ? Math.max(0.5, Math.min(1.5, 1 + beta * (compa - 1))) : 1
+  const targetPct = blended * tilt
+  const fds = postFDS.value
+  const shares = Math.round(targetPct * fds)
+  return {
+    internal, market, blended, compa, tilt, targetPct, shares,
+    value: shares * (data.value?.currentPPS || 0),
+    internalRange: gradeStats.value.find(g => g.level === nhGrade.value),
+    marketBand: nhRole.value ? data.value?.benchmarkBands?.[nhRole.value] : null,
+  }
+})
 // Per-person ISO detail, grade desc then hire year asc (so drift reads top-down).
 const isoDetail = computed(() => [...isoGrants.value].sort((a, b) => {
   const d = (levelNum(b.level) || 0) - (levelNum(a.level) || 0)
@@ -264,6 +305,7 @@ const tabs = [
   { key: 'holdings', label: 'Current holdings' },
   { key: 'recommend', label: 'Recommended grants' },
   { key: 'calibration', label: 'Calibration' },
+  { key: 'newhire', label: 'New-hire calc' },
 ] as const
 </script>
 
@@ -668,6 +710,81 @@ const tabs = [
             </table>
           </UiCard>
         </template>
+      </div>
+    </template>
+
+    <!-- TAB 5: New-hire calculator -->
+    <template v-else-if="tab === 'newhire'">
+      <div class="max-w-3xl">
+        <div class="rounded-lg border border-ink-200 bg-ink-50/60 px-4 py-2.5 mb-5 flex items-start gap-2">
+          <Info :size="15" class="text-ink-400 mt-0.5 shrink-0" />
+          <p class="text-xs text-ink-600 leading-relaxed">
+            Sizes a fresh grant from the grade's internal median (Calibration) blended with the role's market P50
+            (Thelander), then tilted by where the cash offer sits vs the salary midpoint. Anchored in % of FDS and
+            converted to shares at the post-round FDS, so the % falls out naturally diluted.
+          </p>
+        </div>
+
+        <UiCard class="mb-5">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <label class="block">
+              <span class="block text-[11.5px] font-medium text-ink-700 mb-1">Grade <span class="text-ink-400 font-normal">(internal median)</span></span>
+              <select v-model="nhGrade" class="w-full text-sm border border-ink-300 rounded px-2 py-1.5 bg-white">
+                <option value="">—</option>
+                <option v-for="g in gradeOptions" :key="g" :value="g">{{ g }}</option>
+              </select>
+            </label>
+            <label class="block">
+              <span class="block text-[11.5px] font-medium text-ink-700 mb-1">Market role <span class="text-ink-400 font-normal">(Thelander P50)</span></span>
+              <select v-model="nhRole" class="w-full text-sm border border-ink-300 rounded px-2 py-1.5 bg-white">
+                <option value="">Use grade's market</option>
+                <option v-for="r in data.benchmarkRoles" :key="r" :value="r">{{ r }}</option>
+              </select>
+            </label>
+            <label class="block">
+              <span class="block text-[11.5px] font-medium text-ink-700 mb-1">Offer salary</span>
+              <NumberInput v-model="nhSalary" prefix="$" placeholder="—" class="w-full" />
+            </label>
+            <label class="block">
+              <span class="block text-[11.5px] font-medium text-ink-700 mb-1">Salary midpoint</span>
+              <NumberInput v-model="nhMidpoint" prefix="$" placeholder="—" class="w-full" />
+            </label>
+            <label class="block">
+              <span class="block text-[11.5px] font-medium text-ink-700 mb-1">Blend <span class="text-ink-400 font-normal">{{ 100 - nhBlend }}% internal · {{ nhBlend }}% market</span></span>
+              <input v-model.number="nhBlend" type="range" min="0" max="100" step="5" class="w-full accent-brand">
+            </label>
+            <label class="block">
+              <span class="block text-[11.5px] font-medium text-ink-700 mb-1">Salary tilt</span>
+              <div class="inline-flex rounded-md border border-ink-300 overflow-hidden text-xs">
+                <button type="button" class="px-2.5 py-1.5" :class="nhTilt === 'off' ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="nhTilt = 'off'">Off</button>
+                <button type="button" class="px-2.5 py-1.5 border-l border-ink-300" :class="nhTilt === 'mild' ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="nhTilt = 'mild'">Mild</button>
+                <button type="button" class="px-2.5 py-1.5 border-l border-ink-300" :class="nhTilt === 'strong' ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="nhTilt = 'strong'">Strong</button>
+              </div>
+            </label>
+          </div>
+        </UiCard>
+
+        <div v-if="!nhCalc" class="text-sm text-ink-500 border border-dashed border-ink-300 rounded-lg p-8 text-center">
+          Pick a grade with calibration data and/or a market role to get a recommendation.
+        </div>
+        <UiCard v-else>
+          <div class="flex items-end justify-between gap-4 flex-wrap">
+            <div>
+              <div class="text-[11px] uppercase tracking-wide text-ink-500">Recommended new-hire grant</div>
+              <div class="text-3xl font-semibold text-brand num mt-1">{{ fmtShares(nhCalc.shares) }}</div>
+              <div class="text-xs text-ink-500 num mt-0.5">{{ fmtPct(nhCalc.targetPct, 3) }} of FDS · {{ fmtUSD(nhCalc.value) }} at current PPS</div>
+            </div>
+          </div>
+          <div class="mt-4 pt-3 border-t border-ink-100 text-[12px] num space-y-1.5">
+            <div class="flex justify-between"><span class="text-ink-500">Internal median (grade)</span><span class="text-ink-800">{{ nhCalc.internal != null ? fmtPct(nhCalc.internal, 3) : '—' }}</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">Market P50 (role)</span><span class="text-violet-700">{{ nhCalc.market != null ? fmtPct(nhCalc.market, 3) : '—' }}</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">Blended ({{ 100 - nhBlend }}/{{ nhBlend }})</span><span class="text-ink-800">{{ fmtPct(nhCalc.blended!, 3) }}</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">Salary tilt{{ nhCalc.compa != null ? ` · compa ${nhCalc.compa.toFixed(2)}` : '' }}</span><span class="text-ink-800">×{{ nhCalc.tilt.toFixed(3) }}</span></div>
+            <div class="flex justify-between border-t border-ink-100 pt-1.5"><span class="text-ink-700 font-medium">Target</span><span class="text-ink-900 font-medium">{{ fmtPct(nhCalc.targetPct, 3) }} → {{ fmtShares(nhCalc.shares) }}</span></div>
+            <div v-if="nhCalc.internalRange" class="flex justify-between text-ink-400"><span>Internal range (grade)</span><span>{{ fmtShares(nhCalc.internalRange.lo) }}–{{ fmtShares(nhCalc.internalRange.hi) }}</span></div>
+            <div v-if="nhCalc.marketBand?.med" class="flex justify-between text-ink-400"><span>Market band (role P25–P75)</span><span>{{ fmtPct(nhCalc.marketBand.p25 ?? nhCalc.marketBand.med, 3) }}–{{ fmtPct(nhCalc.marketBand.p75 ?? nhCalc.marketBand.med, 3) }}</span></div>
+          </div>
+        </UiCard>
       </div>
     </template>
   </div>
