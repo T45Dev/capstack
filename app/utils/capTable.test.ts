@@ -1,7 +1,9 @@
 // Cap-table FDS math regression suite. Locks the post-round FDS build-up
 // so the Open-Round card and the Overall Dilution page can't drift apart.
 import { describe, it, expect } from 'vitest'
-import { newSharesIssued, openRoundPostFds } from './capTable'
+// Import the canonical shared module directly (vitest resolves the relative
+// path without the Nuxt `~~` alias that the re-export in ./capTable uses).
+import { newSharesIssued, openRoundPostFds, authorizedPool, availablePool } from '../../shared/capTableModel'
 
 describe('newSharesIssued', () => {
   it('floors new money ÷ share price', () => {
@@ -48,5 +50,32 @@ describe('openRoundPostFds', () => {
       optionPoolIssued: pool, notesConverted: notes,
     })
     expect(result).toBe(base + newSharesIssued(3_000_000, 1.5) + pool + notes)
+  })
+})
+
+describe('authorizedPool', () => {
+  const base = { hasTimeline: false, timelinePoolTotal: 0, openRoundPoolIssued: 0, allRoundsPoolIssued: 0, poolsLump: 0 }
+  it('timeline total + open round when a timeline carries a pool', () => {
+    expect(authorizedPool({ ...base, hasTimeline: true, timelinePoolTotal: 3_000_000, openRoundPoolIssued: 1_000_000 }))
+      .toBe(4_000_000)
+  })
+  it('ignores the timeline when it carries no pool, falling to round pools', () => {
+    expect(authorizedPool({ ...base, hasTimeline: true, timelinePoolTotal: 0, allRoundsPoolIssued: 2_500_000 }))
+      .toBe(2_500_000)
+  })
+  it('sums round pools when there is no timeline', () => {
+    expect(authorizedPool({ ...base, allRoundsPoolIssued: 1_750_000 })).toBe(1_750_000)
+  })
+  it('falls back to the option_pools lump last', () => {
+    expect(authorizedPool({ ...base, poolsLump: 900_000 })).toBe(900_000)
+  })
+})
+
+describe('availablePool', () => {
+  it('subtracts outstanding and exercised (forfeit/expire already net out)', () => {
+    expect(availablePool(5_000_000, { outstanding: 1_200_000, exercised: 300_000 })).toBe(3_500_000)
+  })
+  it('can go negative when over-allocated', () => {
+    expect(availablePool(1_000_000, { outstanding: 1_200_000, exercised: 100_000 })).toBe(-300_000)
   })
 })

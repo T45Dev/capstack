@@ -12,6 +12,7 @@
 import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, ChevronRight, Lightbulb, TrendingUp, TrendingDown as ArrowDownIcon, X, UploadCloud, AlertTriangle, CheckCircle2 } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtUSD, fmtDate, fmtPricePerShare } from '~/utils/format'
 import { calcSum } from '~/utils/calc'
+import { authorizedPool } from '~/utils/capTable'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -422,10 +423,18 @@ const grantsMissingDate = computed(() => events.value.filter(e => e.source !== '
 // ---- Top stat values ----
 const totals = computed(() => {
   const isIdea = (s: string) => s === 'idea'
-  // Original Authorized = sum of pool top-up events (Financings page
-  // top-ups or Carta fallback). Same computation as grants.vue so
-  // the two pages MUST agree.
-  const poolAuthorizedOriginal = events.value.filter(e => e.type === 'pool_topup' && !isIdea(e.source)).reduce((a, e) => a + e.shares, 0)
+  // Authorized = the shared source of truth (authorizedPool), so the Pool
+  // Impact headline, the Grants page, and Grant Fairness can't diverge. The
+  // pool_topup timeline events above are built from the same inputs, so the
+  // chart's running balance and this headline stay in lockstep.
+  const ms = milestones.value || []
+  const poolAuthorizedOriginal = authorizedPool({
+    hasTimeline: ms.some(m => (m.option_pool || 0) > 0),
+    timelinePoolTotal: ms.reduce((a, m) => a + (m.option_pool || 0), 0),
+    openRoundPoolIssued: (roundSummary.value?.rounds || []).find(r => r.kind === 'open')?.option_pool_issued || 0,
+    allRoundsPoolIssued: (roundSummary.value?.rounds || []).reduce((a, r) => a + (r.option_pool_issued || 0), 0),
+    poolsLump: (grantsData.value?.pools || []).reduce((a: number, p: any) => a + (p.authorized || 0), 0),
+  })
   // Lifetime grant accounting: lifecycle counts from the Carta option-
   // plan sheet via per-grant detail.
   const ogrants = (grantsData.value?.grants || []).filter((g: any) => g.status === 'outstanding')

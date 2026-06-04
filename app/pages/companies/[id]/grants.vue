@@ -2,6 +2,7 @@
 import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle, UploadCloud, AlertTriangle, CheckCircle2, X } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtDate, fmtPricePerShare, normalizeDate } from '~/utils/format'
 import { calcSum, calcPct, calcValueUSD } from '~/utils/calc'
+import { authorizedPool } from '~/utils/capTable'
 
 // Badge color per explicit award type (ISO/NSO/RSU). Blank → no badge.
 function awardTypeClass(t: string | null | undefined): string {
@@ -87,9 +88,9 @@ const { data: compute } = await useFetch(() => `/api/companies/${id.value}/compu
 // the Overall Dilution page denominate against; the grants %s must use the
 // same base or they read inflated (compute's preRoundFDS is cap-table-only
 // and omits the open round's new shares + converted notes).
-const { data: aggregate } = await useFetch<{ total_shares_fds: number | null }>(
+const { data: aggregate } = await useFetch<{ total_shares_fds: number | null; option_pool_total: number | null; derived_from_history?: boolean }>(
   () => `/api/companies/${id.value}/aggregate-round`,
-  { watch: [id], default: () => ({ total_shares_fds: null } as any) },
+  { watch: [id], default: () => ({ total_shares_fds: null, option_pool_total: null } as any) },
 )
 
 // Stakeholder linking — proposed grants must roll up the FULL position of the
@@ -217,9 +218,10 @@ const totalOutstanding = computed(() =>
   totalIssued.value - totalExercised.value - totalForfeitedOrExpired.value,
 )
 const totalProposed = computed(() => proposed.value.reduce((a, g) => a + g.quantity, 0))
-// Authorized = sum of rounds.option_pool_issued (operator-typed on
-// the Financings page). Falls back to option_pools (Carta import) when
-// no per-round values are set. Pool Impact uses the same source.
+// Authorized pool comes from the shared source of truth (authorizedPool):
+// the Round-history timeline's pool + the open round's own pool when a
+// timeline exists, else the sum of round pools, else the option_pools lump.
+// Pool Impact + Grant Fairness reference the same function so they can't drift.
 //
 // Authorized stays constant. The headline equation:
 //   Authorized = Outstanding + Exercised + Proposed + Available
@@ -230,12 +232,13 @@ const totalProposed = computed(() => proposed.value.reduce((a, g) => a + g.quant
 // the exercised shares would double-count back into the pool via the
 // Outstanding subtraction. The lifetime decomposition row below tracks
 // where every option ever issued went.
-const poolAuthorized = computed(() => {
-  const fromRounds = (roundSummary.value?.rounds || [])
-    .reduce((a: number, r: any) => a + (r.option_pool_issued || 0), 0)
-  if (fromRounds > 0) return fromRounds
-  return data.value!.pools.reduce((a, p) => a + p.authorized, 0)
-})
+const poolAuthorized = computed(() => authorizedPool({
+  hasTimeline: !!aggregate.value?.derived_from_history,
+  timelinePoolTotal: aggregate.value?.option_pool_total || 0,
+  openRoundPoolIssued: (roundSummary.value?.rounds || []).find((r: any) => r.kind === 'open')?.option_pool_issued || 0,
+  allRoundsPoolIssued: (roundSummary.value?.rounds || []).reduce((a: number, r: any) => a + (r.option_pool_issued || 0), 0),
+  poolsLump: (data.value?.pools || []).reduce((a, p) => a + p.authorized, 0),
+}))
 // Simplified pool math:
 //   Authorized − Outstanding = Available − Proposed = Future Available
 // "Outstanding" in the headline lumps active grants + exercised options

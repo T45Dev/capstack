@@ -2,6 +2,7 @@ import { db } from '~~/server/utils/db'
 import { buildFairness, type FairnessRound, type RawHolder } from '~~/server/utils/fairness'
 import { classifyAwardType } from '~~/server/utils/awardType'
 import { THELANDER_EQUITY, THELANDER_ROLES } from '~~/server/utils/thelander'
+import { openRoundPostFds } from '~~/shared/capTableModel'
 
 // Employee Grant Fairness data. Per-round FDS is reused from the
 // round-summary endpoint (single source of truth for the cumulative walk);
@@ -34,6 +35,31 @@ export default defineEventHandler(async (event) => {
     preFDS: i > 0 ? (Number(rcols[i - 1].total_shares_fds) || 0) : (Number(rc.total_shares_fds) || 0),
     postFDS: Number(rc.total_shares_fds) || 0,
   }))
+
+  // Canonical pre/post FDS for the OPEN round — the same source of truth the
+  // Financings cards and the Overall Dilution page use (decision #10): pre =
+  // the Previous-Round aggregate's Total FDS, post = that base + the open
+  // round's own new shares + pool + notes converted (openRoundPostFds). The
+  // per-round cumulative total_shares_fds above accumulates from 0, so using it
+  // as the denominator double-counts prior history. Overriding just the open
+  // round's entry fixes the Current holdings Pre %, Post %, and % at hire.
+  const agg = await $fetch<{ total_shares_fds: number | null }>(`/api/companies/${id}/aggregate-round`).catch(() => null)
+  const aggFds = Number(agg?.total_shares_fds) || 0
+  const openIdx = rounds.findIndex(r => r.kind === 'open')
+  if (openIdx >= 0 && aggFds > 0) {
+    const rc = rcols[openIdx]
+    rounds[openIdx] = {
+      ...rounds[openIdx],
+      preFDS: aggFds,
+      postFDS: openRoundPostFds({
+        base: aggFds,
+        newMoney: Number(rc.new_money) || 0,
+        sharePrice: Number(rc.share_price) || 0,
+        optionPoolIssued: Number(rc.option_pool_issued) || 0,
+        notesConverted: Number(rc.notes_converted) || 0,
+      }),
+    }
+  }
 
   // Stakeholder comp metadata (title / level / include).
   const sMeta = new Map<string, { name: string; title: string | null; level: string | null; include: boolean; salary: number | null; salaryMidpoint: number | null; benchmarkRole: string | null; startDate: string | null }>()
