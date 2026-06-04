@@ -7,7 +7,7 @@
 // (or hits ⌘S) to commit all changes in a single PATCH. Status toggle,
 // delete, and "Start an open round" still commit immediately — they're
 // discrete actions, not field edits.
-import { Sparkles, Plus, Trash2, Save, Undo2, Check } from 'lucide-vue-next'
+import { Sparkles, Plus, Trash2, Save, Undo2, Check, Layers } from 'lucide-vue-next'
 import { fmtShares, fmtUSD } from '~/utils/format'
 import { calcPct, calcSum, calcSharesFromMoney } from '~/utils/calc'
 import { newSharesIssued, openRoundPostFds } from '~/utils/capTable'
@@ -202,6 +202,30 @@ async function setKind(kind: 'open' | 'closed') {
   await commitField('kind', kind)
 }
 
+// Demote: snapshot this round into the Round-history timeline (its post FDS /
+// price / pool), then clear the open round so a fresh raise can be modeled.
+async function demoteToHistory() {
+  if (!round.value) return
+  if (!confirm('Move this round into Round history and clear the open round? Its FDS / price / pool become a history row.')) return
+  bumpSaving(+1)
+  try {
+    await $fetch(`/api/companies/${props.companyId}/milestones`, {
+      method: 'POST',
+      body: {
+        as_of_date: closeDate.value || new Date().toISOString().slice(0, 10),
+        label: name.value || round.value.code,
+        fds: totalSharesFdsPost.value,
+        pps: sharePrice.value,
+        option_pool: optionPoolIssued.value,
+      },
+    })
+    await $fetch(`/api/rounds/${round.value.id}`, { method: 'DELETE' })
+    await refreshRound()
+    emit('refreshed')
+  } catch (e) { console.error('Demote failed', e) }
+  finally { bumpSaving(-1) }
+}
+
 async function deleteOpenRound() {
   if (!round.value) return
   if (!confirm('Delete this round? This wipes its allocations too.')) return
@@ -327,6 +351,9 @@ const fOwnership = computed(() => ownership.value == null ? null
           <button type="button" class="px-2.5 py-1" :class="isOpen ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="setKind('open')">Open</button>
           <button type="button" class="px-2.5 py-1 border-l border-ink-200" :class="!isOpen ? 'bg-ink-700 text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="setKind('closed')">Closed</button>
         </div>
+        <button class="text-[11px] text-ink-600 hover:text-brand-edge inline-flex items-center gap-1" title="Snapshot this round into Round history and clear it for the next raise" @click="demoteToHistory">
+          <Layers :size="11" /> demote to history
+        </button>
         <button class="text-[11px] text-ink-500 hover:text-red-600 inline-flex items-center gap-1" @click="deleteOpenRound">
           <Trash2 :size="11" /> delete
         </button>

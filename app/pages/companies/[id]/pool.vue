@@ -140,33 +140,45 @@ interface TimelineEvent {
 const events = computed<TimelineEvent[]>(() => {
   const out: TimelineEvent[] = []
 
-  // Pool top-ups derived from the Financings table — each round whose
-  // "Option pool issued" cell is non-zero contributes a pool_topup event
-  // anchored to that round's close_date. This is the chronological source
-  // the operator manages on the Financings page (initial authorization,
-  // top-ups at later rounds, etc.).
-  for (const r of (roundSummary.value?.rounds || [])) {
-    if (!r.option_pool_issued || r.option_pool_issued <= 0) continue
-    out.push({
-      id: `pool:${r.round_id}`,
-      date: r.close_date || fallbackDate.value,
-      name: `${r.name || r.code} pool top-up`,
-      type: 'pool_topup', kind: null, shares: r.option_pool_issued, direction: 1, source: 'pool',
-    })
+  // Pool top-up sources. Single rule to avoid double-counting:
+  //   • With a Round-history timeline, PREVIOUS-round pool comes ONLY from the
+  //     timeline; the current round adds its OWN option_pool_issued (the open
+  //     round isn't in the timeline).
+  //   • Without a timeline (legacy), fall back to every round's
+  //     option_pool_issued, then the option_pools lump.
+  const ms = milestones.value || []
+  const hasTimeline = ms.some(m => (m.option_pool || 0) > 0)
+  if (hasTimeline) {
+    for (const m of ms) {
+      if (!m.option_pool || m.option_pool <= 0) continue
+      out.push({
+        id: `pool-ms:${m.id}`,
+        date: m.as_of_date || fallbackDate.value,
+        name: `${m.label || 'Milestone'} pool top-up`,
+        type: 'pool_topup', kind: null, shares: m.option_pool, direction: 1, source: 'pool',
+      })
+    }
+    const openR = (roundSummary.value?.rounds || []).find(r => r.kind === 'open')
+    if (openR?.option_pool_issued && openR.option_pool_issued > 0) {
+      out.push({
+        id: `pool:${openR.round_id}`,
+        date: openR.close_date || fallbackDate.value,
+        name: `${openR.name || openR.code} pool top-up`,
+        type: 'pool_topup', kind: null, shares: openR.option_pool_issued, direction: 1, source: 'pool',
+      })
+    }
+  } else {
+    for (const r of (roundSummary.value?.rounds || [])) {
+      if (!r.option_pool_issued || r.option_pool_issued <= 0) continue
+      out.push({
+        id: `pool:${r.round_id}`,
+        date: r.close_date || fallbackDate.value,
+        name: `${r.name || r.code} pool top-up`,
+        type: 'pool_topup', kind: null, shares: r.option_pool_issued, direction: 1, source: 'pool',
+      })
+    }
   }
-  // Pool increases entered on the FDS timeline (Settings) — each carries its
-  // milestone's close date, so pool top-ups land chronologically.
-  for (const m of (milestones.value || [])) {
-    if (!m.option_pool || m.option_pool <= 0) continue
-    out.push({
-      id: `pool-ms:${m.id}`,
-      date: m.as_of_date || fallbackDate.value,
-      name: `${m.label || 'Milestone'} pool top-up`,
-      type: 'pool_topup', kind: null, shares: m.option_pool, direction: 1, source: 'pool',
-    })
-  }
-  // Fallback: if no per-round / milestone pool issuances are typed in yet,
-  // fall back to the option_pools table (single lump from Carta import).
+  // Fallback: nothing typed yet → the option_pools lump (Carta import).
   if (!out.some(e => e.type === 'pool_topup')) {
     for (const p of (grantsData.value?.pools || [])) {
       out.push({

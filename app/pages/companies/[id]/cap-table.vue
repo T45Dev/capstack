@@ -28,6 +28,11 @@ const { data: roundSummary, refresh: refreshRoundSummary } = await useFetch<{ ro
 })
 const roundCols = computed<RoundColumn[]>(() => roundSummary.value?.rounds || [])
 
+// Round-history timeline. When it has rows it IS the previous-round record,
+// so the typed Previous-Round card is hidden (its base is derived from here).
+const { data: milestones, refresh: refreshMilestones } = await useFetch<any[]>(() => `/api/companies/${id.value}/milestones`, { watch: [id], default: () => [] })
+const hasTimeline = computed(() => (milestones.value || []).length > 0)
+
 // Saving-indicator state. Both cards bubble their in-flight save count
 // up; the page header sums them into one "Saving…" / "Saved Xs ago" pill.
 const prevSaving = ref(0)
@@ -103,14 +108,14 @@ function exportCsv() { /* No-op on the simplified layout. Kept on the page heade
 
     <!-- Rounds tab: Previous-Round aggregate + Open-Round modeled card,
          side-by-side on wide screens, stacked on narrow. -->
-    <div v-show="activeTab === 'financings'" class="grid lg:grid-cols-2 gap-4">
-      <PreviousRoundCard :company-id="id" @update:saving-count="(n: number) => prevSaving = n" />
-      <OpenRoundCard :company-id="id" @update:saving-count="(n: number) => openSaving = n" @refreshed="refreshRoundSummary" />
+    <div v-show="activeTab === 'financings'" class="grid gap-4" :class="hasTimeline ? '' : 'lg:grid-cols-2'">
+      <!-- Once the Round history has rows, it replaces the typed Previous card. -->
+      <PreviousRoundCard v-if="!hasTimeline" :company-id="id" @update:saving-count="(n: number) => prevSaving = n" />
+      <OpenRoundCard :company-id="id" @update:saving-count="(n: number) => openSaving = n" @refreshed="() => { refreshRoundSummary(); refreshMilestones() }" />
     </div>
-    <!-- Round history (FDS timeline): dated FDS/price/pool per historical
-         round. Latest row sets the Previous-Round base. -->
+    <!-- Round history (FDS timeline): dated FDS/price/pool per previous round. -->
     <div v-show="activeTab === 'financings'" class="mt-4">
-      <FdsTimelineCard :company-id="id" />
+      <FdsTimelineCard :company-id="id" @changed="refreshMilestones" />
     </div>
 
     <!-- Preferred investors tab unchanged. -->
