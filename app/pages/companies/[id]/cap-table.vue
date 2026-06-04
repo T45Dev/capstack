@@ -106,15 +106,18 @@ function exportCsv() { /* No-op on the simplified layout. Kept on the page heade
       <NuxtLink :to="`/companies/${id}/import`"><UiButton variant="primary"><Upload :size="14" /> Import Carta export</UiButton></NuxtLink>
     </UiEmpty>
 
-    <!-- Rounds tab: Previous-Round aggregate + Open-Round modeled card,
-         side-by-side on wide screens, stacked on narrow. -->
-    <div v-show="activeTab === 'financings'" class="grid gap-4" :class="hasTimeline ? '' : 'lg:grid-cols-2'">
-      <!-- Once the Round history has rows, it replaces the typed Previous card. -->
-      <PreviousRoundCard v-if="!hasTimeline" :company-id="id" @update:saving-count="(n: number) => prevSaving = n" />
+    <!-- Rounds tab: Round history (FDS timeline) + Open-Round modeled card,
+         side-by-side on wide screens, stacked on narrow. Once the Round
+         history has rows it takes the left column (replacing the typed
+         Previous-Round card). -->
+    <div v-show="activeTab === 'financings'" class="grid gap-4 items-start lg:grid-cols-2">
+      <FdsTimelineCard v-if="hasTimeline" :company-id="id" @changed="refreshMilestones" />
+      <PreviousRoundCard v-else :company-id="id" @update:saving-count="(n: number) => prevSaving = n" />
       <OpenRoundCard :company-id="id" @update:saving-count="(n: number) => openSaving = n" @refreshed="() => { refreshRoundSummary(); refreshMilestones() }" />
     </div>
-    <!-- Round history (FDS timeline): dated FDS/price/pool per previous round. -->
-    <div v-show="activeTab === 'financings'" class="mt-4">
+    <!-- No timeline yet: keep the Round history editor below so the operator
+         can start one (it moves up beside the Open round once it has rows). -->
+    <div v-if="!hasTimeline" v-show="activeTab === 'financings'" class="mt-4">
       <FdsTimelineCard :company-id="id" @changed="refreshMilestones" />
     </div>
 
