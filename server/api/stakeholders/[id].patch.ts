@@ -20,8 +20,8 @@ export default defineEventHandler(async (event) => {
         // Boolean-ish -> 0/1; null clears back to the default.
         params.push(v == null ? null : (v ? 1 : 0))
       } else if (f === 'salary' || f === 'salary_midpoint') {
-        // Numeric; empty/invalid clears to NULL.
-        const n = v == null || v === '' ? null : Number(v)
+        // Strip $ / commas so "165,000" doesn't parse to NaN → null.
+        const n = v == null || v === '' ? null : Number(String(v).replace(/[$,\s]/g, ''))
         params.push(n != null && Number.isFinite(n) ? n : null)
       } else {
         // Normalise empty strings to NULL so a cleared field reverts to "unset".
