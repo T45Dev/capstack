@@ -87,9 +87,9 @@ const { data: compute } = await useFetch(() => `/api/companies/${id.value}/compu
 // the Overall Dilution page denominate against; the grants %s must use the
 // same base or they read inflated (compute's preRoundFDS is cap-table-only
 // and omits the open round's new shares + converted notes).
-const { data: aggregate } = await useFetch<{ total_shares_fds: number | null }>(
+const { data: aggregate } = await useFetch<{ total_shares_fds: number | null; option_pool_total: number | null; derived_from_history?: boolean }>(
   () => `/api/companies/${id.value}/aggregate-round`,
-  { watch: [id], default: () => ({ total_shares_fds: null } as any) },
+  { watch: [id], default: () => ({ total_shares_fds: null, option_pool_total: null } as any) },
 )
 
 // Stakeholder linking — proposed grants must roll up the FULL position of the
@@ -231,6 +231,18 @@ const totalProposed = computed(() => proposed.value.reduce((a, g) => a + g.quant
 // Outstanding subtraction. The lifetime decomposition row below tracks
 // where every option ever issued went.
 const poolAuthorized = computed(() => {
+  // Round-history timeline model: previous-round pool comes from the FDS
+  // timeline (aggregate.option_pool_total = Σ milestone pool increases),
+  // PLUS the open round's own option_pool_issued (the open round isn't in
+  // the timeline). Mirrors the Pool Impact page's single-source rule so the
+  // two pages can't diverge.
+  const prev = aggregate.value?.option_pool_total || 0
+  if (aggregate.value?.derived_from_history && prev > 0) {
+    const openR = (roundSummary.value?.rounds || []).find((r: any) => r.kind === 'open')
+    return prev + (openR?.option_pool_issued || 0)
+  }
+  // Legacy / no timeline: sum every round's typed pool, else the
+  // option_pools lump (Carta import).
   const fromRounds = (roundSummary.value?.rounds || [])
     .reduce((a: number, r: any) => a + (r.option_pool_issued || 0), 0)
   if (fromRounds > 0) return fromRounds
