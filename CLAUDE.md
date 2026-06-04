@@ -107,26 +107,9 @@ POST /api/companies/:id/convertibles                 — add CN
 PATCH /api/convertibles/:id
 DELETE /api/convertibles/:id
 
-POST /api/companies/:id/import                       — Carta xlsx → DB (one-click cap-table import)
-POST /api/companies/:id/import-preview               — dry-run parse of a Carta xlsx (no writes)
-POST /api/companies/:id/grants/import                — import option grants (proposed) from a spreadsheet
-POST /api/companies/:id/pool-events/import           — import ideas (future grants) from a spreadsheet
+POST /api/companies/:id/import                       — Carta xlsx
 POST /api/companies/:id/compute                      — open-round dilution math
 ```
-
-### Import model (current)
-
-Carta is the primary import. Upload a Carta pro-forma `.xlsx` on the Import page →
-`import.post.ts` parses it (`server/parsers/carta.ts`) and writes stakeholders, option
-grants (status `outstanding`, incl. the exercise/forfeit/expire lifecycle columns), and
-the option pool (`option_pools.authorized`). Rounds, share classes, holdings, and
-convertible notes stay manual on the Rounds page. `import-preview.post.ts` is the dry-run.
-
-The master-import workbook experiment (one relational multi-tab template) was reverted —
-it added friction without enough payoff. Proposed grants and ideas are NOT part of the
-Carta file; import those via their own per-page spreadsheet importers instead:
-`grants/import` (proposed grants, on the Grants page) and `pool-events/import` (ideas, on
-the Option Pool page).
 
 ## Pending / parked
 
