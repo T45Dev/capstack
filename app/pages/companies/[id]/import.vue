@@ -150,10 +150,12 @@ const sheetList = computed(() => {
             </span>
           </div>
           <p class="text-[13px] text-ink-500 mt-1 max-w-2xl">
-            Drop a Carta pro-forma <code class="text-ink-700 bg-ink-100 px-1 py-px rounded text-[12px] num">.xlsx</code>. We'll pull in
-            <span class="text-ink-700 font-medium">option grants</span>,
-            <span class="text-ink-700 font-medium">the people who hold them</span>, and
-            <span class="text-ink-700 font-medium">the option-pool size</span>. Rounds, share classes, holdings, and convertible notes stay manual on the Rounds page.
+            Start with the <span class="text-ink-700 font-medium">master template</span> below for a full company — Stakeholders, Holdings,
+            Option grants, Convertibles, Round history, and Ideas in one workbook. Already have an
+            option-grants spreadsheet? Use the quick import further down to pull in just
+            <span class="text-ink-700 font-medium">grants</span>,
+            <span class="text-ink-700 font-medium">their holders</span>, and
+            <span class="text-ink-700 font-medium">the option-pool size</span>.
           </p>
         </div>
         <NuxtLink :to="`/companies/${id}/cap-table`">
@@ -191,10 +193,18 @@ const sheetList = computed(() => {
       </div>
     </section>
 
-    <!-- Drop zone (Carta pro-forma) -->
+    <!-- Quick import: option grants only (a single grants/cap-table spreadsheet) -->
     <section
       class="rounded-xl border border-ink-200 bg-white shadow-[0_1px_0_rgba(16,24,40,0.04)] overflow-hidden"
     >
+      <div class="px-5 pt-4">
+        <h2 class="text-[15px] font-semibold text-ink-900">Quick import <span class="text-ink-400 font-normal">— option grants only</span></h2>
+        <p class="text-[12.5px] text-ink-500 mt-1 max-w-xl">
+          Already have a single option-grants spreadsheet? Drop it here to pull in grants, their
+          holders, and the option-pool size. Rounds, share classes, holdings, and convertible notes
+          stay manual on the Rounds page.
+        </p>
+      </div>
       <div
         class="m-4 rounded-lg border-2 border-dashed transition-colors px-6 py-12 text-center"
         :class="dragging ? 'border-brand-500 bg-brand-50' : (file ? 'border-ok/40 bg-ok-soft/40' : 'border-ink-300 bg-ink-50/40')"
@@ -206,7 +216,7 @@ const sheetList = computed(() => {
           <div class="grid place-items-center w-12 h-12 rounded-full bg-brand-50 text-brand-600 mx-auto mb-3">
             <UploadCloud :size="22" />
           </div>
-          <p class="text-[14px] text-ink-800 font-medium">Drop your Carta export here</p>
+          <p class="text-[14px] text-ink-800 font-medium">Drop your option-grants spreadsheet here</p>
           <p class="text-[12px] text-ink-500 mt-1">
             or
             <label class="text-brand-600 hover:text-brand-700 cursor-pointer underline font-medium">
@@ -214,7 +224,7 @@ const sheetList = computed(() => {
               <input type="file" accept=".xlsx,.xlsm" class="hidden" @change="onPick" />
             </label>
           </p>
-          <p class="text-[11px] text-ink-400 mt-3 num">.xlsx or .xlsm · pro-forma cap-table export</p>
+          <p class="text-[11px] text-ink-400 mt-3 num">.xlsx or .xlsm · option-grants / cap-table export</p>
         </template>
         <template v-else>
           <div class="grid place-items-center w-12 h-12 rounded-full bg-ok-soft text-ok mx-auto mb-3">

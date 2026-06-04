@@ -4,7 +4,13 @@
 // title / level / salary is entered exactly once. Both the template generator
 // and the importer read this spec, so headers can never drift apart.
 
-export interface MasterColumn { header: string; key: string }
+export interface MasterColumn {
+  header: string
+  key: string
+  values?: string[]   // controlled vocabulary → dropdown + documented
+  format?: string     // e.g. "YYYY-MM-DD", "number"
+  help?: string       // what to put here
+}
 export interface MasterTab {
   sheet: string
   note: string
@@ -16,42 +22,42 @@ export const MASTER_TABS: MasterTab[] = [
     sheet: 'Stakeholders',
     note: 'One row per person or entity. "Name" is the key the other tabs reference — enter title/level/salary here once.',
     columns: [
-      { header: 'Name', key: 'name' },
-      { header: 'Type (Employee/Advisor/Investor/…)', key: 'type' },
-      { header: 'Title', key: 'title' },
-      { header: 'Level', key: 'level' },
-      { header: 'Start date', key: 'start_date' },
-      { header: 'Salary', key: 'salary' },
-      { header: 'Salary midpoint', key: 'salary_midpoint' },
-      { header: 'Benchmark role', key: 'benchmark_role' },
+      { header: 'Name', key: 'name', help: 'Full name or entity name. This is the key other tabs match on.' },
+      { header: 'Type (Employee/Advisor/Investor/…)', key: 'type', values: ['Employee', 'Advisor', 'Consultant', 'Board member', 'Investor', 'Founder'], help: 'Relationship to the company.' },
+      { header: 'Title', key: 'title', help: 'Job title, e.g. Staff Engineer.' },
+      { header: 'Level', key: 'level', help: 'Pay grade / level, e.g. 4 (your scheme).' },
+      { header: 'Start date', key: 'start_date', format: 'YYYY-MM-DD', help: 'Employment start — the hire-basis for a not-yet-issued grant.' },
+      { header: 'Salary', key: 'salary', format: 'number', help: 'Base cash salary. Commas OK.' },
+      { header: 'Salary midpoint', key: 'salary_midpoint', format: 'number', help: 'Benchmark midpoint for the role. Commas OK.' },
+      { header: 'Benchmark role', key: 'benchmark_role', help: 'Must match a Thelander survey role exactly (see the role list on Instructions) for the market overlay. Optional.' },
     ],
   },
   {
     sheet: 'Holdings',
     note: 'Issued shares by class. "Stakeholder" must match a Name on the Stakeholders tab.',
     columns: [
-      { header: 'Stakeholder', key: 'stakeholder' },
-      { header: 'Share class code', key: 'class_code' },
-      { header: 'Share class name', key: 'class_name' },
-      { header: 'Kind (common/preferred)', key: 'kind' },
-      { header: 'Shares', key: 'shares' },
-      { header: 'Issue price', key: 'issue_price' },
+      { header: 'Stakeholder', key: 'stakeholder', help: 'Must match a Name on the Stakeholders tab.' },
+      { header: 'Share class code', key: 'class_code', help: 'Short code you choose, e.g. CS, SA1, PB. Reused across rows = same class.' },
+      { header: 'Share class name', key: 'class_name', help: 'Full name, e.g. Common Stock, Series A Preferred.' },
+      { header: 'Kind (common/preferred)', key: 'kind', values: ['common', 'preferred'], help: 'Whether the class is common or preferred.' },
+      { header: 'Shares', key: 'shares', format: 'number', help: 'Issued shares of this class for this holder. Commas OK.' },
+      { header: 'Issue price', key: 'issue_price', format: 'number', help: 'Original issue price per share (optional).' },
     ],
   },
   {
     sheet: 'Option grants',
     note: 'Outstanding option grants. "Stakeholder" must match a Name on the Stakeholders tab.',
     columns: [
-      { header: 'Stakeholder', key: 'stakeholder' },
-      { header: 'Award type (ISO/NSO)', key: 'award_type' },
-      { header: 'Quantity', key: 'quantity' },
-      { header: 'Strike', key: 'strike' },
-      { header: 'Issue date', key: 'issue_date' },
-      { header: 'Vesting start', key: 'vesting_start' },
-      { header: 'Vest months', key: 'vest_months' },
-      { header: 'Cliff months', key: 'cliff_months' },
-      { header: 'Title', key: 'job_title' },
-      { header: 'Level', key: 'job_level' },
+      { header: 'Stakeholder', key: 'stakeholder', help: 'Must match a Name on the Stakeholders tab.' },
+      { header: 'Award type (ISO/NSO)', key: 'award_type', values: ['ISO', 'NSO', 'RSU'], help: 'Option type. "Incentive…" / "Non-qualified…" are also recognized.' },
+      { header: 'Quantity', key: 'quantity', format: 'number', help: 'Options granted. Commas OK.' },
+      { header: 'Strike', key: 'strike', format: 'number', help: 'Exercise price per share.' },
+      { header: 'Issue date', key: 'issue_date', format: 'YYYY-MM-DD' },
+      { header: 'Vesting start', key: 'vesting_start', format: 'YYYY-MM-DD' },
+      { header: 'Vest months', key: 'vest_months', format: 'number', help: 'Default 48 if blank.' },
+      { header: 'Cliff months', key: 'cliff_months', format: 'number', help: 'Default 12 if blank.' },
+      { header: 'Title', key: 'job_title', help: 'Optional; usually set on Stakeholders instead.' },
+      { header: 'Level', key: 'job_level', help: 'Optional; usually set on Stakeholders instead.' },
       { header: 'Notes', key: 'notes' },
     ],
   },
@@ -59,25 +65,25 @@ export const MASTER_TABS: MasterTab[] = [
     sheet: 'Convertibles',
     note: 'SAFEs / convertible notes. "Stakeholder" must match a Name on the Stakeholders tab.',
     columns: [
-      { header: 'Stakeholder', key: 'stakeholder' },
-      { header: 'Principal', key: 'principal' },
-      { header: 'Interest rate', key: 'interest_rate' },
-      { header: 'Interest accrued', key: 'interest_accrued' },
-      { header: 'Issue date', key: 'issue_date' },
-      { header: 'Conversion / maturity date', key: 'maturity_date' },
-      { header: 'Valuation cap', key: 'valuation_cap' },
-      { header: 'Discount', key: 'discount' },
+      { header: 'Stakeholder', key: 'stakeholder', help: 'Must match a Name on the Stakeholders tab.' },
+      { header: 'Principal', key: 'principal', format: 'number' },
+      { header: 'Interest rate', key: 'interest_rate', format: 'number', help: 'Decimal, e.g. 0.05 for 5%.' },
+      { header: 'Interest accrued', key: 'interest_accrued', format: 'number' },
+      { header: 'Issue date', key: 'issue_date', format: 'YYYY-MM-DD' },
+      { header: 'Conversion / maturity date', key: 'maturity_date', format: 'YYYY-MM-DD' },
+      { header: 'Valuation cap', key: 'valuation_cap', format: 'number' },
+      { header: 'Discount', key: 'discount', format: 'number', help: 'Decimal, e.g. 0.20 for 20%.' },
     ],
   },
   {
     sheet: 'Round history',
     note: 'One row per past round (the FDS timeline). The latest row sets the pre-open base.',
     columns: [
-      { header: 'Date', key: 'as_of_date' },
-      { header: 'Label', key: 'label' },
-      { header: 'Fully-diluted shares', key: 'fds' },
-      { header: 'Price per share', key: 'pps' },
-      { header: 'Option pool increase', key: 'option_pool' },
+      { header: 'Date', key: 'as_of_date', format: 'YYYY-MM-DD', help: 'Round close date.' },
+      { header: 'Label', key: 'label', help: 'e.g. Seed, Series A.' },
+      { header: 'Fully-diluted shares', key: 'fds', format: 'number', help: 'Total FDS as of this round. Commas OK.' },
+      { header: 'Price per share', key: 'pps', format: 'number' },
+      { header: 'Option pool increase', key: 'option_pool', format: 'number', help: 'Pool added at this round (not the cumulative total).' },
     ],
   },
   {
@@ -85,13 +91,13 @@ export const MASTER_TABS: MasterTab[] = [
     note: 'Hypothetical future grants (optional).',
     columns: [
       { header: 'Name', key: 'name' },
-      { header: 'Target date', key: 'target_date' },
-      { header: 'ISO/NSO', key: 'kind' },
-      { header: 'Shares', key: 'shares' },
+      { header: 'Target date', key: 'target_date', format: 'YYYY-MM-DD' },
+      { header: 'ISO/NSO', key: 'kind', values: ['ISO', 'NSO'] },
+      { header: 'Shares', key: 'shares', format: 'number' },
       { header: 'Title', key: 'job_title' },
       { header: 'Level', key: 'job_level' },
-      { header: 'Vest months', key: 'vest_months' },
-      { header: 'Cliff months', key: 'cliff_months' },
+      { header: 'Vest months', key: 'vest_months', format: 'number' },
+      { header: 'Cliff months', key: 'cliff_months', format: 'number' },
       { header: 'Notes', key: 'notes' },
     ],
   },

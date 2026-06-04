@@ -128,10 +128,10 @@ const importHref = computed(() => companyId.value ? `/companies/${companyId.valu
             :to="importHref"
             class="inline-flex items-center gap-2 px-2.5 py-1.5 text-[12.5px] rounded-md text-ink-500 hover:text-ink-900 hover:bg-ink-100"
             :class="navCollapsed ? 'justify-center' : ''"
-            :title="navCollapsed ? 'Import Carta' : undefined"
+            :title="navCollapsed ? 'Import data' : undefined"
           >
             <Upload :size="14" />
-            <span v-if="!navCollapsed">Import Carta</span>
+            <span v-if="!navCollapsed">Import data</span>
           </NuxtLink>
           <button
             type="button"
