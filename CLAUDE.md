@@ -107,9 +107,27 @@ POST /api/companies/:id/convertibles                 — add CN
 PATCH /api/convertibles/:id
 DELETE /api/convertibles/:id
 
-POST /api/companies/:id/import                       — Carta xlsx
+GET  /api/companies/:id/master-template              — blank master import workbook (.xlsx)
+POST /api/companies/:id/carta-to-template            — parse a Carta export → PREFILLED master workbook (.xlsx); no DB writes
+POST /api/companies/:id/master-import                — import a filled master workbook (relational by stakeholder Name)
+POST /api/companies/:id/import                       — legacy direct Carta→DB (still works; no longer surfaced in the UI)
 POST /api/companies/:id/compute                      — open-round dilution math
 ```
+
+### Import model (current)
+
+ONE relational workbook is the primary path. `server/utils/masterTemplate.ts` = the
+shared tab spec; `server/utils/masterWorkbook.ts` = the ExcelJS builder (Instructions
+sheet + dropdowns + optional prefill rows), used by BOTH the blank-template download and
+the Carta prefill. Carta is now a *bootstrap*: upload an export → get a prefilled
+template → fill the gaps → import via `master-import`. The old one-click Carta-to-DB
+importer (`import.post.ts` / `import-preview.post.ts`) is retired from the UI but left
+intact.
+
+Tabs: Stakeholders (hub) · Holdings · Option grants · Convertibles · Round history.
+The **Option grants** tab carries a `Status` column — `Issued` → `grants` (outstanding),
+`Proposed` → `grants` (status='proposed', approval='Pending'), `Idea` → `pool_events`.
+This folded the old separate "Ideas" tab in (one tab, three statuses).
 
 ## Pending / parked
 

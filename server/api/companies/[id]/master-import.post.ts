@@ -80,7 +80,7 @@ export default defineEventHandler(async (event) => {
   await wb.xlsx.load(file.data as any)
   const sheet = (name: string) => wb.worksheets.find(w => norm(w.name) === norm(name))
 
-  const counts: Record<string, number> = { stakeholders: 0, holdings: 0, grants: 0, convertibles: 0, rounds: 0, ideas: 0 }
+  const counts: Record<string, number> = { stakeholders: 0, holdings: 0, grants: 0, proposed: 0, convertibles: 0, rounds: 0, ideas: 0 }
   const warnings: string[] = []
   const today = new Date().toISOString().slice(0, 10)
 
@@ -130,19 +130,36 @@ export default defineEventHandler(async (event) => {
       counts.holdings++
     }
 
-    // 3) Option grants (outstanding).
+    // 3) Option grants — one tab, three statuses. Issued → outstanding grant,
+    //    Proposed → draft grant (Pending approval), Idea → a pool_events row
+    //    (hypothetical future grant, not tied to a real stakeholder).
     const insertGr = db().prepare(`INSERT INTO grants
-      (id, company_id, stakeholder_id, recipient_name, quantity, quantity_issued, strike, issue_date, vesting_start, vest_months, cliff_months, award_type, job_title, job_level, status, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outstanding', ?)`)
+      (id, company_id, stakeholder_id, recipient_name, quantity, quantity_issued, strike, issue_date, vesting_start, vest_months, cliff_months, award_type, job_title, job_level, status, approval_status, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    const insertPe = db().prepare(`INSERT INTO pool_events
+      (id, company_id, event_date, type, name, kind, shares, vest_months, cliff_months, notes, job_title, job_level)
+      VALUES (?, ?, ?, 'grant', ?, ?, ?, ?, ?, ?, ?, ?)`)
     for (const row of readTab(sheet('Option grants'), tabSpec('Option grants'))) {
       const name = cellStr(row.stakeholder).trim()
       const qty = Math.round(num(row.quantity) || 0)
       if (!name || qty <= 0) continue
+      const status = norm(cellStr(row.status))
+      const vest = num(row.vest_months) != null ? Math.round(num(row.vest_months)!) : 48
+      const cliff = num(row.cliff_months) != null ? Math.round(num(row.cliff_months)!) : 12
+      const title = cellStr(row.job_title).trim() || null
+      const level = cellStr(row.job_level).trim() || null
+      const notes = cellStr(row.notes).trim() || null
+      if (status.includes('idea')) {
+        const k = classifyAwardType(row.award_type)
+        insertPe.run(newId('pe'), id, asDate(row.issue_date) || today, name, k === 'ISO' ? 'ISO' : 'NSO', qty, vest, cliff, notes, title, level)
+        counts.ideas++
+        continue
+      }
+      const proposed = status.includes('propos')
       insertGr.run(newId('gr'), id, resolve(name), name, qty, qty, num(row.strike), asDate(row.issue_date), asDate(row.vesting_start),
-        num(row.vest_months) != null ? Math.round(num(row.vest_months)!) : 48,
-        num(row.cliff_months) != null ? Math.round(num(row.cliff_months)!) : 12,
-        classifyAwardType(row.award_type), cellStr(row.job_title).trim() || null, cellStr(row.job_level).trim() || null, cellStr(row.notes).trim() || null)
-      counts.grants++
+        vest, cliff, classifyAwardType(row.award_type), title, level,
+        proposed ? 'proposed' : 'outstanding', proposed ? 'Pending' : null, notes)
+      if (proposed) counts.proposed++; else counts.grants++
     }
 
     // 4) Convertibles.
@@ -164,22 +181,6 @@ export default defineEventHandler(async (event) => {
       if (!d) continue
       insertMs.run(newId('ms'), id, d, cellStr(row.label).trim() || null, num(row.fds), num(row.pps), num(row.option_pool))
       counts.rounds++
-    }
-
-    // 6) Ideas (pool events).
-    const insertPe = db().prepare(`INSERT INTO pool_events
-      (id, company_id, event_date, type, name, kind, shares, vest_months, cliff_months, notes, job_title, job_level)
-      VALUES (?, ?, ?, 'grant', ?, ?, ?, ?, ?, ?, ?, ?)`)
-    for (const row of readTab(sheet('Ideas'), tabSpec('Ideas'))) {
-      const name = cellStr(row.name).trim()
-      const shares = Math.round(num(row.shares) || 0)
-      if (!name || shares <= 0) continue
-      const k = classifyAwardType(row.kind)
-      insertPe.run(newId('pe'), id, asDate(row.target_date) || today, name, k === 'ISO' ? 'ISO' : 'NSO', shares,
-        num(row.vest_months) != null ? Math.round(num(row.vest_months)!) : 48,
-        num(row.cliff_months) != null ? Math.round(num(row.cliff_months)!) : 12,
-        cellStr(row.notes).trim() || null, cellStr(row.job_title).trim() || null, cellStr(row.job_level).trim() || null)
-      counts.ideas++
     }
   })
   tx()
