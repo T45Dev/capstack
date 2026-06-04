@@ -101,9 +101,9 @@ function exportCsv() { /* No-op on the simplified layout. Kept on the page heade
     <UiEmpty
       v-if="!data.stakeholders.length && !roundCols.length"
       title="No cap table yet"
-      description="Import the master template to load stakeholders, holdings, and grants, or scroll down and start typing your Previous-Round aggregate."
+      description="Drop a Carta export to load option grants and stakeholders, or scroll down and start typing your Previous-Round aggregate."
     >
-      <NuxtLink :to="`/companies/${id}/import`"><UiButton variant="primary"><Upload :size="14" /> Import data</UiButton></NuxtLink>
+      <NuxtLink :to="`/companies/${id}/import`"><UiButton variant="primary"><Upload :size="14" /> Import Carta export</UiButton></NuxtLink>
     </UiEmpty>
 
     <!-- Rounds tab: Previous-Round aggregate + Open-Round modeled card,

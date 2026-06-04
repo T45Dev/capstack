@@ -107,37 +107,26 @@ POST /api/companies/:id/convertibles                 — add CN
 PATCH /api/convertibles/:id
 DELETE /api/convertibles/:id
 
-GET  /api/companies/:id/master-template              — blank master import workbook (.xlsx)
-POST /api/companies/:id/carta-to-template            — parse a Carta export → PREFILLED master workbook (.xlsx); no DB writes
-POST /api/companies/:id/master-import                — import a filled master workbook (relational by stakeholder Name)
-POST /api/companies/:id/import                       — legacy direct Carta→DB (still works; no longer surfaced in the UI)
+POST /api/companies/:id/import                       — Carta xlsx → DB (one-click cap-table import)
+POST /api/companies/:id/import-preview               — dry-run parse of a Carta xlsx (no writes)
+POST /api/companies/:id/grants/import                — import option grants (proposed) from a spreadsheet
+POST /api/companies/:id/pool-events/import           — import ideas (future grants) from a spreadsheet
 POST /api/companies/:id/compute                      — open-round dilution math
 ```
 
 ### Import model (current)
 
-ONE relational workbook is the primary path. `server/utils/masterTemplate.ts` = the
-shared tab spec; `server/utils/masterWorkbook.ts` = the ExcelJS builder (Instructions
-sheet + dropdowns + optional prefill rows), used by BOTH the blank-template download and
-the Carta prefill. Carta is now a *bootstrap*: upload an export → get a prefilled
-template → fill the gaps → import via `master-import`. The old one-click Carta-to-DB
-importer (`import.post.ts` / `import-preview.post.ts`) is retired from the UI but left
-intact.
+Carta is the primary import. Upload a Carta pro-forma `.xlsx` on the Import page →
+`import.post.ts` parses it (`server/parsers/carta.ts`) and writes stakeholders, option
+grants (status `outstanding`, incl. the exercise/forfeit/expire lifecycle columns), and
+the option pool (`option_pools.authorized`). Rounds, share classes, holdings, and
+convertible notes stay manual on the Rounds page. `import-preview.post.ts` is the dry-run.
 
-Tabs: Stakeholders (hub) · Holdings · Option grants · Convertibles · Round history.
-The **Option grants** tab carries a `Status` column — `Issued` → `grants` (outstanding),
-`Proposed` → `grants` (status='proposed', approval='Pending'), `Idea` → `pool_events`.
-This folded the old separate "Ideas" tab in (one tab, three statuses). It also carries the
-per-grant lifecycle columns (quantity_issued / exercised / forfeited / expired + their dates
-+ acceleration) so the **Option Pool Impact** timeline gets its exercise/forfeit/expire events;
-Carta prefills them.
-
-Option pool: the grants page reads the authorized pool from `option_pools.authorized` (fallback
-after `rounds.option_pool_issued`). Master-import has no `rounds`, so it rolls the Round-history
-"Option pool increase" column into one `option_pools` row (upsert by name 'Stock Option Plan').
-The Carta prefill seeds Carta's `poolAuthorized` onto the latest Round-history row (or a synthetic
-row) so that number flows through. The Financings/Pool pages still read the pool from the
-milestone timeline — same total, different read, no double-count.
+The master-import workbook experiment (one relational multi-tab template) was reverted —
+it added friction without enough payoff. Proposed grants and ideas are NOT part of the
+Carta file; import those via their own per-page spreadsheet importers instead:
+`grants/import` (proposed grants, on the Grants page) and `pool-events/import` (ideas, on
+the Option Pool page).
 
 ## Pending / parked
 

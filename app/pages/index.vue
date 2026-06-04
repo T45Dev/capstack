@@ -57,7 +57,7 @@ async function remove(id: string, name: string) {
     <div class="flex items-center justify-between mb-6">
       <div>
         <h1 class="text-xl font-semibold tracking-tight text-ink-900">Companies</h1>
-        <p class="text-sm text-ink-600 mt-1">Each workspace holds a cap table, round financings, grants, and exit scenarios.</p>
+        <p class="text-sm text-ink-600 mt-1">Each workspace holds a Carta-sourced cap table, round financings, grants, and exit scenarios.</p>
       </div>
       <UiButton variant="primary" @click="showCreate = true">
         <Plus :size="14" /> New company
@@ -70,8 +70,8 @@ async function remove(id: string, name: string) {
       </div>
       <h2 class="text-lg font-semibold text-ink-900">Let's set up your first cap table</h2>
       <p class="text-sm text-ink-600 mt-2 leading-relaxed">
-        Create a company below — then on the next page you'll import the master template
-        to load stakeholders, holdings, grants, and round history.
+        Create a company below — then on the next page you'll drop your Carta pro-forma export
+        and we'll suggest your rounds, pool, and open notes.
       </p>
       <UiButton variant="primary" size="lg" class="mt-5" @click="showCreate = true">
         <Plus :size="14" /> Create your first company
@@ -133,7 +133,7 @@ async function remove(id: string, name: string) {
     <div v-if="showCreate" class="fixed inset-0 z-40 bg-ink-900/40 backdrop-blur-sm grid place-items-center p-4" @click.self="showCreate = false">
       <div class="w-full max-w-md rounded-lg border border-ink-300 bg-white p-5 shadow-card-hover">
         <h2 class="text-base font-semibold text-ink-900">New company</h2>
-        <p class="text-xs text-ink-500 mt-1">You'll add funding rounds on the Cap Table page. You can import the master template on the next page for stakeholders, holdings, and option grants.</p>
+        <p class="text-xs text-ink-500 mt-1">You'll add funding rounds on the Cap Table page. You can upload a Carta export on the next page for option grants and stakeholders.</p>
         <div class="mt-4 space-y-3">
           <UiInput v-model="form.name" label="Name" placeholder="Advanced NanoTherapies, Inc." />
           <UiInput v-model="form.ticker" label="Ticker / short code (optional)" placeholder="ANT" />
