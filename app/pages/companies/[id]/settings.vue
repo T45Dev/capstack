@@ -21,13 +21,16 @@ const { data: milestones, refresh: refreshMilestones } = await useFetch<Mileston
   () => `/api/companies/${id.value}/milestones`,
   { watch: [id], default: () => [] },
 )
-const newMs = reactive({ as_of_date: '', label: '', fds: null as number | null, pps: null as number | null })
+// fds/pps held as raw strings — the server strips commas/$ and coerces, so
+// "42,506,050" survives (v-model.number would parseFloat it to 42).
+const newMs = reactive({ as_of_date: '', label: '', fds: '', pps: '' })
 async function addMilestone() {
   if (!newMs.as_of_date) return
   await $fetch(`/api/companies/${id.value}/milestones`, { method: 'POST', body: { ...newMs } })
-  newMs.as_of_date = ''; newMs.label = ''; newMs.fds = null; newMs.pps = null
+  newMs.as_of_date = ''; newMs.label = ''; newMs.fds = ''; newMs.pps = ''
   await refreshMilestones()
 }
+const fmtFds = (n: number | null) => n != null ? Number(n).toLocaleString() : ''
 async function patchMilestone(m: Milestone, field: 'as_of_date' | 'label' | 'fds' | 'pps', value: any) {
   await $fetch(`/api/milestones/${m.id}`, { method: 'PATCH', body: { [field]: value } })
   await refreshMilestones()
@@ -352,7 +355,7 @@ function resetIdeaMapping(f: CanonicalField) {
                   <input class="w-full bg-transparent text-[13px] focus:outline-none" :value="m.label || ''" placeholder="e.g. Series A" @change="(ev) => patchMilestone(m, 'label', (ev.target as HTMLInputElement).value)">
                 </td>
                 <td class="px-3 py-1.5 text-right">
-                  <input class="num w-full bg-transparent text-right text-[13px] focus:outline-none" :value="m.fds ?? ''" inputmode="numeric" placeholder="—" @change="(ev) => patchMilestone(m, 'fds', (ev.target as HTMLInputElement).value)">
+                  <input class="num w-full bg-transparent text-right text-[13px] focus:outline-none" :value="fmtFds(m.fds)" inputmode="numeric" placeholder="—" @change="(ev) => patchMilestone(m, 'fds', (ev.target as HTMLInputElement).value)">
                 </td>
                 <td class="px-3 py-1.5 text-right">
                   <input class="num w-full bg-transparent text-right text-[13px] focus:outline-none" :value="m.pps ?? ''" inputmode="decimal" placeholder="—" @change="(ev) => patchMilestone(m, 'pps', (ev.target as HTMLInputElement).value)">
@@ -365,8 +368,8 @@ function resetIdeaMapping(f: CanonicalField) {
               <tr class="bg-ink-50/30">
                 <td class="px-4 py-1.5"><DateInput variant="bare" no-hint :model-value="newMs.as_of_date || null" placeholder="add date" @update:model-value="(v) => newMs.as_of_date = v || ''" /></td>
                 <td class="px-3 py-1.5"><input v-model="newMs.label" class="w-full bg-transparent text-[13px] focus:outline-none" placeholder="Series A" @keydown.enter="addMilestone"></td>
-                <td class="px-3 py-1.5 text-right"><input v-model.number="newMs.fds" class="num w-full bg-transparent text-right text-[13px] focus:outline-none" inputmode="numeric" placeholder="FDS" @keydown.enter="addMilestone"></td>
-                <td class="px-3 py-1.5 text-right"><input v-model.number="newMs.pps" class="num w-full bg-transparent text-right text-[13px] focus:outline-none" inputmode="decimal" placeholder="$/sh" @keydown.enter="addMilestone"></td>
+                <td class="px-3 py-1.5 text-right"><input v-model="newMs.fds" class="num w-full bg-transparent text-right text-[13px] focus:outline-none" inputmode="numeric" placeholder="FDS" @keydown.enter="addMilestone"></td>
+                <td class="px-3 py-1.5 text-right"><input v-model="newMs.pps" class="num w-full bg-transparent text-right text-[13px] focus:outline-none" inputmode="decimal" placeholder="$/sh" @keydown.enter="addMilestone"></td>
                 <td class="px-3 py-1.5 text-center">
                   <button type="button" class="text-brand-edge hover:text-brand-deep text-lg leading-none" title="Add" @click="addMilestone">+</button>
                 </td>

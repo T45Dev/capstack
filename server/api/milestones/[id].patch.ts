@@ -13,7 +13,7 @@ export default defineEventHandler(async (event) => {
       updates.push(`${f} = ?`)
       const v = body[f]
       if (f === 'fds' || f === 'pps') {
-        const n = v == null || v === '' ? null : Number(v)
+        const n = v == null || v === '' ? null : Number(String(v).replace(/[$,\s]/g, ''))
         params.push(n != null && Number.isFinite(n) ? n : null)
       } else {
         params.push(v === '' || v == null ? null : String(v).trim())
