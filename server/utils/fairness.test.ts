@@ -211,6 +211,22 @@ describe('buildFairness', () => {
     expect(f.postPct).toBeCloseTo(0.001)
   })
 
+  it('resolves the at-hire basis off the FDS timeline when provided', () => {
+    const timeline = [
+      { date: '2022-01-01', fds: 1_000_000, pps: 0.5, label: 'Seed' },
+      { date: '2023-06-01', fds: 10_000_000, pps: 2, label: 'Series A' },
+    ]
+    const res = buildFairness(rounds, [
+      H({ name: 'Vet', optionShares: 5_000, firstGrantDate: '2022-06-01' }),  // between Seed and A
+    ], { hireTimeline: timeline })
+    const v = res.holders[0]
+    expect(v.entryFDS).toBe(1_000_000)        // snaps to Seed (latest on/before)
+    expect(v.entryPPS).toBe(0.5)
+    expect(v.entryValue).toBe(2_500)          // 5,000 × $0.50
+    expect(v.entryPct).toBeCloseTo(0.005)     // 5,000 / 1,000,000
+    expect(v.hireRoundName).toBe('Seed')
+  })
+
   it('does not flag holders without a level', () => {
     const res = buildFairness(rounds, [H({ name: 'NL', optionShares: 1000, firstGrantDate: '2023-02-01' })], {})
     expect(res.holders[0].flag).toBe('na')

@@ -9,8 +9,33 @@ const id = computed(() => route.params.id as string)
 const tabs = [
   { key: 'grants', label: 'Option Grants' },
   { key: 'pool', label: 'Option Pool' },
+  { key: 'fds', label: 'FDS timeline' },
 ] as const
 const activeTab = ref<typeof tabs[number]['key']>('grants')
+
+// ---- FDS timeline (cap-table milestones) -------------------------------
+// Dated FDS/PPS points used as the Grant Fairness hire-basis. One row per
+// historical round (Formation, Seed, A, …).
+interface Milestone { id: string; as_of_date: string | null; label: string | null; fds: number | null; pps: number | null }
+const { data: milestones, refresh: refreshMilestones } = await useFetch<Milestone[]>(
+  () => `/api/companies/${id.value}/milestones`,
+  { watch: [id], default: () => [] },
+)
+const newMs = reactive({ as_of_date: '', label: '', fds: null as number | null, pps: null as number | null })
+async function addMilestone() {
+  if (!newMs.as_of_date) return
+  await $fetch(`/api/companies/${id.value}/milestones`, { method: 'POST', body: { ...newMs } })
+  newMs.as_of_date = ''; newMs.label = ''; newMs.fds = null; newMs.pps = null
+  await refreshMilestones()
+}
+async function patchMilestone(m: Milestone, field: 'as_of_date' | 'label' | 'fds' | 'pps', value: any) {
+  await $fetch(`/api/milestones/${m.id}`, { method: 'PATCH', body: { [field]: value } })
+  await refreshMilestones()
+}
+async function deleteMilestone(m: Milestone) {
+  await $fetch(`/api/milestones/${m.id}`, { method: 'DELETE' })
+  await refreshMilestones()
+}
 
 // ---- Vesting schedules -------------------------------------------------
 interface VestingSchedule {
@@ -301,6 +326,57 @@ function resetIdeaMapping(f: CanonicalField) {
             </div>
           </div>
         </div>
+      </UiCard>
+    </div>
+
+    <!-- FDS timeline tab -->
+    <div v-else-if="activeTab === 'fds'" class="space-y-4 max-w-4xl">
+      <UiCard title="Cap-table FDS timeline" subtitle="Dated FDS + price points (one per historical round). Grant Fairness snaps each person's start date onto this to value their grant at the company size back then. Isolated — it doesn't affect dilution or the cap table." :padded="false">
+        <div class="overflow-x-auto">
+          <table class="w-full text-[13px] num">
+            <thead>
+              <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
+                <th class="text-left font-medium px-4 py-2 w-40">As-of date</th>
+                <th class="text-left font-medium px-3 py-2">Label</th>
+                <th class="text-right font-medium px-3 py-2 w-40">Fully-diluted shares</th>
+                <th class="text-right font-medium px-3 py-2 w-32">Price / share</th>
+                <th class="px-3 py-2 w-10"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="m in milestones" :key="m.id" class="even:bg-ink-50/50 border-b border-ink-100 last:border-0">
+                <td class="px-4 py-1.5">
+                  <DateInput variant="bare" no-hint :model-value="m.as_of_date" @update:model-value="(v) => patchMilestone(m, 'as_of_date', v)" />
+                </td>
+                <td class="px-3 py-1.5">
+                  <input class="w-full bg-transparent text-[13px] focus:outline-none" :value="m.label || ''" placeholder="e.g. Series A" @change="(ev) => patchMilestone(m, 'label', (ev.target as HTMLInputElement).value)">
+                </td>
+                <td class="px-3 py-1.5 text-right">
+                  <input class="num w-full bg-transparent text-right text-[13px] focus:outline-none" :value="m.fds ?? ''" inputmode="numeric" placeholder="—" @change="(ev) => patchMilestone(m, 'fds', (ev.target as HTMLInputElement).value)">
+                </td>
+                <td class="px-3 py-1.5 text-right">
+                  <input class="num w-full bg-transparent text-right text-[13px] focus:outline-none" :value="m.pps ?? ''" inputmode="decimal" placeholder="—" @change="(ev) => patchMilestone(m, 'pps', (ev.target as HTMLInputElement).value)">
+                </td>
+                <td class="px-3 py-1.5 text-center">
+                  <button type="button" class="text-ink-400 hover:text-red-600" title="Delete" @click="deleteMilestone(m)">×</button>
+                </td>
+              </tr>
+              <!-- Add row -->
+              <tr class="bg-ink-50/30">
+                <td class="px-4 py-1.5"><DateInput variant="bare" no-hint :model-value="newMs.as_of_date || null" placeholder="add date" @update:model-value="(v) => newMs.as_of_date = v || ''" /></td>
+                <td class="px-3 py-1.5"><input v-model="newMs.label" class="w-full bg-transparent text-[13px] focus:outline-none" placeholder="Series A" @keydown.enter="addMilestone"></td>
+                <td class="px-3 py-1.5 text-right"><input v-model.number="newMs.fds" class="num w-full bg-transparent text-right text-[13px] focus:outline-none" inputmode="numeric" placeholder="FDS" @keydown.enter="addMilestone"></td>
+                <td class="px-3 py-1.5 text-right"><input v-model.number="newMs.pps" class="num w-full bg-transparent text-right text-[13px] focus:outline-none" inputmode="decimal" placeholder="$/sh" @keydown.enter="addMilestone"></td>
+                <td class="px-3 py-1.5 text-center">
+                  <button type="button" class="text-brand-edge hover:text-brand-deep text-lg leading-none" title="Add" @click="addMilestone">+</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="px-4 py-2 text-[11px] text-ink-500 border-t border-ink-100">
+          A start date before the earliest row snaps to that earliest point; with no timeline, Fairness falls back to the rounds.
+        </p>
       </UiCard>
     </div>
   </div>
