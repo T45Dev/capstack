@@ -24,6 +24,7 @@ interface AggregateRound {
   pool_attributed: number
   pool_available: number
   grants_breakdown: { outstanding: number; exercised: number; forfeited: number; expired: number }
+  derived_from_history?: boolean
   updated_at: string | null
 }
 
@@ -140,6 +141,9 @@ const poolAvailable = computed(() => {
   if (optionPoolTotal.value == null) return null
   return optionPoolTotal.value - (data.value?.pool_attributed ?? 0)
 })
+// When a round-history timeline exists, FDS + pool come from it (derived) —
+// edit them on the Round history table, not here.
+const derived = computed(() => !!data.value?.derived_from_history)
 
 // Calc-tooltip strings.
 const fPostMoney = computed(() => postMoney.value == null ? null
@@ -204,14 +208,15 @@ const fPoolAvailable = computed(() => poolAvailable.value == null ? null
       </div>
 
       <div>
-        <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Total fully-diluted shares <span class="text-ink-400 font-normal">to date</span></label>
-        <NumberInput v-model="totalSharesFds" placeholder="0" class="w-full" />
+        <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Total fully-diluted shares <span class="text-ink-400 font-normal">{{ derived ? 'from Round history' : 'to date' }}</span></label>
+        <NumberInput v-model="totalSharesFds" :disabled="derived" placeholder="0" class="w-full" />
       </div>
       <div>
-        <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Total option pool</label>
-        <NumberInput v-model="optionPoolTotal" placeholder="0" class="w-full" />
+        <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Total option pool <span v-if="derived" class="text-ink-400 font-normal">from Round history</span></label>
+        <NumberInput v-model="optionPoolTotal" :disabled="derived" placeholder="0" class="w-full" />
       </div>
     </div>
+    <p v-if="derived" class="px-5 -mt-2 pb-1 text-[11px] text-ink-500">FDS &amp; pool come from the Round history timeline below — edit them there.</p>
 
     <!-- Derived footer: post-money + pool attribution math. -->
     <div class="px-5 py-3 border-t border-ink-100 bg-ink-50/40 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-[12px]">

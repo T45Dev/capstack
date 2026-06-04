@@ -26,17 +26,34 @@ export default defineEventHandler(async (event) => {
     FROM grants WHERE company_id = ?
   `).get(id) as { outstanding: number; exercised: number; forfeited: number; expired: number }
 
+  // Round-history timeline (Financings). When present, it's the source of
+  // truth for the pre-open base: FDS = latest milestone's FDS, pool total =
+  // sum of milestone pool increases, share price = latest milestone PPS. Falls
+  // back to the typed aggregate when no timeline exists (so nothing changes
+  // for companies that haven't entered one).
+  const ms = db().prepare(`SELECT as_of_date, fds, pps, option_pool FROM cap_table_milestones WHERE company_id = ? ORDER BY as_of_date ASC, created_at ASC`).all(id) as any[]
+  const derived = ms.length > 0
+  const latest = ms.length ? ms[ms.length - 1] : null
+  const tlFds = latest?.fds ?? null
+  const tlPps = latest?.pps ?? null
+  const tlPool = derived ? ms.reduce((a, m) => a + (m.option_pool || 0), 0) : null
+
+  const total_shares_fds = derived ? tlFds : (row?.total_shares_fds ?? null)
+  const option_pool_total = derived ? tlPool : (row?.option_pool_total ?? null)
+  const share_price = derived && tlPps != null ? tlPps : (row?.share_price ?? null)
+
   const poolAttributed = g.outstanding + g.exercised
-  const poolTotal = (row?.option_pool_total as number | null) ?? 0
+  const poolTotal = (option_pool_total as number | null) ?? 0
   const poolAvailable = poolTotal - poolAttributed
 
   return {
     pre_money:           row?.pre_money ?? null,
     new_money:           row?.new_money ?? null,
-    share_price:         row?.share_price ?? null,
+    share_price,
     cumulated_financing: row?.cumulated_financing ?? null,
-    total_shares_fds:    row?.total_shares_fds ?? null,
-    option_pool_total:   row?.option_pool_total ?? null,
+    total_shares_fds,
+    option_pool_total,
+    derived_from_history: derived,
     pool_attributed:     poolAttributed,
     pool_available:      poolAvailable,
     grants_breakdown: {
