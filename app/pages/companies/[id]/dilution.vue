@@ -213,11 +213,7 @@ const rows = computed<DilRow[]>(() => {
       isNewRound: String(d.stakeholderId).startsWith('new:') || String(d.stakeholderId).startsWith('idea:'),
       isFuture: false,
       aliasNames: Array.isArray(d.aliasNames) ? d.aliasNames : [],
-      // A proposed grant counts as (proposed) options, so a holder whose
-      // only position is a proposed grant must survive the "Include
-      // preferred" filter — otherwise new-hire proposed grants (which land
-      // on a real stakeholder with no base holdings) silently drop out.
-      hasOptions: !!d.hasOptions || proposed > 0,
+      hasOptions: !!d.hasOptions,
       invested: d.investedDollars || 0,
       avgEntryPPS: d.avgEntryPPS ?? null,
     }
