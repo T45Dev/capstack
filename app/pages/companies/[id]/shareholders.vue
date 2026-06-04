@@ -178,7 +178,7 @@ function classBgFooter(kind: string): string {
     </div>
 
     <div v-if="!totals.stakeholders" class="px-4 py-12 text-center text-sm text-ink-500 border border-dashed border-ink-300 rounded-lg bg-white">
-      No stakeholders yet — import the master template or add preferred holders from the Dilution page.
+      No stakeholders yet — import a Carta export or add preferred holders from the Dilution page.
     </div>
 
     <div v-else class="rounded-xl border border-ink-200 bg-white overflow-hidden shadow-[0_1px_0_rgba(16,24,40,0.04)]">
