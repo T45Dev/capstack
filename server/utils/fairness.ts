@@ -43,6 +43,7 @@ export interface RawHolder {
   heldShares: number
   proposedShares: number
   firstGrantDate: string | null
+  startDate?: string | null  // employment start (hire-basis fallback)
   initialShares?: number     // granted size of the earliest grant (new-hire signal)
   salary?: number | null
   salaryMidpoint?: number | null
@@ -80,6 +81,7 @@ export interface Holder extends RawHolder {
   source: 'grant' | 'proposed' | 'idea'
   editKind: 'stakeholder' | 'grant' | 'idea'
   editId: string | null
+  startDate: string | null
   benchmarkRole: string | null
   benchmark: MarketBand | null
   hireRoundCode: string | null
@@ -228,6 +230,7 @@ export function buildFairness(rounds: FairnessRound[], rawHolders: RawHolder[], 
       source: h.source ?? 'grant',
       editKind: h.editKind ?? 'stakeholder',
       editId: h.editId ?? h.stakeholderId,
+      startDate: h.startDate ?? null,
       benchmarkRole: h.benchmarkRole ?? null,
       benchmark: h.benchmark ?? null,
       hireRoundCode: hireRound?.code ?? null,

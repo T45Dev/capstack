@@ -36,8 +36,8 @@ export default defineEventHandler(async (event) => {
   }))
 
   // Stakeholder comp metadata (title / level / include).
-  const sMeta = new Map<string, { name: string; title: string | null; level: string | null; include: boolean; salary: number | null; salaryMidpoint: number | null; benchmarkRole: string | null }>()
-  for (const s of db().prepare(`SELECT id, name, title, job_level, fairness_include, salary, salary_midpoint, benchmark_role FROM stakeholders WHERE company_id = ?`).all(id) as any[]) {
+  const sMeta = new Map<string, { name: string; title: string | null; level: string | null; include: boolean; salary: number | null; salaryMidpoint: number | null; benchmarkRole: string | null; startDate: string | null }>()
+  for (const s of db().prepare(`SELECT id, name, title, job_level, fairness_include, salary, salary_midpoint, benchmark_role, start_date FROM stakeholders WHERE company_id = ?`).all(id) as any[]) {
     sMeta.set(s.id, {
       name: s.name,
       title: s.title || null,
@@ -46,6 +46,7 @@ export default defineEventHandler(async (event) => {
       salary: s.salary ?? null,
       salaryMidpoint: s.salary_midpoint ?? null,
       benchmarkRole: s.benchmark_role || null,
+      startDate: s.start_date || null,
     })
   }
   const bandFor = (role: string | null) => role && THELANDER_EQUITY[role] ? THELANDER_EQUITY[role] : null
@@ -127,7 +128,10 @@ export default defineEventHandler(async (event) => {
       optionShares: a.optionShares,
       heldShares: a.stakeholderId ? (heldBy.get(a.stakeholderId) || 0) : 0,
       proposedShares: proposedBy.get(key) || 0,
-      firstGrantDate: a.firstGrantDate,
+      // Real grant date if any, else the person's employment start (so an
+      // early hire's not-yet-issued grant is anchored to when they joined).
+      firstGrantDate: a.firstGrantDate ?? meta?.startDate ?? null,
+      startDate: meta?.startDate ?? null,
       initialShares: a.initialShares,
       salary: meta?.salary ?? null,
       salaryMidpoint: meta?.salaryMidpoint ?? null,
@@ -155,7 +159,10 @@ export default defineEventHandler(async (event) => {
         optionShares: 0,
         heldShares: d.stakeholderId ? (heldBy.get(d.stakeholderId) || 0) : 0,
         proposedShares: proposedBy.get(key) || 0,
-        firstGrantDate: null,
+        // Proposed-only person: anchor to their employment start date so a
+        // veteran's first (still-unissued) grant reflects the early FDS.
+        firstGrantDate: meta?.startDate ?? null,
+        startDate: meta?.startDate ?? null,
         salary: meta?.salary ?? null,
         salaryMidpoint: meta?.salaryMidpoint ?? null,
         benchmarkRole: meta?.benchmarkRole ?? null,
