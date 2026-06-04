@@ -66,8 +66,8 @@ export default defineEventHandler(async (event) => {
   }
 
   const insert = db().prepare(`
-    INSERT INTO pool_events (id, company_id, event_date, type, name, kind, shares, vest_months, cliff_months, notes)
-    VALUES (?, ?, ?, 'grant', ?, ?, ?, ?, ?, ?)
+    INSERT INTO pool_events (id, company_id, event_date, type, name, kind, shares, vest_months, cliff_months, notes, job_title, job_level)
+    VALUES (?, ?, ?, 'grant', ?, ?, ?, ?, ?, ?, ?, ?)
   `)
   const today = new Date().toISOString().slice(0, 10)
 
@@ -83,9 +83,9 @@ export default defineEventHandler(async (event) => {
           if (res === 'skip') { skipped++; continue }
           if (res === 'replace') {
             db().prepare(`
-              UPDATE pool_events SET event_date = ?, name = ?, kind = ?, shares = ?, vest_months = ?, cliff_months = ?, notes = ?
+              UPDATE pool_events SET event_date = ?, name = ?, kind = ?, shares = ?, vest_months = ?, cliff_months = ?, notes = ?, job_title = ?, job_level = ?
               WHERE id = ?
-            `).run(ie.targetDate || today, ie.name.trim(), ie.kind, ie.shares, ie.vestMonths ?? 48, ie.cliffMonths ?? 12, ie.notes ?? null, ex.id)
+            `).run(ie.targetDate || today, ie.name.trim(), ie.kind, ie.shares, ie.vestMonths ?? 48, ie.cliffMonths ?? 12, ie.notes ?? null, ie.jobTitle ?? null, ie.jobLevel ?? null, ex.id)
           } else {
             // combine: add shares, update other fields where the import has one.
             const sets: string[] = ['shares = shares + ?']
@@ -96,6 +96,8 @@ export default defineEventHandler(async (event) => {
             setIf('vest_months', ie.vestMonths)
             setIf('cliff_months', ie.cliffMonths)
             setIf('notes', ie.notes)
+            setIf('job_title', ie.jobTitle)
+            setIf('job_level', ie.jobLevel)
             vals.push(ex.id)
             db().prepare(`UPDATE pool_events SET ${sets.join(', ')} WHERE id = ?`).run(...vals)
             ex.shares += ie.shares
@@ -112,6 +114,8 @@ export default defineEventHandler(async (event) => {
           ie.vestMonths ?? 48,
           ie.cliffMonths ?? 12,
           ie.notes ?? null,
+          ie.jobTitle ?? null,
+          ie.jobLevel ?? null,
         )
         created++
       } catch (e: any) {

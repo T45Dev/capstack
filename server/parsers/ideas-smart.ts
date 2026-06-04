@@ -23,11 +23,13 @@ export interface ParsedIdea {
   vestMonths: number | null
   cliffMonths: number | null
   notes: string | null
+  jobTitle: string | null
+  jobLevel: string | null
 }
 
 export type IdeaField =
   | 'name' | 'targetDate' | 'kind' | 'shares'
-  | 'vestMonths' | 'cliffMonths' | 'notes'
+  | 'vestMonths' | 'cliffMonths' | 'notes' | 'jobTitle' | 'jobLevel'
 
 export interface IdeasImportResult {
   parsed: ParsedIdea[]
@@ -52,6 +54,8 @@ export const CANONICAL_IDEA_FIELDS: CanonicalIdeaField[] = [
   { field: 'vestMonths',  label: 'Vest months',  defaultHeader: 'Vest months',  mapsTo: 'vest_months' },
   { field: 'cliffMonths', label: 'Cliff months', defaultHeader: 'Cliff months', mapsTo: 'cliff_months' },
   { field: 'notes',       label: 'Notes',        defaultHeader: 'Notes',        mapsTo: 'notes' },
+  { field: 'jobTitle',    label: 'Job title',    defaultHeader: 'Title',        mapsTo: 'job_title' },
+  { field: 'jobLevel',    label: 'Level / grade', defaultHeader: 'Level',       mapsTo: 'job_level' },
 ]
 export function defaultIdeaHeaderMappings(): Partial<Record<IdeaField, string>> {
   const out: Partial<Record<IdeaField, string>> = {}
@@ -91,6 +95,17 @@ const ALIASES: Record<IdeaField, RegExp[]> = {
   notes: [
     /^(notes?|comments?|memo|remarks|details)$/,
     /notes?/, /comments?/,
+  ],
+  jobTitle: [
+    /^(job ?)?title$/,
+    /^role$/,
+    /^position$/,
+  ],
+  jobLevel: [
+    /^(job ?)?level$/,
+    /^grade$/,
+    /^(pay|job) ?grade$/,
+    /^tier$/,
   ],
 }
 
@@ -228,6 +243,8 @@ function buildFromRows(getRow: (r: number) => any[], rowCount: number, matchHead
       vestMonths: 'vestMonths' in colByField && cellHasValue(get('vestMonths')) ? Math.round(cellNumber(get('vestMonths'))) : null,
       cliffMonths: 'cliffMonths' in colByField && cellHasValue(get('cliffMonths')) ? Math.round(cellNumber(get('cliffMonths'))) : null,
       notes: 'notes' in colByField ? cellString(get('notes')) || null : null,
+      jobTitle: 'jobTitle' in colByField ? cellString(get('jobTitle')) || null : null,
+      jobLevel: 'jobLevel' in colByField ? cellString(get('jobLevel')) || null : null,
     })
   }
   if (parsed.length === 0 && rowsRead > 0) warnings.push(`Scanned ${rowsRead} rows but found no usable ideas (need a name + a positive share count).`)

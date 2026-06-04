@@ -36,12 +36,14 @@ export interface ParsedGrant {
   vestingSchedule: string | null
   awardType: string | null
   batch: string | null
+  jobTitle: string | null
+  jobLevel: string | null
 }
 
 export type GrantField =
   | 'recipientName' | 'recipientType' | 'quantity' | 'strike'
   | 'issueDate' | 'vestingStart' | 'vestMonths' | 'cliffMonths' | 'notes'
-  | 'vestingSchedule' | 'awardType' | 'batch'
+  | 'vestingSchedule' | 'awardType' | 'batch' | 'jobTitle' | 'jobLevel'
 
 // The canonical "template" fields the operator maps in Option Grants settings.
 // Each lists the default spreadsheet header we expect and the grants-table
@@ -64,6 +66,8 @@ export const CANONICAL_GRANT_FIELDS: CanonicalGrantField[] = [
   { field: 'vestingSchedule', label: 'Vesting schedule',      defaultHeader: 'Vesting schedule',      mapsTo: 'vesting_schedule_id' },
   { field: 'awardType',       label: 'Type (ISO/NSO/RSU)',    defaultHeader: 'Type',                  mapsTo: 'award_type' },
   { field: 'batch',           label: 'Batch',                 defaultHeader: 'Batch',                 mapsTo: 'round' },
+  { field: 'jobTitle',        label: 'Job title',             defaultHeader: 'Title',                 mapsTo: 'job_title' },
+  { field: 'jobLevel',        label: 'Level / grade',         defaultHeader: 'Level',                 mapsTo: 'job_level' },
 ]
 
 // The default header → field overrides (canonical defaults). Importers merge
@@ -101,7 +105,7 @@ const ALIASES: Record<GrantField, RegExp[]> = {
     /name/,
   ],
   recipientType: [
-    /^(recipient ?type|type|role|category|classification|position|title|relationship)$/,
+    /^(recipient ?type|type|category|classification|relationship)$/,
     /(employee|advisor|consultant|board|director)/,
   ],
   quantity: [
@@ -153,6 +157,17 @@ const ALIASES: Record<GrantField, RegExp[]> = {
     /^(grant ?)?batch( ?name)?$/,
     /^cohort$/,
     /batch/,
+  ],
+  jobTitle: [
+    /^(job ?)?title$/,
+    /^role$/,
+    /^position$/,
+  ],
+  jobLevel: [
+    /^(job ?)?level$/,
+    /^grade$/,
+    /^(pay|job) ?grade$/,
+    /^tier$/,
   ],
 }
 
@@ -357,6 +372,8 @@ export async function parseGrantsXlsx(buf: Buffer, overrides?: Partial<Record<Gr
       vestingSchedule: 'vestingSchedule' in colByField ? cellString(get('vestingSchedule')) || null : null,
       awardType: 'awardType' in colByField ? normalizeAwardType(get('awardType')) : null,
       batch: 'batch' in colByField ? cellString(get('batch')) || null : null,
+      jobTitle: 'jobTitle' in colByField ? cellString(get('jobTitle')) || null : null,
+      jobLevel: 'jobLevel' in colByField ? cellString(get('jobLevel')) || null : null,
     })
   }
 
@@ -449,6 +466,8 @@ export function parseGrantsCsv(text: string, overrides?: Partial<Record<GrantFie
       vestingSchedule: 'vestingSchedule' in colByField ? cellString(get('vestingSchedule')) || null : null,
       awardType: 'awardType' in colByField ? normalizeAwardType(get('awardType')) : null,
       batch: 'batch' in colByField ? cellString(get('batch')) || null : null,
+      jobTitle: 'jobTitle' in colByField ? cellString(get('jobTitle')) || null : null,
+      jobLevel: 'jobLevel' in colByField ? cellString(get('jobLevel')) || null : null,
     })
   }
 
