@@ -20,6 +20,9 @@ const { data: company } = await useFetch(() => `/api/companies/${id.value}`, { w
 const { data: capTable } = await useFetch(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => null as any })
 const { data: grantsData, refresh: refreshGrants } = await useFetch(() => `/api/companies/${id.value}/grants`, { watch: [id], default: () => ({ grants: [], pools: [] } as any) })
 const { data: ideas, refresh: refreshIdeas } = await useFetch<any[]>(() => `/api/companies/${id.value}/pool-events`, { watch: [id], default: () => [] })
+// Cap-table FDS timeline (Settings) — pool increases here carry the round's
+// close date into the timeline below.
+const { data: milestones } = await useFetch<Array<{ id: string; as_of_date: string | null; label: string | null; option_pool: number | null }>>(() => `/api/companies/${id.value}/milestones`, { watch: [id], default: () => [] })
 // Round-summary supplies per-round option_pool_issued + close_date, which
 // is what drives the chronological pool top-up events on the timeline.
 const { data: roundSummary } = await useFetch<{ rounds: Array<{ round_id: string; code: string; name: string | null; kind: 'formation' | 'closed' | 'open'; close_date: string | null; option_pool_issued: number; total_shares_fds: number }> }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
@@ -151,10 +154,20 @@ const events = computed<TimelineEvent[]>(() => {
       type: 'pool_topup', kind: null, shares: r.option_pool_issued, direction: 1, source: 'pool',
     })
   }
-  // Fallback: if no per-round pool issuances are typed in yet, fall back
-  // to the option_pools table (single lump from Carta import). Keeps the
-  // page useful before the operator has filled in per-round cells.
-  if (out.length === 0) {
+  // Pool increases entered on the FDS timeline (Settings) — each carries its
+  // milestone's close date, so pool top-ups land chronologically.
+  for (const m of (milestones.value || [])) {
+    if (!m.option_pool || m.option_pool <= 0) continue
+    out.push({
+      id: `pool-ms:${m.id}`,
+      date: m.as_of_date || fallbackDate.value,
+      name: `${m.label || 'Milestone'} pool top-up`,
+      type: 'pool_topup', kind: null, shares: m.option_pool, direction: 1, source: 'pool',
+    })
+  }
+  // Fallback: if no per-round / milestone pool issuances are typed in yet,
+  // fall back to the option_pools table (single lump from Carta import).
+  if (!out.some(e => e.type === 'pool_topup')) {
     for (const p of (grantsData.value?.pools || [])) {
       out.push({
         id: `pool:${p.id}`, date: p.adopted_date || fallbackDate.value, name: p.name || 'Option pool',

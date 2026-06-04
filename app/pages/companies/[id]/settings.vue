@@ -16,22 +16,22 @@ const activeTab = ref<typeof tabs[number]['key']>('grants')
 // ---- FDS timeline (cap-table milestones) -------------------------------
 // Dated FDS/PPS points used as the Grant Fairness hire-basis. One row per
 // historical round (Formation, Seed, A, …).
-interface Milestone { id: string; as_of_date: string | null; label: string | null; fds: number | null; pps: number | null }
+interface Milestone { id: string; as_of_date: string | null; label: string | null; fds: number | null; pps: number | null; option_pool: number | null }
 const { data: milestones, refresh: refreshMilestones } = await useFetch<Milestone[]>(
   () => `/api/companies/${id.value}/milestones`,
   { watch: [id], default: () => [] },
 )
 // fds/pps held as raw strings — the server strips commas/$ and coerces, so
 // "42,506,050" survives (v-model.number would parseFloat it to 42).
-const newMs = reactive({ as_of_date: '', label: '', fds: '', pps: '' })
+const newMs = reactive({ as_of_date: '', label: '', fds: '', pps: '', option_pool: '' })
 async function addMilestone() {
   if (!newMs.as_of_date) return
   await $fetch(`/api/companies/${id.value}/milestones`, { method: 'POST', body: { ...newMs } })
-  newMs.as_of_date = ''; newMs.label = ''; newMs.fds = ''; newMs.pps = ''
+  newMs.as_of_date = ''; newMs.label = ''; newMs.fds = ''; newMs.pps = ''; newMs.option_pool = ''
   await refreshMilestones()
 }
 const fmtFds = (n: number | null) => n != null ? Number(n).toLocaleString() : ''
-async function patchMilestone(m: Milestone, field: 'as_of_date' | 'label' | 'fds' | 'pps', value: any) {
+async function patchMilestone(m: Milestone, field: 'as_of_date' | 'label' | 'fds' | 'pps' | 'option_pool', value: any) {
   await $fetch(`/api/milestones/${m.id}`, { method: 'PATCH', body: { [field]: value } })
   await refreshMilestones()
 }
@@ -343,6 +343,7 @@ function resetIdeaMapping(f: CanonicalField) {
                 <th class="text-left font-medium px-3 py-2">Label</th>
                 <th class="text-right font-medium px-3 py-2 w-40">Fully-diluted shares</th>
                 <th class="text-right font-medium px-3 py-2 w-32">Price / share</th>
+                <th class="text-right font-medium px-3 py-2 w-36">Option pool +</th>
                 <th class="px-3 py-2 w-10"></th>
               </tr>
             </thead>
@@ -360,6 +361,9 @@ function resetIdeaMapping(f: CanonicalField) {
                 <td class="px-3 py-1.5 text-right">
                   <input class="num w-full bg-transparent text-right text-[13px] focus:outline-none" :value="m.pps ?? ''" inputmode="decimal" placeholder="—" @change="(ev) => patchMilestone(m, 'pps', (ev.target as HTMLInputElement).value)">
                 </td>
+                <td class="px-3 py-1.5 text-right">
+                  <input class="num w-full bg-transparent text-right text-[13px] focus:outline-none" :value="fmtFds(m.option_pool)" inputmode="numeric" placeholder="—" @change="(ev) => patchMilestone(m, 'option_pool', (ev.target as HTMLInputElement).value)">
+                </td>
                 <td class="px-3 py-1.5 text-center">
                   <button type="button" class="text-ink-400 hover:text-red-600" title="Delete" @click="deleteMilestone(m)">×</button>
                 </td>
@@ -370,6 +374,7 @@ function resetIdeaMapping(f: CanonicalField) {
                 <td class="px-3 py-1.5"><input v-model="newMs.label" class="w-full bg-transparent text-[13px] focus:outline-none" placeholder="Series A" @keydown.enter="addMilestone"></td>
                 <td class="px-3 py-1.5 text-right"><input v-model="newMs.fds" class="num w-full bg-transparent text-right text-[13px] focus:outline-none" inputmode="numeric" placeholder="FDS" @keydown.enter="addMilestone"></td>
                 <td class="px-3 py-1.5 text-right"><input v-model="newMs.pps" class="num w-full bg-transparent text-right text-[13px] focus:outline-none" inputmode="decimal" placeholder="$/sh" @keydown.enter="addMilestone"></td>
+                <td class="px-3 py-1.5 text-right"><input v-model="newMs.option_pool" class="num w-full bg-transparent text-right text-[13px] focus:outline-none" inputmode="numeric" placeholder="pool +" @keydown.enter="addMilestone"></td>
                 <td class="px-3 py-1.5 text-center">
                   <button type="button" class="text-brand-edge hover:text-brand-deep text-lg leading-none" title="Add" @click="addMilestone">+</button>
                 </td>

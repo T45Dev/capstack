@@ -370,6 +370,9 @@ function migrate(d: Database.Database): void {
   // their own (proposed/idea), so an early hire's "% at hire" reflects the
   // (smaller) FDS back when they joined.
   ensureColumn('stakeholders', 'start_date', 'TEXT')
+  // Option-pool increase (shares) at a cap-table milestone — lets pool top-ups
+  // carry the round's close date into the Option Pool Impact timeline.
+  ensureColumn('cap_table_milestones', 'option_pool', 'REAL')
   // Pool ideas (future-grant events) can carry a job title + level so the
   // Grant Fairness recommendation slots them into the right level section.
   ensureColumn('pool_events', 'job_title', 'TEXT')
