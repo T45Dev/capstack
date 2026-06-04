@@ -226,10 +226,14 @@ const events = computed<TimelineEvent[]>(() => {
     // the UI it's a guess).
     const grantBaseDate = g.issue_date || g.vesting_start || fallbackDate.value
     if (g.quantity_exercised && g.quantity_exercised > 0) {
-      // Exercise: Outstanding → Common. Outstanding drops; Available
-      // grows by the same amount (Authorized = Out + Avail and
-      // Authorized is constant). Direction = +1: chart line steps up,
-      // matching forfeit/expire.
+      // Exercise: the option converts to Common stock. It already left the
+      // pool when the grant was issued (the grant event above subtracts the
+      // FULL issued amount), and exercising does NOT return it to Available —
+      // unlike forfeit/expire. Direction = 0: the event shows on the
+      // timeline but doesn't move the running balance. This matches
+      // directionFor('exercise') and the headline accounting
+      // (Available = Authorized − Outstanding − Exercised). Previously this
+      // was +1, which added exercised shares back and overstated Available.
       out.push({
         id: `exercise:${g.id}`,
         date: g.last_exercised_date || grantBaseDate,
@@ -238,7 +242,7 @@ const events = computed<TimelineEvent[]>(() => {
         type: 'exercise',
         kind: null,
         shares: g.quantity_exercised,
-        direction: 1,
+        direction: 0,
         source: 'grant_outstanding',
         grantId: g.id,
       })
