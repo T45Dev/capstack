@@ -314,6 +314,64 @@ const tabs = [
   { key: 'calibration', label: 'Calibration' },
   { key: 'newhire', label: 'New-hire calc' },
 ] as const
+
+// ---- Column sorting (every fairness table) ----
+// useSortableTable manages sort key/dir (+ localStorage persistence) and a pure
+// applySort(rows) that sorts by row[key]. We register one instance per table;
+// derived display columns (basis-dependent shares, market median) are surfaced
+// as plain props on the row so they can be sorted like any other.
+const sc = (key: string, align?: 'left' | 'right' | 'center') => ({ key, label: key, width: 100, sortable: true, align })
+
+const rosterTable = useSortableTable({
+  key: 'capstack:fairness:roster',
+  defaultSort: { key: 'name', dir: 'asc' },
+  columns: ['name', 'awardTypes', 'title', 'level', 'startDate', 'salary', 'salaryMidpoint', 'benchmarkRole', 'optionShares'].map(k => sc(k)),
+})
+const rosterRows = computed(() => rosterTable.applySort((data.value?.holders || []) as any[]))
+
+const holdingsTable = useSortableTable({
+  key: 'capstack:fairness:holdings',
+  defaultSort: { key: 'postPct', dir: 'desc' },
+  columns: ['name', 'level', 'grantShares', 'totalShares', 'prePct', 'postPct', 'entryPct', 'value'].map(k => sc(k)),
+})
+const holdingsRows = computed(() => holdingsTable.applySort(included.value as any[]))
+
+const recTable = useSortableTable({
+  key: 'capstack:fairness:recommend',
+  defaultSort: { key: 'recommendedAddl', dir: 'desc' },
+  columns: ['name', 'postPct', 'flag', 'recommendedAddl', 'recommendedPct'].map(k => sc(k)),
+})
+
+// Calibration: per-grade benchmark table. Augment each grade with its market
+// median so the Market % column is sortable too.
+const calGradeTable = useSortableTable({
+  key: 'capstack:fairness:calGrade',
+  defaultSort: { key: 'level', dir: 'desc' },
+  columns: ['level', 'n', 'med', 'lo', 'medPct', '_market', 'medValue', 'medMult'].map(k => sc(k)),
+})
+const calGradeRows = computed(() =>
+  calGradeTable.applySort(gradeStats.value.map(g => ({ ...g, _market: marketByGrade.value.get(g.level)?.med ?? null }))),
+)
+
+// Calibration: per-person ISO detail. Basis-dependent shares/%/$ and hire year
+// are surfaced as sortable props; the template still reads them via calShares()
+// etc., so display stays in lockstep with the basis toggle.
+const calDetailTable = useSortableTable({
+  key: 'capstack:fairness:calDetail',
+  defaultSort: { key: 'level', dir: 'desc' },
+  columns: ['level', 'name', '_year', '_shares', '_pct', '_marketMed', '_value', 'salary', '_mult'].map(k => sc(k)),
+})
+const calDetailRows = computed(() =>
+  calDetailTable.applySort(isoDetail.value.map(h => ({
+    ...h,
+    _year: cohortYear(h),
+    _shares: calShares(h),
+    _pct: calPct(h),
+    _value: calValue(h),
+    _marketMed: h.benchmark?.med ?? null,
+    _mult: h.salary ? calValue(h) / h.salary : null,
+  }))),
+)
 </script>
 
 <template>
@@ -371,19 +429,19 @@ const tabs = [
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
             <th class="text-center font-medium px-3 py-2 w-16">Include</th>
-            <th class="text-left font-medium px-4 py-2">Optionholder</th>
-            <th class="text-left font-medium px-3 py-2 w-20">Award</th>
-            <th class="text-left font-medium px-3 py-2 w-40">Title</th>
-            <th class="text-left font-medium px-3 py-2 w-16">Level</th>
-            <th class="text-left font-medium px-3 py-2 w-32">Start date</th>
-            <th class="text-right font-medium px-3 py-2 w-28">Salary</th>
-            <th class="text-right font-medium px-3 py-2 w-28">Midpoint</th>
-            <th class="text-left font-medium px-3 py-2 w-48">Market role</th>
-            <th class="text-right font-medium px-3 py-2 num">Options</th>
+            <SortTh :table="rosterTable" col="name" th-class="text-left font-medium px-4 py-2">Optionholder</SortTh>
+            <SortTh :table="rosterTable" col="awardTypes" th-class="text-left font-medium px-3 py-2 w-20">Award</SortTh>
+            <SortTh :table="rosterTable" col="title" th-class="text-left font-medium px-3 py-2 w-40">Title</SortTh>
+            <SortTh :table="rosterTable" col="level" th-class="text-left font-medium px-3 py-2 w-16">Level</SortTh>
+            <SortTh :table="rosterTable" col="startDate" th-class="text-left font-medium px-3 py-2 w-32">Start date</SortTh>
+            <SortTh :table="rosterTable" col="salary" align="right" th-class="text-right font-medium px-3 py-2 w-28">Salary</SortTh>
+            <SortTh :table="rosterTable" col="salaryMidpoint" align="right" th-class="text-right font-medium px-3 py-2 w-28">Midpoint</SortTh>
+            <SortTh :table="rosterTable" col="benchmarkRole" th-class="text-left font-medium px-3 py-2 w-48">Market role</SortTh>
+            <SortTh :table="rosterTable" col="optionShares" align="right" th-class="text-right font-medium px-3 py-2 num">Options</SortTh>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="h in data.holders" :key="h.stakeholderId || `${h.source}:${h.name}`" class="even:bg-ink-50/50 hover:bg-brand-50/50 transition-colors" :class="h.include ? '' : 'opacity-55'">
+          <tr v-for="h in rosterRows" :key="h.stakeholderId || `${h.source}:${h.name}`" class="even:bg-ink-50/50 hover:bg-brand-50/50 transition-colors" :class="h.include ? '' : 'opacity-55'">
             <td class="px-3 py-1.5 text-center">
               <input
                 type="checkbox"
@@ -447,18 +505,18 @@ const tabs = [
       <table class="w-full text-sm num">
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
-            <th class="text-left font-medium px-4 py-2">Optionholder</th>
-            <th class="text-left font-medium px-3 py-2">Level</th>
-            <th class="text-right font-medium px-3 py-2">Options</th>
-            <th class="text-right font-medium px-3 py-2">Total shares</th>
-            <th class="text-right font-medium px-3 py-2">Pre %</th>
-            <th class="text-right font-medium px-3 py-2">Post %</th>
-            <th class="text-right font-medium px-3 py-2">% at hire</th>
-            <th class="text-right font-medium px-3 py-2">$ value</th>
+            <SortTh :table="holdingsTable" col="name" th-class="text-left font-medium px-4 py-2">Optionholder</SortTh>
+            <SortTh :table="holdingsTable" col="level" th-class="text-left font-medium px-3 py-2">Level</SortTh>
+            <SortTh :table="holdingsTable" col="grantShares" align="right" th-class="text-right font-medium px-3 py-2">Options</SortTh>
+            <SortTh :table="holdingsTable" col="totalShares" align="right" th-class="text-right font-medium px-3 py-2">Total shares</SortTh>
+            <SortTh :table="holdingsTable" col="prePct" align="right" th-class="text-right font-medium px-3 py-2">Pre %</SortTh>
+            <SortTh :table="holdingsTable" col="postPct" align="right" th-class="text-right font-medium px-3 py-2">Post %</SortTh>
+            <SortTh :table="holdingsTable" col="entryPct" align="right" th-class="text-right font-medium px-3 py-2">% at hire</SortTh>
+            <SortTh :table="holdingsTable" col="value" align="right" th-class="text-right font-medium px-3 py-2">$ value</SortTh>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="h in included" :key="h.stakeholderId || `${h.source}:${h.name}`" class="border-b border-ink-100 last:border-0 hover:bg-ink-50/40">
+          <tr v-for="h in holdingsRows" :key="h.stakeholderId || `${h.source}:${h.name}`" class="border-b border-ink-100 last:border-0 hover:bg-ink-50/40">
             <td class="px-4 py-1.5 text-ink-900">
               {{ h.name }}
               <span v-if="sourceMeta[h.source]" class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle" :class="sourceMeta[h.source].cls">{{ sourceMeta[h.source].label }}</span>
@@ -500,15 +558,15 @@ const tabs = [
           <table class="w-full text-sm num">
             <thead>
               <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
-                <th class="text-left font-medium px-4 py-2">Optionholder</th>
-                <th class="text-right font-medium px-3 py-2">Current post %</th>
-                <th class="text-left font-medium px-3 py-2 pl-6">Fairness</th>
-                <th class="text-right font-medium px-3 py-2">Recommended + options</th>
-                <th class="text-right font-medium px-3 py-2">Resulting %</th>
+                <SortTh :table="recTable" col="name" th-class="text-left font-medium px-4 py-2">Optionholder</SortTh>
+                <SortTh :table="recTable" col="postPct" align="right" th-class="text-right font-medium px-3 py-2">Current post %</SortTh>
+                <SortTh :table="recTable" col="flag" th-class="text-left font-medium px-3 py-2 pl-6">Fairness</SortTh>
+                <SortTh :table="recTable" col="recommendedAddl" align="right" th-class="text-right font-medium px-3 py-2">Recommended + options</SortTh>
+                <SortTh :table="recTable" col="recommendedPct" align="right" th-class="text-right font-medium px-3 py-2">Resulting %</SortTh>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="h in lvl.holders" :key="h.stakeholderId || `${h.source}:${h.name}`" class="border-b border-ink-100 last:border-0">
+              <tr v-for="h in recTable.applySort(lvl.holders)" :key="h.stakeholderId || `${h.source}:${h.name}`" class="border-b border-ink-100 last:border-0">
                 <td class="px-4 py-1.5 text-ink-900">
                   {{ h.name }}
                   <span v-if="sourceMeta[h.source]" class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle" :class="sourceMeta[h.source].cls">{{ sourceMeta[h.source].label }}</span>
@@ -665,19 +723,19 @@ const tabs = [
             <table class="w-full text-sm num">
               <thead>
                 <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
-                  <th class="text-left font-medium px-4 py-2">Grade</th>
-                  <th class="text-right font-medium px-3 py-2">#</th>
+                  <SortTh :table="calGradeTable" col="level" th-class="text-left font-medium px-4 py-2">Grade</SortTh>
+                  <SortTh :table="calGradeTable" col="n" align="right" th-class="text-right font-medium px-3 py-2">#</SortTh>
                   <th class="text-left font-medium px-3 py-2 pl-4">Confidence</th>
-                  <th class="text-right font-medium px-3 py-2">Median grant</th>
-                  <th class="text-right font-medium px-3 py-2">Range</th>
-                  <th class="text-right font-medium px-3 py-2">% at hire</th>
-                  <th class="text-right font-medium px-3 py-2">Market %</th>
-                  <th class="text-right font-medium px-3 py-2">$ at grant</th>
-                  <th class="text-right font-medium px-3 py-2">$ / salary</th>
+                  <SortTh :table="calGradeTable" col="med" align="right" th-class="text-right font-medium px-3 py-2">Median grant</SortTh>
+                  <SortTh :table="calGradeTable" col="lo" align="right" th-class="text-right font-medium px-3 py-2">Range</SortTh>
+                  <SortTh :table="calGradeTable" col="medPct" align="right" th-class="text-right font-medium px-3 py-2">% at hire</SortTh>
+                  <SortTh :table="calGradeTable" col="_market" align="right" th-class="text-right font-medium px-3 py-2">Market %</SortTh>
+                  <SortTh :table="calGradeTable" col="medValue" align="right" th-class="text-right font-medium px-3 py-2">$ at grant</SortTh>
+                  <SortTh :table="calGradeTable" col="medMult" align="right" th-class="text-right font-medium px-3 py-2">$ / salary</SortTh>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="g in gradeStats" :key="g.level" class="even:bg-ink-50/50 hover:bg-brand-50/50 transition-colors">
+                <tr v-for="g in calGradeRows" :key="g.level" class="even:bg-ink-50/50 hover:bg-brand-50/50 transition-colors">
                   <td class="px-4 py-1.5 font-medium" :class="g.interpolated ? 'text-ink-400 italic' : 'text-ink-900'">{{ g.level }}<span v-if="g.interpolated" class="ml-1 text-[9px] uppercase tracking-wide text-ink-400">interp</span></td>
                   <td class="px-3 py-1.5 text-right text-ink-500">{{ g.interpolated ? '—' : g.n }}<span v-if="g.removed" class="text-red-400 text-[10px]" :title="`${g.removed} outlier(s) removed`"> −{{ g.removed }}</span></td>
                   <td class="px-3 py-1.5 pl-4"><span class="inline-block text-[10px] px-1.5 py-0.5 rounded border" :class="confMeta[g.confidence].cls">{{ confMeta[g.confidence].label }}</span></td>
@@ -696,20 +754,20 @@ const tabs = [
             <table class="w-full text-sm num">
               <thead>
                 <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
-                  <th class="text-right font-medium px-3 py-2 w-14">Grade</th>
-                  <th class="text-left font-medium px-4 py-2">Optionholder</th>
-                  <th class="text-right font-medium px-3 py-2 w-16">Year</th>
-                  <th class="text-right font-medium px-3 py-2">Granted</th>
-                  <th class="text-right font-medium px-3 py-2">% at hire</th>
-                  <th class="text-right font-medium px-3 py-2">Market med %</th>
+                  <SortTh :table="calDetailTable" col="level" align="right" th-class="text-right font-medium px-3 py-2 w-14">Grade</SortTh>
+                  <SortTh :table="calDetailTable" col="name" th-class="text-left font-medium px-4 py-2">Optionholder</SortTh>
+                  <SortTh :table="calDetailTable" col="_year" align="right" th-class="text-right font-medium px-3 py-2 w-16">Year</SortTh>
+                  <SortTh :table="calDetailTable" col="_shares" align="right" th-class="text-right font-medium px-3 py-2">Granted</SortTh>
+                  <SortTh :table="calDetailTable" col="_pct" align="right" th-class="text-right font-medium px-3 py-2">% at hire</SortTh>
+                  <SortTh :table="calDetailTable" col="_marketMed" align="right" th-class="text-right font-medium px-3 py-2">Market med %</SortTh>
                   <th class="text-left font-medium px-3 py-2 pl-4">vs market</th>
-                  <th class="text-right font-medium px-3 py-2">$ at grant</th>
-                  <th class="text-right font-medium px-3 py-2">Salary</th>
-                  <th class="text-right font-medium px-3 py-2">$ / salary</th>
+                  <SortTh :table="calDetailTable" col="_value" align="right" th-class="text-right font-medium px-3 py-2">$ at grant</SortTh>
+                  <SortTh :table="calDetailTable" col="salary" align="right" th-class="text-right font-medium px-3 py-2">Salary</SortTh>
+                  <SortTh :table="calDetailTable" col="_mult" align="right" th-class="text-right font-medium px-3 py-2">$ / salary</SortTh>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="h in isoDetail" :key="h.stakeholderId || h.name" class="even:bg-ink-50/50 hover:bg-brand-50/50 transition-colors">
+                <tr v-for="h in calDetailRows" :key="h.stakeholderId || h.name" class="even:bg-ink-50/50 hover:bg-brand-50/50 transition-colors">
                   <td class="px-3 py-1.5 text-right text-ink-700">{{ h.level }}</td>
                   <td class="px-4 py-1.5 text-ink-900">{{ h.name }}</td>
                   <td class="px-3 py-1.5 text-right text-ink-500">{{ cohortYear(h) }}</td>
