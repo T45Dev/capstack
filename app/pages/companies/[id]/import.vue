@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { UploadCloud, CheckCircle2, AlertTriangle, ArrowRight, Sparkles, RefreshCcw } from 'lucide-vue-next'
+import { UploadCloud, CheckCircle2, AlertTriangle, ArrowRight, Sparkles, RefreshCcw, Download } from 'lucide-vue-next'
 import { fmtShares, fmtDate, fmtPricePerShare } from '~/utils/format'
 
 const route = useRoute()
@@ -34,6 +34,30 @@ const preview = ref<Preview | null>(null)
 const previewError = ref<string | null>(null)
 const result = ref<{ ok: boolean; counts: Record<string, number>; poolAuthorized?: number; warnings: string[] } | null>(null)
 const error = ref<string | null>(null)
+
+// ---- Master import (the multi-tab CapStack template) ----
+const masterFile = ref<File | null>(null)
+const masterUploading = ref(false)
+const masterResult = ref<{ ok: boolean; counts: Record<string, number>; warnings: string[] } | null>(null)
+const masterError = ref<string | null>(null)
+function downloadTemplate() { window.location.href = `/api/companies/${id.value}/master-template` }
+function onMasterPick(e: Event) {
+  const f = (e.target as HTMLInputElement).files?.[0]
+  masterFile.value = f || null; masterError.value = null; masterResult.value = null
+}
+async function uploadMaster() {
+  if (!masterFile.value || masterUploading.value) return
+  masterUploading.value = true; masterError.value = null
+  try {
+    const fd = new FormData()
+    fd.append('file', masterFile.value)
+    masterResult.value = await $fetch(`/api/companies/${id.value}/master-import`, { method: 'POST', body: fd })
+  } catch (e: any) {
+    masterError.value = e?.data?.message || e?.message || 'Import failed'
+  } finally {
+    masterUploading.value = false
+  }
+}
 
 async function runPreview(f: File) {
   previewing.value = true
@@ -138,7 +162,36 @@ const sheetList = computed(() => {
       </div>
     </div>
 
-    <!-- Drop zone -->
+    <!-- Master import: the full multi-tab CapStack template -->
+    <section class="rounded-xl border border-ink-200 bg-white shadow-[0_1px_0_rgba(16,24,40,0.04)] overflow-hidden mb-6">
+      <div class="px-5 py-4">
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+          <div class="min-w-0">
+            <h2 class="text-[15px] font-semibold text-ink-900">Master import <span class="text-ink-400 font-normal">— one workbook, everything</span></h2>
+            <p class="text-[12.5px] text-ink-500 mt-1 max-w-xl">
+              A single relational template: tabs for Stakeholders, Holdings, Option grants, Convertibles, Round history, and Ideas.
+              People are entered once on <span class="font-medium text-ink-700">Stakeholders</span>; other tabs reference them by name. Best for a fresh company.
+            </p>
+          </div>
+          <UiButton variant="secondary" size="sm" @click="downloadTemplate"><Download :size="14" /> Download template</UiButton>
+        </div>
+        <div class="mt-4 flex items-center gap-3 flex-wrap">
+          <label class="inline-flex items-center gap-2 text-[12.5px] text-ink-700 border border-ink-300 rounded-md px-3 py-1.5 cursor-pointer hover:border-ink-400 bg-white">
+            <input type="file" accept=".xlsx" class="hidden" @change="onMasterPick">
+            <UploadCloud :size="14" /> {{ masterFile ? masterFile.name : 'Choose filled workbook…' }}
+          </label>
+          <UiButton v-if="masterFile" size="sm" :disabled="masterUploading" @click="uploadMaster">{{ masterUploading ? 'Importing…' : 'Import workbook' }}</UiButton>
+        </div>
+        <p v-if="masterError" class="mt-2 text-[12px] text-red-600">{{ masterError }}</p>
+        <div v-if="masterResult" class="mt-3 rounded-lg border border-ok/30 bg-ok-soft/40 px-3 py-2 text-[12.5px] num">
+          <span class="font-medium text-ink-800">Imported:</span>
+          <span v-for="(v, k) in masterResult.counts" :key="k" class="ml-2 text-ink-700">{{ v }} {{ k }}</span>
+          <p v-for="(w, i) in masterResult.warnings" :key="i" class="text-amber-700 text-[11px] mt-1">{{ w }}</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Drop zone (Carta pro-forma) -->
     <section
       class="rounded-xl border border-ink-200 bg-white shadow-[0_1px_0_rgba(16,24,40,0.04)] overflow-hidden"
     >
