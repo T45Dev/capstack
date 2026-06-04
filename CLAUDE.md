@@ -127,7 +127,17 @@ intact.
 Tabs: Stakeholders (hub) · Holdings · Option grants · Convertibles · Round history.
 The **Option grants** tab carries a `Status` column — `Issued` → `grants` (outstanding),
 `Proposed` → `grants` (status='proposed', approval='Pending'), `Idea` → `pool_events`.
-This folded the old separate "Ideas" tab in (one tab, three statuses).
+This folded the old separate "Ideas" tab in (one tab, three statuses). It also carries the
+per-grant lifecycle columns (quantity_issued / exercised / forfeited / expired + their dates
++ acceleration) so the **Option Pool Impact** timeline gets its exercise/forfeit/expire events;
+Carta prefills them.
+
+Option pool: the grants page reads the authorized pool from `option_pools.authorized` (fallback
+after `rounds.option_pool_issued`). Master-import has no `rounds`, so it rolls the Round-history
+"Option pool increase" column into one `option_pools` row (upsert by name 'Stock Option Plan').
+The Carta prefill seeds Carta's `poolAuthorized` onto the latest Round-history row (or a synthetic
+row) so that number flows through. The Financings/Pool pages still read the pool from the
+milestone timeline — same total, different read, no double-count.
 
 ## Pending / parked
 
