@@ -198,11 +198,13 @@ export function buildFairness(rounds: FairnessRound[], rawHolders: RawHolder[], 
 
   const holders: Holder[] = rawHolders.map(h => {
     const hireIdx = pickRoundIndexForDate(rounds, h.firstGrantDate)
-    const hireRound = hireIdx >= 0 ? rounds[hireIdx] : (rounds[0] ?? null)
-    let entryFDS = 0
-    if (hireIdx >= 0) entryFDS = rounds[hireIdx].postFDS
-    else if (rounds.length) entryFDS = rounds[0].preFDS || rounds[0].postFDS
-    if (!entryFDS && sel) entryFDS = sel.postFDS
+    // No hire date (proposed / idea / undated grant) → treat as granted at the
+    // selected (current) round, NOT formation. Anchoring to the formation
+    // round's tiny FDS would massively inflate entry % for a not-yet-issued
+    // grant; "entry" for something granted now is today's FDS/price.
+    const hireRound = hireIdx >= 0 ? rounds[hireIdx] : (sel ?? rounds[rounds.length - 1] ?? null)
+    let entryFDS = hireIdx >= 0 ? rounds[hireIdx].postFDS : (sel?.postFDS || 0)
+    if (!entryFDS && rounds.length) entryFDS = rounds[rounds.length - 1].postFDS
 
     const grantShares = h.optionShares + (includeFuture ? h.proposedShares : 0)
     const totalShares = grantShares + h.heldShares
