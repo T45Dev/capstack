@@ -27,6 +27,22 @@ export default defineEventHandler(async (event) => {
 
   const classByCode = new Map(parsed.shareClasses.map(c => [c.code, c]))
 
+  // Round history rows. Carta's authorized option pool is a single total, but
+  // the importer rolls the Round-history "Option pool increase" column into
+  // the authorized pool — so we seed the pool onto the latest round row (or a
+  // synthetic row if Carta carried no rounds) to keep that number flowing.
+  const roundRows = parsed.rounds.map(r => ({
+    as_of_date: r.closeDate ?? '',
+    label: r.name || r.code,
+    pps: r.sharePrice ?? '',
+    option_pool: '' as any,
+  }))
+  if (parsed.poolAuthorized > 0) {
+    const dated = roundRows.filter(r => r.as_of_date)
+    if (dated.length) dated[dated.length - 1].option_pool = parsed.poolAuthorized
+    else roundRows.push({ as_of_date: parsed.asOfDate ?? new Date().toISOString().slice(0, 10), label: 'Option pool', pps: '', option_pool: parsed.poolAuthorized })
+  }
+
   const prefill: Record<string, Array<Record<string, any>>> = {
     'Stakeholders': parsed.stakeholders.map(s => ({ name: s.name })),
     'Holdings': parsed.holdings.map(h => {
@@ -41,17 +57,27 @@ export default defineEventHandler(async (event) => {
       }
     }),
     // Carta only ever knows issued (outstanding) grants — status preset to
-    // Issued. Proposed / Idea rows are added by hand after download.
+    // Issued. Proposed / Idea rows are added by hand after download. Lifecycle
+    // figures (exercised / forfeited / expired + dates) flow through so the
+    // Option Pool Impact timeline is populated.
     'Option grants': parsed.grants.map(g => ({
       stakeholder: g.recipientName,
       status: 'Issued',
       award_type: g.awardType ?? '',
-      quantity: g.quantityIssued ?? g.quantity,
+      quantity: g.quantity,
       strike: g.strike ?? '',
       issue_date: g.issueDate ?? '',
       vesting_start: g.vestingStart ?? '',
       vest_months: g.vestMonths ?? '',
       cliff_months: g.cliffMonths ?? '',
+      quantity_issued: g.quantityIssued ?? '',
+      quantity_exercised: g.quantityExercised ?? '',
+      quantity_forfeited: g.quantityForfeited ?? '',
+      quantity_expired: g.quantityExpired ?? '',
+      last_exercised_date: g.lastExercisedDate ?? '',
+      forfeited_date: g.forfeitedDate ?? '',
+      expired_date: g.expiredDate ?? '',
+      acceleration: g.acceleration ?? '',
     })),
     'Convertibles': parsed.convertibles.map(c => ({
       stakeholder: c.stakeholderName,
@@ -64,12 +90,8 @@ export default defineEventHandler(async (event) => {
       discount: c.conversionDiscount,
     })),
     // Date / label / PPS come straight from Carta's ledgers; the cumulative
-    // FDS and per-round pool increase are gaps the operator fills.
-    'Round history': parsed.rounds.map(r => ({
-      as_of_date: r.closeDate ?? '',
-      label: r.name || r.code,
-      pps: r.sharePrice ?? '',
-    })),
+    // FDS is a gap the operator fills. Pool seeded above.
+    'Round history': roundRows,
   }
 
   const buffer = await buildMasterWorkbook(company, prefill)

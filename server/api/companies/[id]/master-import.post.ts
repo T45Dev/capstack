@@ -134,11 +134,13 @@ export default defineEventHandler(async (event) => {
     //    Proposed → draft grant (Pending approval), Idea → a pool_events row
     //    (hypothetical future grant, not tied to a real stakeholder).
     const insertGr = db().prepare(`INSERT INTO grants
-      (id, company_id, stakeholder_id, recipient_name, quantity, quantity_issued, strike, issue_date, vesting_start, vest_months, cliff_months, award_type, job_title, job_level, status, approval_status, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      (id, company_id, stakeholder_id, recipient_name, quantity, quantity_issued, strike, issue_date, vesting_start, vest_months, cliff_months, award_type, job_title, job_level, status, approval_status, notes,
+       quantity_exercised, quantity_forfeited, quantity_expired, last_exercised_date, forfeited_date, expired_date, acceleration)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     const insertPe = db().prepare(`INSERT INTO pool_events
       (id, company_id, event_date, type, name, kind, shares, vest_months, cliff_months, notes, job_title, job_level)
       VALUES (?, ?, ?, 'grant', ?, ?, ?, ?, ?, ?, ?, ?)`)
+    const accel = (v: any) => { const s = norm(cellStr(v)); return s.includes('double') ? 'double' : s.includes('single') ? 'single' : null }
     for (const row of readTab(sheet('Option grants'), tabSpec('Option grants'))) {
       const name = cellStr(row.stakeholder).trim()
       const qty = Math.round(num(row.quantity) || 0)
@@ -156,9 +158,12 @@ export default defineEventHandler(async (event) => {
         continue
       }
       const proposed = status.includes('propos')
-      insertGr.run(newId('gr'), id, resolve(name), name, qty, qty, num(row.strike), asDate(row.issue_date), asDate(row.vesting_start),
+      const intOrNull = (v: any) => { const n = num(v); return n != null ? Math.round(n) : null }
+      insertGr.run(newId('gr'), id, resolve(name), name, qty, intOrNull(row.quantity_issued) ?? qty, num(row.strike), asDate(row.issue_date), asDate(row.vesting_start),
         vest, cliff, classifyAwardType(row.award_type), title, level,
-        proposed ? 'proposed' : 'outstanding', proposed ? 'Pending' : null, notes)
+        proposed ? 'proposed' : 'outstanding', proposed ? 'Pending' : null, notes,
+        intOrNull(row.quantity_exercised), intOrNull(row.quantity_forfeited), intOrNull(row.quantity_expired),
+        asDate(row.last_exercised_date), asDate(row.forfeited_date), asDate(row.expired_date), accel(row.acceleration))
       if (proposed) counts.proposed++; else counts.grants++
     }
 
@@ -174,13 +179,27 @@ export default defineEventHandler(async (event) => {
       counts.convertibles++
     }
 
-    // 5) Round history (FDS timeline).
+    // 5) Round history (FDS timeline). The per-round pool increases also roll
+    //    up into the authorized option pool below.
     const insertMs = db().prepare('INSERT INTO cap_table_milestones (id, company_id, as_of_date, label, fds, pps, option_pool) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    let poolTotal = 0
     for (const row of readTab(sheet('Round history'), tabSpec('Round history'))) {
       const d = asDate(row.as_of_date)
       if (!d) continue
-      insertMs.run(newId('ms'), id, d, cellStr(row.label).trim() || null, num(row.fds), num(row.pps), num(row.option_pool))
+      const pool = num(row.option_pool)
+      poolTotal += pool || 0
+      insertMs.run(newId('ms'), id, d, cellStr(row.label).trim() || null, num(row.fds), num(row.pps), pool)
       counts.rounds++
+    }
+
+    // 6) Authorized option pool. The grants page reads the option pool from the
+    //    option_pools table (the same lump the legacy importer wrote), so roll
+    //    the Round-history increases into one row. Upsert by name so re-running
+    //    the import doesn't stack duplicate pools.
+    if (poolTotal > 0) {
+      const existing = db().prepare(`SELECT id FROM option_pools WHERE company_id = ? AND name = 'Stock Option Plan'`).get(id) as any
+      if (existing) db().prepare('UPDATE option_pools SET authorized = ? WHERE id = ?').run(Math.round(poolTotal), existing.id)
+      else db().prepare(`INSERT INTO option_pools (id, company_id, name, authorized) VALUES (?, ?, 'Stock Option Plan', ?)`).run(newId('pl'), id, Math.round(poolTotal))
     }
   })
   tx()
