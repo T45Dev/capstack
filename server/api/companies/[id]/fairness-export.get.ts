@@ -73,7 +73,7 @@ export default defineEventHandler(async (event) => {
   const ws2 = wb.addWorksheet('Holdings (FD)')
   ws2.columns = [{ width: 26 }, { width: 12 }, { width: 14 }, { width: 14 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 16 }]
   banner(ws2, 8, `CURRENT HOLDINGS — fully diluted to ${selName}${data.includeFuture ? ' (incl. proposed + ideas)' : ''}`)
-  header(ws2, 2, ['Name', 'Level', 'Options', 'Total shares', 'Pre %', 'Post %', 'Entry %', '$ value'])
+  header(ws2, 2, ['Name', 'Level', 'Options', 'Total shares', 'Pre %', 'Post %', '% at hire', '$ value'])
   let r2 = 3
   for (const h of included) {
     ws2.getCell(r2, 1).value = h.name

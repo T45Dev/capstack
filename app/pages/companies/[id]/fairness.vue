@@ -426,6 +426,11 @@ const tabs = [
 
     <!-- TAB 2: Current holdings, fully diluted to the selected round -->
     <UiCard v-else-if="tab === 'holdings'" :padded="false" class="max-w-5xl" :subtitle="`Fully diluted to ${selName}${data.includeFuture ? ' · incl. proposed + ideas' : ''}`">
+      <p class="px-4 pt-3 pb-1 text-[11px] text-ink-500 leading-relaxed">
+        <span class="font-medium text-ink-700">Post %</span> is the apples-to-apples ownership <span class="font-medium">today</span>.
+        <span class="font-medium text-ink-700">% at hire</span> is each holder's slice at the round they were granted in —
+        a <span class="italic">then</span> figure, so an early hire looks large there even with few shares.
+      </p>
       <table class="w-full text-sm num">
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
@@ -435,7 +440,7 @@ const tabs = [
             <th class="text-right font-medium px-3 py-2">Total shares</th>
             <th class="text-right font-medium px-3 py-2">Pre %</th>
             <th class="text-right font-medium px-3 py-2">Post %</th>
-            <th class="text-right font-medium px-3 py-2">Entry %</th>
+            <th class="text-right font-medium px-3 py-2">% at hire</th>
             <th class="text-right font-medium px-3 py-2">$ value</th>
           </tr>
         </thead>
@@ -652,7 +657,7 @@ const tabs = [
                   <th class="text-left font-medium px-3 py-2 pl-4">Confidence</th>
                   <th class="text-right font-medium px-3 py-2">Median grant</th>
                   <th class="text-right font-medium px-3 py-2">Range</th>
-                  <th class="text-right font-medium px-3 py-2">Entry %</th>
+                  <th class="text-right font-medium px-3 py-2">% at hire</th>
                   <th class="text-right font-medium px-3 py-2">Market %</th>
                   <th class="text-right font-medium px-3 py-2">$ at grant</th>
                   <th class="text-right font-medium px-3 py-2">$ / salary</th>
@@ -682,7 +687,7 @@ const tabs = [
                   <th class="text-left font-medium px-4 py-2">Optionholder</th>
                   <th class="text-right font-medium px-3 py-2 w-16">Year</th>
                   <th class="text-right font-medium px-3 py-2">Granted</th>
-                  <th class="text-right font-medium px-3 py-2">Entry %</th>
+                  <th class="text-right font-medium px-3 py-2">% at hire</th>
                   <th class="text-right font-medium px-3 py-2">Market med %</th>
                   <th class="text-left font-medium px-3 py-2 pl-4">vs market</th>
                   <th class="text-right font-medium px-3 py-2">$ at grant</th>
