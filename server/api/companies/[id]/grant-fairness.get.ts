@@ -192,6 +192,10 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const result = buildFairness(rounds, holders, { selectedRoundCode: selectedRound, includeFuture, ideasShares })
+  // Hire-basis timeline (settings) — when present, drives the at-hire FDS/PPS.
+  const hireTimeline = (db().prepare(`SELECT as_of_date, label, fds, pps FROM cap_table_milestones WHERE company_id = ? AND fds > 0 ORDER BY as_of_date ASC`).all(id) as any[])
+    .map(m => ({ date: m.as_of_date, fds: m.fds || 0, pps: m.pps || 0, label: m.label || null }))
+
+  const result = buildFairness(rounds, holders, { selectedRoundCode: selectedRound, includeFuture, ideasShares, hireTimeline })
   return { company: { id: company.id, name: company.name, slug: company.slug }, benchmarkRoles: THELANDER_ROLES, benchmarkBands: THELANDER_EQUITY, ...result }
 })

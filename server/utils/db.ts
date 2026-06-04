@@ -236,6 +236,20 @@ function migrate(d: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_round_investors_company ON round_investors(company_id);
     CREATE INDEX IF NOT EXISTS idx_round_investors_round ON round_investors(round_id);
 
+    -- Cap-table FDS/PPS milestones — a dated timeline (one row per historical
+    -- round) used as the hire-basis for Grant Fairness "% / $ at hire". Kept
+    -- separate from the rounds model so it can't perturb dilution math.
+    CREATE TABLE IF NOT EXISTS cap_table_milestones (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      as_of_date TEXT NOT NULL,           -- ISO yyyy-mm-dd
+      label TEXT,                         -- e.g. "Series A"
+      fds REAL,                           -- fully-diluted shares as of this date
+      pps REAL,                           -- price per share as of this date
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_milestones_company ON cap_table_milestones(company_id, as_of_date);
+
     CREATE TABLE IF NOT EXISTS pool_events (
       id TEXT PRIMARY KEY,
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,

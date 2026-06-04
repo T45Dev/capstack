@@ -126,10 +126,29 @@ export interface FairnessResult {
   methodology: string
 }
 
+// A dated cap-table FDS/PPS point — the hire-basis timeline (settings).
+export interface Milestone { date: string; fds: number; pps: number; label?: string | null }
+
 export interface BuildOpts {
   selectedRoundCode?: string | null
   includeFuture?: boolean
   ideasShares?: number
+  // When provided, the at-hire basis (entry FDS / PPS) is resolved off this
+  // timeline instead of the rounds — so a start date snaps to the FDS/price as
+  // of that milestone. Falls back to rounds when empty.
+  hireTimeline?: Milestone[]
+}
+
+// Latest milestone with date on/before `date`; if the date precedes all,
+// the earliest milestone; null when the timeline is empty.
+export function pickMilestoneForDate(timeline: Milestone[], date: string | null): Milestone | null {
+  if (!timeline.length) return null
+  const sorted = [...timeline].sort((a, b) => a.date.localeCompare(b.date))
+  if (!date) return null
+  const d = String(date).slice(0, 10)
+  let pick: Milestone | null = null
+  for (const m of sorted) { if (m.date.slice(0, 10) <= d) pick = m }
+  return pick ?? sorted[0]
 }
 
 // Linear-interpolated percentile over a value array (need not be sorted).
@@ -198,20 +217,32 @@ export function buildFairness(rounds: FairnessRound[], rawHolders: RawHolder[], 
     }
   }
 
+  const timeline = opts.hireTimeline && opts.hireTimeline.length ? opts.hireTimeline : null
+
   const holders: Holder[] = rawHolders.map(h => {
-    const hireIdx = pickRoundIndexForDate(rounds, h.firstGrantDate)
-    // No hire date (proposed / idea / undated grant) → treat as granted at the
-    // selected (current) round, NOT formation. Anchoring to the formation
-    // round's tiny FDS would massively inflate entry % for a not-yet-issued
-    // grant; "entry" for something granted now is today's FDS/price.
-    const hireRound = hireIdx >= 0 ? rounds[hireIdx] : (sel ?? rounds[rounds.length - 1] ?? null)
-    let entryFDS = hireIdx >= 0 ? rounds[hireIdx].postFDS : (sel?.postFDS || 0)
-    if (!entryFDS && rounds.length) entryFDS = rounds[rounds.length - 1].postFDS
+    // At-hire basis: prefer the FDS-timeline (settings) when present, snapping
+    // the hire date onto it; otherwise the rounds. No hire date → the selected
+    // (current) round, since "entry" for a not-yet-issued grant is today.
+    let entryFDS: number, entryPPS: number, hireCode: string | null, hireName: string | null
+    if (timeline) {
+      const ms = h.firstGrantDate ? pickMilestoneForDate(timeline, h.firstGrantDate) : null
+      entryFDS = ms?.fds || (sel?.postFDS || 0)
+      entryPPS = ms ? ms.pps : (sel?.sharePrice || currentPPS)
+      hireName = ms ? (ms.label || ms.date) : (sel?.name ?? null)
+      hireCode = ms ? null : (sel?.code ?? null)
+    } else {
+      const hireIdx = pickRoundIndexForDate(rounds, h.firstGrantDate)
+      const hireRound = hireIdx >= 0 ? rounds[hireIdx] : (sel ?? rounds[rounds.length - 1] ?? null)
+      entryFDS = hireIdx >= 0 ? rounds[hireIdx].postFDS : (sel?.postFDS || 0)
+      if (!entryFDS && rounds.length) entryFDS = rounds[rounds.length - 1].postFDS
+      entryPPS = hireRound?.sharePrice || 0
+      hireCode = hireRound?.code ?? null
+      hireName = hireRound?.name ?? null
+    }
 
     const grantShares = h.optionShares + (includeFuture ? h.proposedShares : 0)
     const totalShares = grantShares + h.heldShares
     const entryPct = entryFDS > 0 ? grantShares / entryFDS : 0
-    const entryPPS = hireRound?.sharePrice || 0
     const entryValue = h.optionShares * entryPPS
     const prePct = sel && sel.preFDS > 0 ? totalShares / sel.preFDS : 0
     const postPct = sel && sel.postFDS > 0 ? totalShares / sel.postFDS : 0
@@ -233,8 +264,8 @@ export function buildFairness(rounds: FairnessRound[], rawHolders: RawHolder[], 
       startDate: h.startDate ?? null,
       benchmarkRole: h.benchmarkRole ?? null,
       benchmark: h.benchmark ?? null,
-      hireRoundCode: hireRound?.code ?? null,
-      hireRoundName: hireRound?.name ?? null,
+      hireRoundCode: hireCode,
+      hireRoundName: hireName,
       entryFDS,
       entryPPS,
       entryValue,
