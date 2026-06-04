@@ -107,6 +107,11 @@ function exportCsv() { /* No-op on the simplified layout. Kept on the page heade
       <PreviousRoundCard :company-id="id" @update:saving-count="(n: number) => prevSaving = n" />
       <OpenRoundCard :company-id="id" @update:saving-count="(n: number) => openSaving = n" @refreshed="refreshRoundSummary" />
     </div>
+    <!-- Round history (FDS timeline): dated FDS/price/pool per historical
+         round. Latest row sets the Previous-Round base. -->
+    <div v-show="activeTab === 'financings'" class="mt-4">
+      <FdsTimelineCard :company-id="id" />
+    </div>
 
     <!-- Preferred investors tab unchanged. -->
     <div v-show="activeTab === 'investors'">
