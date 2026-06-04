@@ -188,6 +188,18 @@ describe('buildFairness', () => {
     expect(idea.editId).toBe('pe9')
   })
 
+  it('anchors a veteran\'s not-yet-issued grant to their (early) start date', () => {
+    // Endpoint resolves firstGrantDate := start_date for proposed-only people.
+    const res = buildFairness(rounds, [
+      H({ name: 'Vet', stakeholderId: 's', proposedShares: 10_000, firstGrantDate: '2022-02-01', startDate: '2022-02-01' }),
+    ], { includeFuture: true })
+    const v = res.holders[0]
+    expect(v.entryFDS).toBe(1_000_000)        // R1 (formation) FDS — when they joined
+    expect(v.entryPct).toBeCloseTo(0.01)      // 10,000 / 1,000,000 — the early, bigger slice
+    expect(v.postPct).toBeCloseTo(0.0025)     // vs 10,000 / 4,000,000 today
+    expect(v.startDate).toBe('2022-02-01')
+  })
+
   it('anchors a dateless (proposed/idea) row to the selected round, not formation', () => {
     const res = buildFairness(rounds, [
       H({ name: 'Future', stakeholderId: null, proposedShares: 4_000, firstGrantDate: null }),

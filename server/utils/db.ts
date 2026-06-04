@@ -352,6 +352,10 @@ function migrate(d: Database.Database): void {
   ensureColumn('stakeholders', 'salary_midpoint', 'REAL')
   // Thelander survey role this person maps to, for the market-equity overlay.
   ensureColumn('stakeholders', 'benchmark_role', 'TEXT')
+  // Employment start date — the hire-basis for grants that have no date of
+  // their own (proposed/idea), so an early hire's "% at hire" reflects the
+  // (smaller) FDS back when they joined.
+  ensureColumn('stakeholders', 'start_date', 'TEXT')
   // Pool ideas (future-grant events) can carry a job title + level so the
   // Grant Fairness recommendation slots them into the right level section.
   ensureColumn('pool_events', 'job_title', 'TEXT')

@@ -33,6 +33,7 @@ interface Holder {
   source: 'grant' | 'proposed' | 'idea'
   editKind: 'stakeholder' | 'grant' | 'idea'
   editId: string | null
+  startDate: string | null
   benchmarkRole: string | null
   benchmark: MarketBand | null
   awardTypes: string[]
@@ -287,6 +288,12 @@ async function saveSalary(h: Holder, field: 'salary' | 'salary_midpoint', value:
   await $fetch(`/api/stakeholders/${h.stakeholderId}`, { method: 'PATCH', body: { [field]: value } })
   await refresh()
 }
+// Employment start date — the hire-basis for not-yet-issued grants.
+async function saveStart(h: Holder, value: string | null) {
+  if (!h.stakeholderId) return
+  await $fetch(`/api/stakeholders/${h.stakeholderId}`, { method: 'PATCH', body: { start_date: value || null } })
+  await refresh()
+}
 async function toggleInclude(h: Holder, ev: Event) {
   if (!h.stakeholderId) return
   await $fetch(`/api/stakeholders/${h.stakeholderId}`, { method: 'PATCH', body: { fairness_include: (ev.target as HTMLInputElement).checked } })
@@ -359,15 +366,16 @@ const tabs = [
     />
 
     <!-- TAB 1: Optionholders roster -->
-    <UiCard v-else-if="tab === 'roster'" :padded="false" class="max-w-5xl" subtitle="Untick to drop a holder from the fairness analysis. Title, level, salary + midpoint edit inline (salary feeds the Calibration tab).">
+    <UiCard v-else-if="tab === 'roster'" :padded="false" class="max-w-7xl" subtitle="Edit inline. Start date is the hire-basis for a not-yet-issued grant — set it for veterans so their first grant reflects when they joined, not today.">
       <table class="w-full text-sm">
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
             <th class="text-center font-medium px-3 py-2 w-16">Include</th>
             <th class="text-left font-medium px-4 py-2">Optionholder</th>
             <th class="text-left font-medium px-3 py-2 w-20">Award</th>
-            <th class="text-left font-medium px-3 py-2 w-44">Title</th>
-            <th class="text-left font-medium px-3 py-2 w-20">Level</th>
+            <th class="text-left font-medium px-3 py-2 w-40">Title</th>
+            <th class="text-left font-medium px-3 py-2 w-16">Level</th>
+            <th class="text-left font-medium px-3 py-2 w-32">Start date</th>
             <th class="text-right font-medium px-3 py-2 w-28">Salary</th>
             <th class="text-right font-medium px-3 py-2 w-28">Midpoint</th>
             <th class="text-left font-medium px-3 py-2 w-48">Market role</th>
@@ -398,6 +406,11 @@ const tabs = [
             <td class="px-3 py-1.5">
               <input :class="amberInput" :value="h.level || ''" :disabled="!h.editId" placeholder="level"
                      @change="(ev) => saveGrade(h, 'level', (ev.target as HTMLInputElement).value)">
+            </td>
+            <td class="px-3 py-1.5">
+              <DateInput v-if="h.stakeholderId" variant="bare" no-hint :model-value="h.startDate" placeholder="—"
+                         @update:model-value="(v) => saveStart(h, v)" />
+              <span v-else class="text-ink-300 text-[12px]">—</span>
             </td>
             <td class="px-3 py-1.5">
               <input :class="[amberInput, 'text-right']" :value="h.salary ?? ''" :disabled="!h.stakeholderId" placeholder="—" inputmode="numeric"
