@@ -188,6 +188,17 @@ describe('buildFairness', () => {
     expect(idea.editId).toBe('pe9')
   })
 
+  it('anchors a dateless (proposed/idea) row to the selected round, not formation', () => {
+    const res = buildFairness(rounds, [
+      H({ name: 'Future', stakeholderId: null, proposedShares: 4_000, firstGrantDate: null }),
+    ], { includeFuture: true })
+    const f = res.holders[0]
+    expect(f.entryFDS).toBe(4_000_000)        // R3 post FDS, not formation's 1,000,000
+    expect(f.entryPPS).toBe(2)                // R3 price, not formation's 0
+    expect(f.entryPct).toBeCloseTo(0.001)     // 4,000 / 4,000,000 — matches its post %
+    expect(f.postPct).toBeCloseTo(0.001)
+  })
+
   it('does not flag holders without a level', () => {
     const res = buildFairness(rounds, [H({ name: 'NL', optionShares: 1000, firstGrantDate: '2023-02-01' })], {})
     expect(res.holders[0].flag).toBe('na')
