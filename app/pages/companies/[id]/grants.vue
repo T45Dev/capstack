@@ -258,17 +258,16 @@ onMounted(() => { try { includeIdeas.value = localStorage.getItem(IDEAS_KEY) ===
 watch(includeIdeas, v => { try { localStorage.setItem(IDEAS_KEY, String(v)) } catch { /* ignore */ } })
 const ideasDeducted = computed(() => includeIdeas.value ? totalIdeas.value : 0)
 
-// Available = Authorized − Outstanding − Exercised. Forfeited/Expired already
-// returned to the pool (netted out of Outstanding), so they're NOT subtracted
-// here — they're surfaced separately as "returned". Exercised converted to
-// Common and does NOT return, so it stays subtracted.
-const availableShares = computed(() => poolAuthorized.value - totalOutstanding.value - totalExercised.value)
+// Authorized is NET of exercised — exercised options already converted to
+// Common and were removed from the pool figure — so Available = Authorized −
+// Outstanding only. Exercised and Forfeited/Expired are informational (shown
+// in the Lifetime row), NOT deductions: subtracting Exercised here would
+// double-count it (it's already out of Authorized).
+const availableShares = computed(() => poolAuthorized.value - totalOutstanding.value)
 const futureAvailable = computed(() => availableShares.value - totalProposed.value - ideasDeducted.value)
-// Legacy lump (outstanding + exercised) — kept for any callers/tooltips.
-const outOfPool = computed(() => totalOutstanding.value + totalExercised.value)
 
 // Calc-tooltip strings for the pool summary stats.
-const fAvailable = computed(() => `Authorized ${fmtShares(poolAuthorized.value)} − outstanding ${fmtShares(totalOutstanding.value)} − exercised ${fmtShares(totalExercised.value)} = ${fmtShares(availableShares.value)}`)
+const fAvailable = computed(() => `Authorized ${fmtShares(poolAuthorized.value)} − outstanding ${fmtShares(totalOutstanding.value)} = ${fmtShares(availableShares.value)}`)
 const fFutureAvailable = computed(() => {
   const parts = [`Available ${fmtShares(availableShares.value)}`, `− proposed ${fmtShares(totalProposed.value)}`]
   if (includeIdeas.value) parts.push(`− ideas ${fmtShares(totalIdeas.value)}`)
@@ -893,12 +892,11 @@ const fieldLabels: Record<string, string> = {
       </div>
     </div>
 
-    <!-- Pool math, broken out so every term matches the Lifetime row:
-           Authorized − Outstanding − Exercised = Available
-           Available − Proposed [− Ideas] = Future Available
-         Forfeited/Expired returned to the pool (already netted out of
-         Outstanding), so they're shown as "returned", not subtracted.
-         Exercised converted to Common and does NOT return. -->
+    <!-- Pool math. Authorized is NET of exercised, so:
+           Authorized − Outstanding = Available − Proposed [− Ideas] = Future Available
+         Exercised (issued as Common, already out of Authorized) and
+         Forfeited/Expired (returned to the pool, already out of Outstanding)
+         are informational in the Lifetime row, not deductions. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-6 p-4">
       <div class="flex items-center justify-end mb-2">
         <label class="inline-flex items-center gap-1.5 text-[11px] text-ink-600 border border-ink-300 rounded px-2 py-1 cursor-pointer select-none hover:bg-ink-50">
@@ -918,11 +916,6 @@ const fieldLabels: Record<string, string> = {
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Outstanding</span>
           <span class="text-2xl font-semibold">{{ fmtShares(totalOutstanding) }}</span>
-        </div>
-        <span class="text-2xl text-ink-400 pb-1">−</span>
-        <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Exercised options converted to Common Stock — they left the pool and don't return.">Exercised</span>
-          <span class="text-2xl font-semibold" :class="totalExercised > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totalExercised) }}</span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">=</span>
         <div class="flex flex-col items-start">
@@ -948,15 +941,21 @@ const fieldLabels: Record<string, string> = {
         </div>
       </div>
       <!-- Lifetime decomposition: where every option ever issued is now.
-           Issued = Outstanding + Exercised + Forfeited/Expired. Forfeited and
-           Expired returned to the pool, so they're already counted in Available
-           above (flagged here so the chain reads cleanly). -->
+           Issued = Outstanding + Exercised + Forfeited/Expired. Exercised
+           converted to Common (already out of the net Authorized); Forfeited/
+           Expired returned to the pool (already out of Outstanding). Both are
+           informational here — neither is a separate deduction above. -->
       <div class="mt-3 pt-3 border-t border-ink-200 flex flex-wrap items-end gap-x-5 gap-y-2 text-ink-700 num text-sm">
         <span class="text-[10px] uppercase tracking-wider text-ink-500">Lifetime</span>
         <div class="flex items-end gap-1.5">
           <span class="text-ink-500">Issued</span>
           <span class="font-medium">{{ fmtShares(totalIssued) }}</span>
           <span class="text-ink-400 text-[11px]">= outstanding + exercised + forfeited/expired</span>
+        </div>
+        <div class="flex items-end gap-1.5">
+          <span class="text-ink-500" title="Exercised options converted to Common Stock — already excluded from the Authorized pool.">Exercised</span>
+          <span class="font-medium" :class="totalExercised > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totalExercised) }}</span>
+          <span class="text-ink-400 text-[11px]">→ Common</span>
         </div>
         <div class="flex items-end gap-1.5">
           <span class="text-ink-500">Forfeited/Expired</span>

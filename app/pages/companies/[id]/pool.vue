@@ -227,14 +227,13 @@ const events = computed<TimelineEvent[]>(() => {
     // the UI it's a guess).
     const grantBaseDate = g.issue_date || g.vesting_start || fallbackDate.value
     if (g.quantity_exercised && g.quantity_exercised > 0) {
-      // Exercise: the option converts to Common stock. It already left the
-      // pool when the grant was issued (the grant event above subtracts the
-      // FULL issued amount), and exercising does NOT return it to Available —
-      // unlike forfeit/expire. Direction = 0: the event shows on the
-      // timeline but doesn't move the running balance. This matches
-      // directionFor('exercise') and the headline accounting
-      // (Available = Authorized − Outstanding − Exercised). Previously this
-      // was +1, which added exercised shares back and overstated Available.
+      // Exercise: the option converts to Common stock. Authorized is NET of
+      // exercised (the pool figure already excludes shares that became Common),
+      // but the grant event above subtracts the FULL issued amount — so the
+      // exercised portion would be double-subtracted. Direction = +1 adds it
+      // back, leaving the running balance at Authorized − Outstanding, matching
+      // the headline. (Subtracting it would double-count exercised, since it's
+      // already out of the net Authorized.)
       out.push({
         id: `exercise:${g.id}`,
         date: g.last_exercised_date || grantBaseDate,
@@ -243,7 +242,7 @@ const events = computed<TimelineEvent[]>(() => {
         type: 'exercise',
         kind: null,
         shares: g.quantity_exercised,
-        direction: 0,
+        direction: 1,
         source: 'grant_outstanding',
         grantId: g.id,
       })
@@ -459,22 +458,21 @@ const totals = computed(() => {
   // Idea exercises shrink Authorized (per the mental model table).
   const ideaExercises = events.value.filter(e => isIdea(e.source) && e.type === 'exercise').reduce((a, e) => a + e.shares, 0)
   const floorShares = events.value.filter(e => isIdea(e.source) && e.type === 'floor').reduce((a, e) => Math.max(a, e.shares), 0)
-  // Authorized stays CONSTANT. The headline tells a simple story:
+  // Authorized stays CONSTANT and is NET of exercised (exercised options
+  // already converted to Common and were removed from the pool figure), so:
   //   Authorized − Outstanding = Available − Proposed − Ideas = Future Available
-  // "Outstanding" in the headline lumps active grants + exercised options
-  // (both have permanently left the pool — Exercised converted to Common
-  // and DOESN'T return). The Lifetime row below splits them out for audit.
-  // Forfeited/Expired DO return; they're already excluded from
-  // outstandingShares (the per-grant counts net them out).
+  // Exercised is NOT subtracted again (that would double-count it). Forfeited/
+  // Expired returned to the pool and are already excluded from outstandingShares.
+  // Both are informational in the Lifetime row.
   const poolAuthorized = poolAuthorizedOriginal
-  const outOfPool = outstandingShares + totalExercised
+  const outOfPool = outstandingShares
   const availableShares = poolAuthorized - outOfPool
   const futureAvailable = availableShares - proposedShares - ideaGrants
   return { poolAuthorized, outstandingShares, outOfPool, proposedShares, ideaGrants, ideaTopups, ideaForfeits, ideaExercises, floorShares, availableShares, futureAvailable, totalExercised, totalForfeited, totalExpired, totalForfeitedOrExpired, totalIssued }
 })
 
 // Calc-tooltip strings for the pool summary stats.
-const fOutOfPool = computed(() => calcSum([['Active grants', totals.value.outstandingShares], ['Exercised', totals.value.totalExercised]]))
+const fOutOfPool = computed(() => calcSum([['Active grants', totals.value.outstandingShares]]))
 const fAvailable = computed(() => `Authorized ${fmtShares(totals.value.poolAuthorized)} − outstanding ${fmtShares(totals.value.outOfPool)} = ${fmtShares(totals.value.availableShares)}`)
 const fFutureAvailable = computed(() => `Available ${fmtShares(totals.value.availableShares)} − proposed ${fmtShares(totals.value.proposedShares)} − ideas ${fmtShares(totals.value.ideaGrants)} = ${fmtShares(totals.value.futureAvailable)}`)
 const fForfExp = computed(() => calcSum([['Forfeited', totals.value.totalForfeited], ['Expired', totals.value.totalExpired]]))
