@@ -830,7 +830,7 @@ const chart = computed(() => {
     <!-- Header bar -->
     <div class="flex items-end justify-between mb-4 gap-3 flex-wrap shrink-0">
       <div>
-        <h1 class="text-xl font-semibold tracking-tight text-ink-900">Option pool impact</h1>
+        <h1 class="text-xl font-semibold tracking-tight text-ink-900 flex items-center gap-2"><ArrowDownIcon :size="20" /> Option pool impact</h1>
         <p class="text-sm text-ink-600 mt-1">Chronological view of every event that affects the pool — pool top-ups, outstanding grants, proposed grants, and your future ideas.</p>
       </div>
       <div class="flex items-center gap-2">
@@ -1029,7 +1029,7 @@ const chart = computed(() => {
           <button type="button" class="ml-2 text-brand-600 hover:text-brand-700 underline" @click="eventFilter = 'all'">Show all</button>
         </div>
         <div v-else class="overflow-y-auto min-h-0 flex-1">
-          <table class="w-full text-[13px] num">
+          <table class="text-[13px] num">
             <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100 sticky top-0 z-10">
               <tr>
                 <th class="px-2.5 py-1.5 font-semibold w-24">Date</th>
@@ -1108,7 +1108,7 @@ const chart = computed(() => {
           No ideas yet. Click <span class="font-medium text-ink-700">Add idea</span> to model a future top-up, grant, exercise, forfeit, or floor.
         </div>
         <div v-else class="overflow-y-auto min-h-0 flex-1">
-          <table class="w-full text-[13px] num">
+          <table class="text-[13px] num">
             <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100 sticky top-0 z-10">
               <tr>
                 <th class="px-2.5 py-1.5 font-semibold w-24">Date</th>
@@ -1290,7 +1290,7 @@ const chart = computed(() => {
                 Preview ({{ importPreview.totalParsed }} total{{ importPreview.totalParsed > importPreview.sample.length ? ` — first ${importPreview.sample.length} shown` : '' }})
               </h4>
               <div class="border border-ink-200 rounded overflow-x-auto">
-                <table class="text-[12px] w-full">
+                <table class="text-[12px]">
                   <thead class="bg-ink-100 text-ink-700">
                     <tr>
                       <th class="px-2 py-1 text-left text-[10px] uppercase tracking-wide">Name</th>
@@ -1322,7 +1322,7 @@ const chart = computed(() => {
               <p class="text-xs text-amber-900">Same name. <b>Combine</b> adds the imported shares, <b>Replace</b> overwrites the existing idea, <b>Skip</b> leaves it untouched.</p>
             </div>
             <div class="border border-ink-200 rounded overflow-x-auto">
-              <table class="text-[12px] w-full">
+              <table class="text-[12px]">
                 <thead class="bg-ink-100 text-ink-700">
                   <tr>
                     <th class="px-2 py-1 text-left text-[10px] uppercase tracking-wide">Name</th>

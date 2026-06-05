@@ -4,7 +4,7 @@
 // Layout: breadcrumb / title row (H1 + status pill + auto-saved + saving)
 // / description / actions / sub-tabs.
 // Pre-baseline picker lives in AppTopBar (serves every per-company page).
-import { Plus, Upload, Download, Camera } from 'lucide-vue-next'
+import { Plus, Upload, Download, Camera, FileSpreadsheet } from 'lucide-vue-next'
 
 export type TabKey = 'financings' | 'investors'
 
@@ -43,7 +43,7 @@ const tabs: Array<{ key: TabKey; label: string }> = [
     <div class="flex items-end justify-between gap-6 flex-wrap pb-3">
       <div class="min-w-0">
         <div class="flex items-center gap-3 flex-wrap">
-          <h1 class="text-[22px] font-semibold text-ink-900 tracking-tight">Rounds</h1>
+          <h1 class="text-[22px] font-semibold text-ink-900 tracking-tight flex items-center gap-2"><FileSpreadsheet :size="20" /> Rounds</h1>
           <span
             v-if="openRoundName"
             class="inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full bg-brand-soft text-brand-edge font-medium"

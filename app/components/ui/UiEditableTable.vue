@@ -163,7 +163,7 @@ function isEditingRow(row: T): boolean {
 <template>
   <div class="border border-ink-200 rounded-lg bg-white overflow-hidden shadow-[0_1px_0_rgba(16,24,40,0.04)]">
     <div class="overflow-x-auto table-scroll">
-      <table class="text-[13px] border-separate w-full" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: totalWidth + 'px' }">
+      <table class="text-[13px] border-separate" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: totalWidth + 'px' }">
         <colgroup>
           <col v-for="col in table.cols" :key="col.key" :style="{ width: col.width + 'px' }" />
           <col :style="{ width: ACTIONS_WIDTH + 'px' }" />

@@ -34,7 +34,7 @@ async function deleteMilestone(m: Milestone) {
 <template>
   <UiCard title="Round history (FDS timeline)" subtitle="One row per historical round — date · FDS · price · pool increase. The latest row sets the Previous-Round base; rows feed the Fairness hire-basis and dated Option Pool top-ups. Only the open round needs full economics (above)." :padded="false">
     <div class="overflow-x-auto">
-      <table class="w-full text-[13px] num">
+      <table class="text-[13px] num">
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
             <th class="text-left font-medium px-4 py-2 w-40">As-of date</th>

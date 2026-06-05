@@ -135,7 +135,7 @@ T45 Labs\t       250,000\t$1,000,000`
 
             <!-- Preview table -->
             <div v-if="parsedRows.length" class="mt-4 border border-ink-200 rounded-md overflow-hidden">
-              <table class="w-full text-[12.5px] num">
+              <table class="text-[12.5px] num">
                 <thead class="bg-ink-50 text-[10px] uppercase tracking-wider text-ink-500 font-semibold">
                   <tr>
                     <th class="px-3 py-1.5 text-left">Name</th>
