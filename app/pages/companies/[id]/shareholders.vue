@@ -4,7 +4,7 @@
 // their primary. Operator can link two stakeholders so the app treats
 // them as one (e.g., "Ingenuity Medical LLC" → "Marwan Berrada");
 // aliases' shares fold into the primary's row across every column.
-import { Users, Link2, Link2Off, Search, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { Users, Link2, Link2Off, Search, ChevronDown, ChevronRight, ArrowUp, ArrowDown } from 'lucide-vue-next'
 import { fmtShares } from '~/utils/format'
 import { calcSum } from '~/utils/calc'
 
@@ -48,6 +48,41 @@ const filtered = computed<Primary[]>(() => {
 })
 
 const shareClasses = computed<ShareClass[]>(() => data.value?.share_classes || [])
+
+// Column sort. Dynamic share-class columns make a fixed useSortableTable
+// column list awkward, so this is a lightweight inline sort keyed by 'name',
+// a share-class code, 'options', or 'total'. Primaries sort; aliases stay
+// nested under their primary. Default: biggest holders first.
+const sort = ref<{ key: string; dir: 'asc' | 'desc' }>({ key: 'total', dir: 'desc' })
+const SORT_KEY = 'capstack:shareholders:sort'
+onMounted(() => {
+  try { const s = JSON.parse(localStorage.getItem(SORT_KEY) || 'null'); if (s?.key) sort.value = s } catch { /* ignore */ }
+})
+function toggleSort(key: string) {
+  if (sort.value.key === key) sort.value.dir = sort.value.dir === 'asc' ? 'desc' : 'asc'
+  else sort.value = { key, dir: key === 'name' ? 'asc' : 'desc' }
+  try { localStorage.setItem(SORT_KEY, JSON.stringify(sort.value)) } catch { /* ignore */ }
+}
+function sortIcon(key: string) {
+  if (sort.value.key !== key) return null
+  return sort.value.dir === 'asc' ? ArrowUp : ArrowDown
+}
+function sortVal(p: Primary, key: string): number | string {
+  if (key === 'name') return (p.name || '').toLowerCase()
+  if (key === 'options') return p.options_outstanding
+  if (key === 'total') return p.total_shares
+  return p.holdings[key] || 0
+}
+const sortedRows = computed<Primary[]>(() => {
+  const rows = [...filtered.value]
+  const k = sort.value.key
+  const sign = sort.value.dir === 'asc' ? 1 : -1
+  return rows.sort((a, b) => {
+    const av = sortVal(a, k), bv = sortVal(b, k)
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sign
+    return String(av).localeCompare(String(bv), 'en', { numeric: true }) * sign
+  })
+})
 
 // Calc tooltips — the per-holder and grand total are sums across every
 // share-class ledger plus options.
@@ -186,7 +221,11 @@ function classBgFooter(kind: string): string {
         <table class="w-full text-[13px] border-separate" :style="{ borderSpacing: 0 }">
           <thead class="bg-ink-50/60 text-[10.5px] uppercase tracking-[0.06em] text-ink-500 font-semibold">
             <tr>
-              <th class="px-3 py-2 border-b border-ink-200 text-left sticky left-0 bg-ink-50/95 z-10">Stakeholder</th>
+              <th class="px-3 py-2 border-b border-ink-200 text-left sticky left-0 bg-ink-50/95 z-10">
+                <button type="button" class="inline-flex items-center gap-1 hover:text-ink-800 select-none uppercase tracking-[0.06em]" @click="toggleSort('name')">
+                  Stakeholder <component :is="sortIcon('name')" v-if="sortIcon('name')" :size="11" class="text-brand-600" />
+                </button>
+              </th>
               <th
                 v-for="sc in shareClasses"
                 :key="sc.code"
@@ -194,15 +233,25 @@ function classBgFooter(kind: string): string {
                 :class="classBgFooter(sc.kind)"
                 :title="sc.name"
               >
-                {{ sc.code }}
+                <button type="button" class="inline-flex items-center gap-1 flex-row-reverse hover:text-ink-800 select-none uppercase tracking-[0.06em]" @click="toggleSort(sc.code)">
+                  {{ sc.code }} <component :is="sortIcon(sc.code)" v-if="sortIcon(sc.code)" :size="11" class="text-brand-600" />
+                </button>
               </th>
-              <th class="px-3 py-2 border-b border-ink-200 text-right bg-ink-50">Options</th>
-              <th class="px-3 py-2 border-b border-ink-200 text-right">Total</th>
+              <th class="px-3 py-2 border-b border-ink-200 text-right bg-ink-50">
+                <button type="button" class="inline-flex items-center gap-1 flex-row-reverse hover:text-ink-800 select-none uppercase tracking-[0.06em]" @click="toggleSort('options')">
+                  Options <component :is="sortIcon('options')" v-if="sortIcon('options')" :size="11" class="text-brand-600" />
+                </button>
+              </th>
+              <th class="px-3 py-2 border-b border-ink-200 text-right">
+                <button type="button" class="inline-flex items-center gap-1 flex-row-reverse hover:text-ink-800 select-none uppercase tracking-[0.06em]" @click="toggleSort('total')">
+                  Total <component :is="sortIcon('total')" v-if="sortIcon('total')" :size="11" class="text-brand-600" />
+                </button>
+              </th>
               <th class="px-3 py-2 border-b border-ink-200 text-right" style="width: 100px">Action</th>
             </tr>
           </thead>
           <tbody>
-            <template v-for="(p, pi) in filtered" :key="p.id">
+            <template v-for="(p, pi) in sortedRows" :key="p.id">
               <tr class="group hover:bg-brand-50/50 transition-colors" :class="pi % 2 ? 'bg-ink-50/60' : ''">
                 <td class="px-3 py-2 sticky left-0 z-[5] group-hover:bg-brand-50" :class="pi % 2 ? 'bg-ink-50' : 'bg-white'">
                   <div class="flex items-center gap-2">
