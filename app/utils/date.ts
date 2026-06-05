@@ -116,14 +116,3 @@ export function formatDateDisplay(iso: string | null | undefined): string {
   if (isNaN(d.getTime())) return iso
   return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
 }
-
-// Compact form used by tooltips and dense table cells where space is tight.
-// "Mar 22, 23" instead of "Mar 22, 2023".
-export function formatDateShort(iso: string | null | undefined): string {
-  if (!iso) return ''
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
-  if (!m) return iso
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
-  if (isNaN(d.getTime())) return iso
-  return d.toLocaleDateString('en-US', { year: '2-digit', month: 'short', day: 'numeric' })
-}
