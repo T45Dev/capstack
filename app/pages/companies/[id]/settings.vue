@@ -120,14 +120,9 @@ function resetIdeaMapping(f: CanonicalField) {
 
 <template>
   <div>
-    <div class="flex items-end justify-between mb-5 gap-3 flex-wrap">
-      <div>
-        <h1 class="text-xl font-semibold tracking-tight text-ink-900 flex items-center gap-2">
-          <SettingsIcon :size="20" class="text-ink-500" /> Settings
-        </h1>
-        <p class="text-sm text-ink-600 mt-1">Per-company configuration.</p>
-      </div>
-    </div>
+    <PageHeader :breadcrumb="[{ label: 'Cap-table model' }, { label: 'Settings' }]" description="Per-company configuration.">
+      <template #title><SettingsIcon :size="20" /> Settings</template>
+    </PageHeader>
 
     <!-- Tab bar -->
     <div class="flex items-center gap-1 border-b border-ink-200 mb-6">
@@ -148,7 +143,7 @@ function resetIdeaMapping(f: CanonicalField) {
       <!-- Vesting schedules -->
       <UiCard title="Vesting schedules" subtitle="Named schedules you can apply to grants and reference in imports." :padded="false">
         <div class="overflow-x-auto table-scroll table-sticky-head">
-          <table class="w-full text-[13px] border-separate" style="border-spacing: 0;">
+          <table class="text-[13px] border-separate" style="border-spacing: 0;">
             <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide">
               <tr>
                 <th class="px-3 py-2 border-b border-ink-200 font-semibold bg-ink-100">Name</th>

@@ -376,17 +376,13 @@ const calDetailRows = computed(() =>
 
 <template>
   <div v-if="data">
-    <div class="flex items-end justify-between mb-4 gap-3 flex-wrap">
-      <div>
-        <h1 class="text-xl font-semibold tracking-tight text-ink-900 flex items-center gap-2">
-          <Scale :size="20" /> Grant fairness
-        </h1>
-        <p class="text-sm text-ink-600 mt-1">
-          Judge each optionholder against their job level. Newer hires are naturally diluted — the recommended
-          model tops them up toward their level’s median.
-        </p>
-      </div>
-      <div class="flex items-center gap-2">
+    <PageHeader :breadcrumb="[{ label: 'Cap-table model' }, { label: 'Grant Fairness' }]">
+      <template #title><Scale :size="20" /> Grant fairness</template>
+      <template #description>
+        Judge each optionholder against their job level. Newer hires are naturally diluted — the recommended
+        model tops them up toward their level’s median.
+      </template>
+      <template #actions>
         <label class="text-xs text-ink-500">Basis</label>
         <select
           v-model="selectedRound"
@@ -401,8 +397,8 @@ const calDetailRows = computed(() =>
         <UiButton :disabled="!data.holders.length" @click="exportXlsx">
           <FileDown :size="14" /> Export (.xlsx)
         </UiButton>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- Tab bar -->
     <div class="flex items-center gap-1 border-b border-ink-200 mb-5">
@@ -425,7 +421,7 @@ const calDetailRows = computed(() =>
 
     <!-- TAB 1: Optionholders roster -->
     <UiCard v-else-if="tab === 'roster'" :padded="false" class="max-w-7xl" subtitle="Edit inline. Start date is the hire-basis for a not-yet-issued grant — set it for veterans so their first grant reflects when they joined, not today.">
-      <table class="w-full text-sm">
+      <table class="text-sm">
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
             <th class="text-center font-medium px-3 py-2 w-16">Include</th>
@@ -502,7 +498,7 @@ const calDetailRows = computed(() =>
         <span class="font-medium text-ink-700">% at hire</span> is each holder's slice at the round they were granted in —
         a <span class="italic">then</span> figure, so an early hire looks large there even with few shares.
       </p>
-      <table class="w-full text-sm num">
+      <table class="text-sm num">
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
             <SortTh :table="holdingsTable" col="name" th-class="text-left font-medium px-4 py-2">Optionholder</SortTh>
@@ -555,7 +551,7 @@ const calDetailRows = computed(() =>
               </span>
             </div>
           </template>
-          <table class="w-full text-sm num">
+          <table class="text-sm num">
             <thead>
               <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
                 <SortTh :table="recTable" col="name" th-class="text-left font-medium px-4 py-2">Optionholder</SortTh>
@@ -593,7 +589,7 @@ const calDetailRows = computed(() =>
               <span class="text-[11px] text-ink-500">recommended placement</span>
             </div>
           </template>
-          <table class="w-full text-sm num">
+          <table class="text-sm num">
             <thead>
               <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
                 <th class="text-left font-medium px-4 py-2">Idea</th>
@@ -720,7 +716,7 @@ const calDetailRows = computed(() =>
           </UiCard>
 
           <UiCard :padded="false" class="mb-5" subtitle="Per-grade ISO benchmarks (median; range = min–max after outlier removal)">
-            <table class="w-full text-sm num">
+            <table class="text-sm num">
               <thead>
                 <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
                   <SortTh :table="calGradeTable" col="level" th-class="text-left font-medium px-4 py-2">Grade</SortTh>
@@ -751,7 +747,7 @@ const calDetailRows = computed(() =>
           </UiCard>
 
           <UiCard :padded="false" subtitle="Every ISO grant, by grade then hire year — spot drift + outliers">
-            <table class="w-full text-sm num">
+            <table class="text-sm num">
               <thead>
                 <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
                   <SortTh :table="calDetailTable" col="level" align="right" th-class="text-right font-medium px-3 py-2 w-14">Grade</SortTh>

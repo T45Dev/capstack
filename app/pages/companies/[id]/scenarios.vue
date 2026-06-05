@@ -223,15 +223,15 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
 
 <template>
   <div>
-    <div class="flex items-end justify-between mb-5 gap-3 flex-wrap">
-      <div>
-        <h1 class="text-xl font-semibold tracking-tight text-ink-900">Exit Scenarios</h1>
-        <p class="text-sm text-ink-600 mt-1">
-          Three exit values (Low / Mid / High) modeled as if the to-close round has closed. Saving a new scenario locks the previous ones — they stay available read-only.
-        </p>
-      </div>
-      <UiButton variant="primary" @click="startCreate()"><Plus :size="14" /> New scenario</UiButton>
-    </div>
+    <PageHeader :breadcrumb="[{ label: 'Cap-table model' }, { label: 'Exit Scenarios' }]">
+      <template #title><FlaskConical :size="20" /> Exit Scenarios</template>
+      <template #description>
+        Three exit values (Low / Mid / High) modeled as if the to-close round has closed. Saving a new scenario locks the previous ones — they stay available read-only.
+      </template>
+      <template #actions>
+        <UiButton variant="primary" @click="startCreate()"><Plus :size="14" /> New scenario</UiButton>
+      </template>
+    </PageHeader>
 
     <UiEmpty
       v-if="!scenarios?.length"

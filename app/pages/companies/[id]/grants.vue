@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle, UploadCloud, AlertTriangle, CheckCircle2, X } from 'lucide-vue-next'
+import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle, UploadCloud, AlertTriangle, CheckCircle2, X, Award } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtDate, fmtPricePerShare, normalizeDate } from '~/utils/format'
 import { calcSum, calcPct, calcValueUSD } from '~/utils/calc'
 import { authorizedPool } from '~/utils/capTable'
@@ -879,19 +879,16 @@ const fieldLabels: Record<string, string> = {
 
 <template>
   <div v-if="data">
-    <div class="flex items-end justify-between mb-5 gap-3 flex-wrap">
-      <div>
-        <h1 class="text-xl font-semibold tracking-tight text-ink-900">Option grants</h1>
-        <p class="text-sm text-ink-600 mt-1">Outstanding grants from the cap table, plus any proposed grants you're modelling.</p>
-      </div>
-      <div class="flex items-center gap-2">
+    <PageHeader :breadcrumb="[{ label: 'Cap-table model' }, { label: 'Option grants' }]" description="Outstanding grants from the cap table, plus any proposed grants you're modelling.">
+      <template #title><Award :size="20" /> Option grants</template>
+      <template #actions>
         <UiButton :disabled="!proposed.length" @click="exportBoardApproval">
           <FileDown :size="14" /> Export board approval (.xlsx)
         </UiButton>
         <UiButton @click="openImport"><UploadCloud :size="14" /> Import proposed</UiButton>
         <UiButton variant="primary" @click="startAdd()"><Plus :size="14" /> Propose grant</UiButton>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- Pool math, broken out so every term matches the Lifetime row:
            Authorized − Outstanding − Exercised = Available
@@ -988,7 +985,7 @@ const fieldLabels: Record<string, string> = {
         </template>
         <div v-if="!outstanding.length" class="text-sm text-ink-500 px-4 py-6 text-center">No outstanding grants.</div>
         <div v-else class="overflow-x-auto table-scroll table-sticky-head">
-          <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
+          <table class="text-[13px] border-separate" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
               <col v-for="c in outstandingVisibleCols" :key="c.key" :style="{ width: c.width + 'px' }" />
             </colgroup>
@@ -1094,7 +1091,7 @@ const fieldLabels: Record<string, string> = {
         </template>
         <div v-if="!proposed.length && !ideaRows.length && !adding" class="text-sm text-ink-500 px-4 py-6 text-center">No proposed grants. Click "Propose grant" to draft one.</div>
         <div v-else class="overflow-x-auto table-scroll table-sticky-head">
-          <table class="text-[13px] border-separate w-full" style="border-spacing: 0; table-layout: fixed;">
+          <table class="text-[13px] border-separate" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
               <col v-for="c in proposedVisibleCols" :key="c.key" :style="{ width: c.width + 'px' }" />
             </colgroup>
@@ -1297,7 +1294,7 @@ const fieldLabels: Record<string, string> = {
                 Preview ({{ importPreview.totalParsed }} total{{ importPreview.totalParsed > importPreview.sample.length ? ` — first ${importPreview.sample.length} shown` : '' }})
               </h4>
               <div class="border border-ink-200 rounded overflow-x-auto">
-                <table class="text-[12px] w-full">
+                <table class="text-[12px]">
                   <thead class="bg-ink-100 text-ink-700">
                     <tr>
                       <th class="px-2 py-1 text-left text-[10px] uppercase tracking-wide">Recipient</th>
@@ -1332,7 +1329,7 @@ const fieldLabels: Record<string, string> = {
               <p class="text-xs text-amber-900">Same recipient + batch. Choose what to do with each — <b>Combine</b> adds the imported shares, <b>Replace</b> overwrites the existing grant, <b>Skip</b> leaves it untouched.</p>
             </div>
             <div class="border border-ink-200 rounded overflow-x-auto">
-              <table class="text-[12px] w-full">
+              <table class="text-[12px]">
                 <thead class="bg-ink-100 text-ink-700">
                   <tr>
                     <th class="px-2 py-1 text-left text-[10px] uppercase tracking-wide">Recipient</th>

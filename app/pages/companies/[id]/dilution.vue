@@ -24,7 +24,7 @@
 // NUMERATOR only — per-stakeholder postShares, plus a synthetic
 // "Future ideas" row. Pre and the denominator are untouched (proposed/
 // ideas draw from pool capacity already inside postFDS).
-import { ArrowUp, ArrowDown, Upload } from 'lucide-vue-next'
+import { ArrowUp, ArrowDown, Upload, GitCompare } from 'lucide-vue-next'
 import { fmtUSD, fmtPct, fmtShares } from '~/utils/format'
 import { calcPct, calcValueUSD, calcSum } from '~/utils/calc'
 import { openRoundPostFds } from '~/utils/capTable'
@@ -379,7 +379,7 @@ async function onImported() {
     <div class="mb-3 shrink-0">
       <div class="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 class="text-xl font-semibold tracking-tight text-ink-900">Overall Dilution</h1>
+          <h1 class="text-xl font-semibold tracking-tight text-ink-900 flex items-center gap-2"><GitCompare :size="20" /> Overall Dilution</h1>
           <p class="text-sm text-ink-600 mt-1">
             Comparing <span class="font-medium text-ink-800">pre-{{ currentRoundName }}</span> vs.
             <span class="font-medium text-brand-700">post-{{ currentRoundName }}</span> —

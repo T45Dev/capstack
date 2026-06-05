@@ -108,7 +108,7 @@ const sheetList = computed(() => {
 <template>
   <div class="max-w-3xl mx-auto">
     <PageHeader :breadcrumb="[{ label: 'Cap-table model', to: `/companies/${id}` }, { label: 'Import' }]">
-      <template #title>{{ firstRun ? "Welcome — let's load your option grants" : 'Re-import option grants' }}</template>
+      <template #title><UploadCloud :size="20" /> {{ firstRun ? "Welcome — let's load your option grants" : 'Re-import option grants' }}</template>
       <template #badge>
         <span class="inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full bg-ink-100 text-ink-600 font-medium">
           <span class="w-1.5 h-1.5 rounded-full bg-ink-300"></span>
@@ -219,7 +219,7 @@ const sheetList = computed(() => {
           <div class="mt-5 space-y-4">
             <div v-if="preview.samples.grants.length">
               <h4 class="text-[10.5px] uppercase tracking-[0.08em] text-ink-500 font-semibold mb-1.5">Option grants <span class="text-ink-400 font-normal normal-case tracking-normal">— first {{ preview.samples.grants.length }}</span></h4>
-              <table class="w-full text-[12px] num">
+              <table class="text-[12px] num">
                 <tbody class="divide-y divide-ink-100">
                   <tr v-for="(g, i) in preview.samples.grants" :key="i">
                     <td class="py-1 pr-2 text-ink-900 truncate max-w-[40%]">{{ g.recipientName }}</td>
