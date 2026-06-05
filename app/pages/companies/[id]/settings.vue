@@ -137,7 +137,7 @@ function resetIdeaMapping(f: CanonicalField) {
         type="button"
         class="px-3.5 py-2 text-sm font-medium -mb-px border-b-2 transition-colors"
         :class="activeTab === t.key
-          ? 'border-brand-500 text-ink-900'
+          ? 'border-brand text-ink-900'
           : 'border-transparent text-ink-500 hover:text-ink-800'"
         @click="activeTab = t.key"
       >{{ t.label }}</button>

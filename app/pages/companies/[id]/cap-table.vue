@@ -123,9 +123,11 @@ function exportCsv() { /* No-op on the simplified layout. Kept on the page heade
 
     <!-- Preferred investors tab unchanged. -->
     <div v-show="activeTab === 'investors'">
-      <div v-if="!roundCols.length" class="px-4 py-10 text-center text-sm text-ink-500 border border-dashed border-ink-300 rounded-lg bg-white">
-        Start an open round first — the investor matrix needs a column to populate.
-      </div>
+      <UiEmpty
+        v-if="!roundCols.length"
+        title="No open round yet"
+        description="Start an open round first — the investor matrix needs a column to populate."
+      />
       <InvestorMatrix v-else :company-id="id" @refreshed="refreshRoundSummary" />
     </div>
   </div>

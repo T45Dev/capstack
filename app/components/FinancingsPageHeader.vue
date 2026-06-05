@@ -108,7 +108,7 @@ const tabs: Array<{ key: TabKey; label: string }> = [
         type="button"
         class="px-3 h-9 text-[12.5px] border-b-2 transition-colors"
         :class="activeTab === t.key
-          ? 'border-ink-900 text-ink-900 font-semibold'
+          ? 'border-brand text-ink-900 font-semibold'
           : 'border-transparent text-ink-500 hover:text-ink-800'"
         @click="emit('update:active-tab', t.key)"
       >

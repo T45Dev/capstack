@@ -180,48 +180,41 @@ function classBgFooter(kind: string): string {
 
 <template>
   <div>
-    <div class="border-b border-ink-200 bg-white -mx-6 -mt-6 px-6 pt-5 pb-3 mb-5">
-      <div class="flex items-center gap-1.5 text-[12px] text-ink-500 mb-2">
-        <span>Cap-table model</span>
-        <span class="text-ink-300">/</span>
-        <span class="text-ink-700 font-medium">Shareholders</span>
-      </div>
-      <div class="flex items-end justify-between gap-4 flex-wrap">
-        <div class="min-w-0">
-          <div class="flex items-center gap-3 flex-wrap">
-            <h1 class="text-[22px] font-semibold text-ink-900 tracking-tight flex items-center gap-2"><Users :size="20" /> Shareholders</h1>
-            <span v-if="totals.aliases > 0" class="text-[11px] px-2 py-0.5 rounded-full bg-brand-soft text-brand-edge font-medium num">
-              {{ totals.primaries }} primary · {{ totals.aliases }} aliased
-            </span>
-          </div>
-          <p class="text-[13px] text-ink-500 mt-1 max-w-2xl">
-            Every stakeholder broken out by share-class ledger. Link two rows when they represent the same investor (e.g., a holding-company name and a person's name); the alias's shares fold into the primary's columns.
-          </p>
+    <PageHeader :breadcrumb="[{ label: 'Cap-table model' }, { label: 'Shareholders' }]">
+      <template #title><Users :size="20" /> Shareholders</template>
+      <template #badge>
+        <span v-if="totals.aliases > 0" class="text-[11px] px-2 py-0.5 rounded-full bg-brand-soft text-brand-edge font-medium num">
+          {{ totals.primaries }} primary · {{ totals.aliases }} aliased
+        </span>
+      </template>
+      <template #description>
+        Every stakeholder broken out by share-class ledger. Link two rows when they represent the same investor (e.g., a holding-company name and a person's name); the alias's shares fold into the primary's columns.
+      </template>
+      <template #actions>
+        <div class="flex items-center gap-2 bg-white border border-ink-300 rounded-md px-2 py-1.5">
+          <Search :size="13" class="text-ink-400 shrink-0" />
+          <input
+            v-model="query"
+            type="text"
+            placeholder="Find a stakeholder…"
+            class="bg-transparent text-[12.5px] outline-none border-0 w-52 text-left"
+          />
         </div>
-        <div class="flex items-center gap-2">
-          <div class="flex items-center gap-2 bg-white border border-ink-300 rounded-md px-2 py-1.5">
-            <Search :size="13" class="text-ink-400 shrink-0" />
-            <input
-              v-model="query"
-              type="text"
-              placeholder="Find a stakeholder…"
-              class="bg-transparent text-[12.5px] outline-none border-0 w-52 text-left"
-            />
-          </div>
-        </div>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
-    <div v-if="!totals.stakeholders" class="px-4 py-12 text-center text-sm text-ink-500 border border-dashed border-ink-300 rounded-lg bg-white">
-      No stakeholders yet — import a Carta export or add preferred holders from the Dilution page.
-    </div>
+    <UiEmpty
+      v-if="!totals.stakeholders"
+      title="No stakeholders yet"
+      description="Import a Carta export, or add preferred holders from the Dilution page."
+    />
 
-    <div v-else class="rounded-xl border border-ink-200 bg-white overflow-hidden shadow-[0_1px_0_rgba(16,24,40,0.04)]">
+    <div v-else class="rounded-lg border border-ink-300 bg-white overflow-hidden shadow-card">
       <div class="overflow-x-auto table-scroll">
         <table class="w-full text-[13px] border-separate" :style="{ borderSpacing: 0 }">
-          <thead class="bg-ink-50/60 text-[10.5px] uppercase tracking-[0.06em] text-ink-500 font-semibold">
+          <thead class="bg-ink-100 text-[11px] uppercase tracking-wider text-ink-500 font-semibold">
             <tr>
-              <th class="px-3 py-2 border-b border-ink-200 text-left sticky left-0 bg-ink-50/95 z-10">
+              <th class="px-3 py-2 border-b border-ink-200 text-left sticky left-0 bg-ink-100 z-10">
                 <button type="button" class="inline-flex items-center gap-1 hover:text-ink-800 select-none uppercase tracking-[0.06em]" @click="toggleSort('name')">
                   Stakeholder <component :is="sortIcon('name')" v-if="sortIcon('name')" :size="11" class="text-brand-600" />
                 </button>

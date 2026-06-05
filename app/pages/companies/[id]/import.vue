@@ -107,40 +107,28 @@ const sheetList = computed(() => {
 
 <template>
   <div class="max-w-3xl mx-auto">
-    <!-- Page header. Same -mx-6 bleed pattern as the Financings page. -->
-    <div class="border-b border-ink-200 bg-white -mx-6 -mt-6 px-6 pt-5 pb-3 mb-6">
-      <div class="flex items-center gap-1.5 text-[12px] text-ink-500 mb-2">
-        <NuxtLink :to="`/companies/${id}`" class="hover:text-ink-700">Cap-table model</NuxtLink>
-        <span class="text-ink-300">/</span>
-        <span class="text-ink-700 font-medium">Import</span>
-      </div>
-      <div class="flex items-end justify-between gap-6 flex-wrap">
-        <div class="min-w-0">
-          <div class="flex items-center gap-3 flex-wrap">
-            <h1 class="text-[22px] font-semibold text-ink-900 tracking-tight">
-              {{ firstRun ? 'Welcome — let\'s load your option grants' : 'Re-import option grants' }}
-            </h1>
-            <span class="inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full bg-ink-100 text-ink-600 font-medium">
-              <span class="w-1.5 h-1.5 rounded-full bg-ink-300"></span>
-              {{ company?.name || '—' }}
-            </span>
-          </div>
-          <p class="text-[13px] text-ink-500 mt-1 max-w-2xl">
-            Drop a Carta pro-forma <code class="text-ink-700 bg-ink-100 px-1 py-px rounded text-[12px] num">.xlsx</code>. We'll pull in
-            <span class="text-ink-700 font-medium">option grants</span>,
-            <span class="text-ink-700 font-medium">the people who hold them</span>, and
-            <span class="text-ink-700 font-medium">the option-pool size</span>. Rounds, share classes, holdings, and convertible notes stay manual on the Rounds page.
-          </p>
-        </div>
-        <NuxtLink :to="`/companies/${id}/cap-table`">
-          <UiButton variant="ghost" size="sm">Cancel</UiButton>
-        </NuxtLink>
-      </div>
-    </div>
+    <PageHeader :breadcrumb="[{ label: 'Cap-table model', to: `/companies/${id}` }, { label: 'Import' }]">
+      <template #title>{{ firstRun ? "Welcome — let's load your option grants" : 'Re-import option grants' }}</template>
+      <template #badge>
+        <span class="inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full bg-ink-100 text-ink-600 font-medium">
+          <span class="w-1.5 h-1.5 rounded-full bg-ink-300"></span>
+          {{ company?.name || '—' }}
+        </span>
+      </template>
+      <template #description>
+        Drop a Carta pro-forma <code class="text-ink-700 bg-ink-100 px-1 py-px rounded text-[12px] num">.xlsx</code>. We'll pull in
+        <span class="text-ink-700 font-medium">option grants</span>,
+        <span class="text-ink-700 font-medium">the people who hold them</span>, and
+        <span class="text-ink-700 font-medium">the option-pool size</span>. Rounds, share classes, holdings, and convertible notes stay manual on the Rounds page.
+      </template>
+      <template #actions>
+        <NuxtLink :to="`/companies/${id}/cap-table`"><UiButton variant="ghost" size="sm">Cancel</UiButton></NuxtLink>
+      </template>
+    </PageHeader>
 
     <!-- Drop zone -->
     <section
-      class="rounded-xl border border-ink-200 bg-white shadow-[0_1px_0_rgba(16,24,40,0.04)] overflow-hidden"
+      class="rounded-lg border border-ink-300 bg-white shadow-card overflow-hidden"
     >
       <div
         class="m-4 rounded-lg border-2 border-dashed transition-colors px-6 py-12 text-center"
