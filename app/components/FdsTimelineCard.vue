@@ -36,12 +36,12 @@ async function deleteMilestone(m: Milestone) {
     <div class="overflow-x-auto">
       <table class="text-[13px] num">
         <thead>
-          <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
-            <th class="text-left font-medium px-4 py-2 w-40">As-of date</th>
+          <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100 whitespace-nowrap">
+            <th class="text-left font-medium px-4 py-2">As-of date</th>
             <th class="text-left font-medium px-3 py-2">Label</th>
-            <th class="text-right font-medium px-3 py-2 w-40">Fully-diluted shares</th>
-            <th class="text-right font-medium px-3 py-2 w-28">Price / share</th>
-            <th class="text-right font-medium px-3 py-2 w-32">Option pool +</th>
+            <th class="text-right font-medium px-3 py-2">Fully-diluted shares</th>
+            <th class="text-right font-medium px-3 py-2">Price / share</th>
+            <th class="text-right font-medium px-3 py-2">Option pool +</th>
             <th class="px-3 py-2 w-10"></th>
           </tr>
         </thead>

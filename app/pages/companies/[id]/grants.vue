@@ -897,13 +897,8 @@ const fieldLabels: Record<string, string> = {
          Outstanding), so they're shown as "returned", not subtracted.
          Exercised converted to Common and does NOT return. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-6 p-4">
-      <div class="flex items-center justify-end mb-2">
-        <label class="inline-flex items-center gap-1.5 text-[11px] text-ink-600 border border-ink-300 rounded px-2 py-1 cursor-pointer select-none hover:bg-ink-50">
-          <input v-model="includeIdeas" type="checkbox" class="accent-brand">
-          Include ideas{{ totalIdeas ? ` (${fmtShares(totalIdeas)})` : '' }}
-        </label>
-      </div>
-      <div class="flex flex-wrap items-end gap-x-3 gap-y-2 num">
+      <div class="flex items-end justify-between gap-4 flex-wrap">
+        <div class="flex flex-wrap items-end gap-x-3 gap-y-2 num">
         <div class="flex flex-col items-start">
           <span class="text-[11px] uppercase tracking-wider text-ink-500">Authorized</span>
           <span
@@ -943,6 +938,11 @@ const fieldLabels: Record<string, string> = {
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Future Available</span>
           <span class="text-2xl font-semibold" :class="futureAvailable < 0 ? 'text-red-700' : 'text-ok'"><UiCalcTip :formula="fFutureAvailable">{{ fmtShares(futureAvailable) }}</UiCalcTip></span>
         </div>
+        </div>
+        <label class="inline-flex items-center gap-1.5 text-[11px] text-ink-600 border border-ink-300 rounded px-2 py-1 cursor-pointer select-none hover:bg-ink-50 shrink-0">
+          <input v-model="includeIdeas" type="checkbox" class="accent-brand">
+          Include ideas{{ totalIdeas ? ` (${fmtShares(totalIdeas)})` : '' }}
+        </label>
       </div>
       <!-- Lifetime decomposition: where every option ever issued is now.
            Issued = Outstanding + Exercised + Forfeited/Expired. Forfeited and
@@ -1346,16 +1346,12 @@ const fieldLabels: Record<string, string> = {
                     <td class="px-2 py-1 text-right text-ink-700">{{ fmtShares(c.existingQuantity) }}</td>
                     <td class="px-2 py-1 text-right text-ink-700">{{ fmtShares(c.incomingQuantity) }}</td>
                     <td class="px-2 py-1">
-                      <div class="inline-flex rounded-md border border-ink-300 overflow-hidden text-[11px]">
-                        <button
-                          v-for="opt in (['combine','replace','skip'] as const)"
-                          :key="opt"
-                          type="button"
-                          class="px-2 py-1 capitalize transition-colors"
-                          :class="resolutions[c.key] === opt ? 'bg-brand-500 text-white' : 'bg-white text-ink-700 hover:bg-ink-100'"
-                          @click="resolutions[c.key] = opt"
-                        >{{ opt }}</button>
-                      </div>
+                      <UiSegmented
+                        size="xs"
+                        :model-value="resolutions[c.key] || ''"
+                        :options="[{ value: 'combine', label: 'Combine' }, { value: 'replace', label: 'Replace' }, { value: 'skip', label: 'Skip' }]"
+                        @update:model-value="(v) => resolutions[c.key] = v as any"
+                      />
                     </td>
                   </tr>
                 </tbody>
