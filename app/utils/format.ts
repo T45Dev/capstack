@@ -8,14 +8,6 @@ export function fmtUSD(n: number | null | undefined, digits = 0): string {
   }).format(n)
 }
 
-export function fmtNum(n: number | null | undefined, digits = 0): string {
-  if (n == null || !isFinite(n)) return '—'
-  return new Intl.NumberFormat('en-US', {
-    maximumFractionDigits: digits,
-    minimumFractionDigits: digits,
-  }).format(n)
-}
-
 export function fmtPct(n: number | null | undefined, digits = 2): string {
   if (n == null || !isFinite(n)) return '—'
   return new Intl.NumberFormat('en-US', {
