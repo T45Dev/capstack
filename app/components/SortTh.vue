@@ -14,7 +14,7 @@ defineProps<{
 </script>
 
 <template>
-  <th :class="thClass || (align === 'right' ? 'text-right font-medium px-3 py-2' : align === 'center' ? 'text-center font-medium px-3 py-2' : 'text-left font-medium px-3 py-2')">
+  <th class="whitespace-nowrap" :class="thClass || (align === 'right' ? 'text-right font-medium px-3 py-2' : align === 'center' ? 'text-center font-medium px-3 py-2' : 'text-left font-medium px-3 py-2')">
     <button
       type="button"
       class="inline-flex items-center gap-1 hover:text-ink-900 select-none"

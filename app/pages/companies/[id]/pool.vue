@@ -837,14 +837,11 @@ const chart = computed(() => {
         <!-- Vest-vs-single chart mode toggle. "Add idea" lives in the
              Ideas card header (right of the two side-by-side tables
              below) so it sits next to the ideas list it manages. -->
-        <div class="inline-flex items-center rounded-md border border-ink-300 bg-white p-0.5 text-xs">
-          <button type="button" class="px-2.5 py-1 rounded-[5px] font-medium transition-colors"
-            :class="mode === 'single' ? 'bg-brand-500 text-white' : 'text-ink-600 hover:text-ink-900'"
-            @click="mode = 'single'">Single event</button>
-          <button type="button" class="px-2.5 py-1 rounded-[5px] font-medium transition-colors"
-            :class="mode === 'vest' ? 'bg-brand-500 text-white' : 'text-ink-600 hover:text-ink-900'"
-            @click="mode = 'vest'">Vest schedule</button>
-        </div>
+        <UiSegmented
+          :model-value="mode"
+          :options="[{ value: 'single', label: 'Single event' }, { value: 'vest', label: 'Vest schedule' }]"
+          @update:model-value="(v) => mode = v as typeof mode"
+        />
       </div>
     </div>
 
@@ -1190,11 +1187,11 @@ const chart = computed(() => {
           <div class="col-span-2">
             <div class="flex items-center justify-between gap-2 mb-2">
               <span class="text-xs font-medium text-ink-700">Size — enter as</span>
-              <div class="inline-flex rounded-md border border-ink-300 bg-white p-0.5 text-xs">
-                <button type="button" class="px-3 py-1 rounded-[3px] font-medium" :class="inputMode === 'shares' ? 'bg-brand-500 text-white shadow-sm' : 'text-ink-600 hover:text-ink-900'" @click="inputMode = 'shares'">Shares</button>
-                <button type="button" class="px-3 py-1 rounded-[3px] font-medium" :class="inputMode === 'pct' ? 'bg-brand-500 text-white shadow-sm' : 'text-ink-600 hover:text-ink-900'" @click="inputMode = 'pct'">%</button>
-                <button type="button" class="px-3 py-1 rounded-[3px] font-medium" :class="inputMode === 'value' ? 'bg-brand-500 text-white shadow-sm' : 'text-ink-600 hover:text-ink-900'" @click="inputMode = 'value'">$</button>
-              </div>
+              <UiSegmented
+                :model-value="inputMode"
+                :options="[{ value: 'shares', label: 'Shares' }, { value: 'pct', label: '%' }, { value: 'value', label: '$' }]"
+                @update:model-value="(v) => inputMode = v as typeof inputMode"
+              />
             </div>
             <div class="grid grid-cols-3 gap-2.5">
               <label class="block">
@@ -1337,16 +1334,12 @@ const chart = computed(() => {
                     <td class="px-2 py-1 text-right text-ink-700">{{ fmtShares(c.existingShares) }}</td>
                     <td class="px-2 py-1 text-right text-ink-700">{{ fmtShares(c.incomingShares) }}</td>
                     <td class="px-2 py-1">
-                      <div class="inline-flex rounded-md border border-ink-300 overflow-hidden text-[11px]">
-                        <button
-                          v-for="opt in (['combine','replace','skip'] as const)"
-                          :key="opt"
-                          type="button"
-                          class="px-2 py-1 capitalize transition-colors"
-                          :class="resolutions[c.key] === opt ? 'bg-brand-500 text-white' : 'bg-white text-ink-700 hover:bg-ink-100'"
-                          @click="resolutions[c.key] = opt"
-                        >{{ opt }}</button>
-                      </div>
+                      <UiSegmented
+                        size="xs"
+                        :model-value="resolutions[c.key] || ''"
+                        :options="[{ value: 'combine', label: 'Combine' }, { value: 'replace', label: 'Replace' }, { value: 'skip', label: 'Skip' }]"
+                        @update:model-value="(v) => resolutions[c.key] = v as any"
+                      />
                     </td>
                   </tr>
                 </tbody>

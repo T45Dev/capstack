@@ -183,16 +183,11 @@ function onSave() {
             :step="inputMode === 'shares' ? '100' : inputMode === 'pct' ? '0.01' : '1000'"
             class="flex-1 min-w-0"
           />
-          <div class="inline-flex rounded-md border border-ink-300 overflow-hidden text-xs">
-            <button
-              v-for="m in (['shares','pct','value'] as const)"
-              :key="m"
-              type="button"
-              class="px-2.5 py-2 transition-colors"
-              :class="inputMode === m ? 'bg-brand-500 text-white' : 'bg-white text-ink-700 hover:bg-ink-100'"
-              @click="inputMode = m"
-            >{{ m === 'shares' ? 'Shares' : m === 'pct' ? '%' : '$' }}</button>
-          </div>
+          <UiSegmented
+            :model-value="inputMode"
+            :options="[{ value: 'shares', label: 'Shares' }, { value: 'pct', label: '%' }, { value: 'value', label: '$' }]"
+            @update:model-value="(v) => inputMode = v as typeof inputMode"
+          />
         </div>
         <p class="mt-1 text-[11px] text-ink-500">
           Stored as <span class="num text-ink-700">{{ fmtShares(form.quantity) }}</span> shares.

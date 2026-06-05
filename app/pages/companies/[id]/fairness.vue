@@ -423,7 +423,7 @@ const calDetailRows = computed(() =>
     <UiCard v-else-if="tab === 'roster'" :padded="false" class="max-w-7xl" subtitle="Edit inline. Start date is the hire-basis for a not-yet-issued grant — set it for veterans so their first grant reflects when they joined, not today.">
       <table class="text-sm">
         <thead>
-          <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
+          <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
             <th class="text-center font-medium px-3 py-2 w-16">Include</th>
             <SortTh :table="rosterTable" col="name" th-class="text-left font-medium px-4 py-2">Optionholder</SortTh>
             <SortTh :table="rosterTable" col="awardTypes" th-class="text-left font-medium px-3 py-2 w-20">Award</SortTh>
@@ -500,7 +500,7 @@ const calDetailRows = computed(() =>
       </p>
       <table class="text-sm num">
         <thead>
-          <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
+          <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
             <SortTh :table="holdingsTable" col="name" th-class="text-left font-medium px-4 py-2">Optionholder</SortTh>
             <SortTh :table="holdingsTable" col="level" th-class="text-left font-medium px-3 py-2">Level</SortTh>
             <SortTh :table="holdingsTable" col="grantShares" align="right" th-class="text-right font-medium px-3 py-2">Options</SortTh>
@@ -553,7 +553,7 @@ const calDetailRows = computed(() =>
           </template>
           <table class="text-sm num">
             <thead>
-              <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
+              <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
                 <SortTh :table="recTable" col="name" th-class="text-left font-medium px-4 py-2">Optionholder</SortTh>
                 <SortTh :table="recTable" col="postPct" align="right" th-class="text-right font-medium px-3 py-2">Current post %</SortTh>
                 <SortTh :table="recTable" col="flag" th-class="text-left font-medium px-3 py-2 pl-6">Fairness</SortTh>
@@ -591,7 +591,7 @@ const calDetailRows = computed(() =>
           </template>
           <table class="text-sm num">
             <thead>
-              <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
+              <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
                 <th class="text-left font-medium px-4 py-2">Idea</th>
                 <th class="text-right font-medium px-3 py-2">Options</th>
                 <th class="text-right font-medium px-3 py-2">Resulting %</th>
@@ -646,10 +646,11 @@ const calDetailRows = computed(() =>
         <!-- Basis toggle: isolate the at-hire grant vs accumulated outstanding. -->
         <div class="flex items-center gap-2 mb-4 text-xs">
           <span class="text-ink-500">Measure</span>
-          <div class="inline-flex rounded-md border border-ink-300 overflow-hidden">
-            <button type="button" class="px-2.5 py-1" :class="calibBasis === 'initial' ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="calibBasis = 'initial'">Initial grant</button>
-            <button type="button" class="px-2.5 py-1 border-l border-ink-300" :class="calibBasis === 'outstanding' ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="calibBasis = 'outstanding'">All outstanding</button>
-          </div>
+          <UiSegmented
+            :model-value="calibBasis"
+            :options="[{ value: 'initial', label: 'Initial grant' }, { value: 'outstanding', label: 'All outstanding' }]"
+            @update:model-value="(v) => calibBasis = v as typeof calibBasis"
+          />
           <span class="text-ink-400">{{ calibBasis === 'initial' ? 'earliest grant only — strips later refreshes' : 'every grant they still hold, accumulated' }}</span>
         </div>
 
@@ -718,7 +719,7 @@ const calDetailRows = computed(() =>
           <UiCard :padded="false" class="mb-5" subtitle="Per-grade ISO benchmarks (median; range = min–max after outlier removal)">
             <table class="text-sm num">
               <thead>
-                <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
+                <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
                   <SortTh :table="calGradeTable" col="level" th-class="text-left font-medium px-4 py-2">Grade</SortTh>
                   <SortTh :table="calGradeTable" col="n" align="right" th-class="text-right font-medium px-3 py-2">#</SortTh>
                   <th class="text-left font-medium px-3 py-2 pl-4">Confidence</th>
@@ -749,7 +750,7 @@ const calDetailRows = computed(() =>
           <UiCard :padded="false" subtitle="Every ISO grant, by grade then hire year — spot drift + outliers">
             <table class="text-sm num">
               <thead>
-                <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200">
+                <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
                   <SortTh :table="calDetailTable" col="level" align="right" th-class="text-right font-medium px-3 py-2 w-14">Grade</SortTh>
                   <SortTh :table="calDetailTable" col="name" th-class="text-left font-medium px-4 py-2">Optionholder</SortTh>
                   <SortTh :table="calDetailTable" col="_year" align="right" th-class="text-right font-medium px-3 py-2 w-16">Year</SortTh>
@@ -827,11 +828,11 @@ const calDetailRows = computed(() =>
             </label>
             <label class="block">
               <span class="block text-[11.5px] font-medium text-ink-700 mb-1">Salary tilt</span>
-              <div class="inline-flex rounded-md border border-ink-300 overflow-hidden text-xs">
-                <button type="button" class="px-2.5 py-1.5" :class="nhTilt === 'off' ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="nhTilt = 'off'">Off</button>
-                <button type="button" class="px-2.5 py-1.5 border-l border-ink-300" :class="nhTilt === 'mild' ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="nhTilt = 'mild'">Mild</button>
-                <button type="button" class="px-2.5 py-1.5 border-l border-ink-300" :class="nhTilt === 'strong' ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="nhTilt = 'strong'">Strong</button>
-              </div>
+              <UiSegmented
+                :model-value="nhTilt"
+                :options="[{ value: 'off', label: 'Off' }, { value: 'mild', label: 'Mild' }, { value: 'strong', label: 'Strong' }]"
+                @update:model-value="(v) => nhTilt = v as typeof nhTilt"
+              />
             </label>
           </div>
         </UiCard>
