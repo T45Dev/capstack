@@ -827,23 +827,19 @@ const chart = computed(() => {
        calc(100vh − h-14 nav) keeps the layout pinned to the viewport so
        the operator never has to scroll the page to see the bottom row. -->
   <div class="flex flex-col" style="height: calc(100vh - 3.5rem - 3rem)">
-    <!-- Header bar -->
-    <div class="flex items-end justify-between mb-4 gap-3 flex-wrap shrink-0">
-      <div>
-        <h1 class="text-xl font-semibold tracking-tight text-ink-900 flex items-center gap-2"><ArrowDownIcon :size="20" /> Option pool impact</h1>
-        <p class="text-sm text-ink-600 mt-1">Chronological view of every event that affects the pool — pool top-ups, outstanding grants, proposed grants, and your future ideas.</p>
-      </div>
-      <div class="flex items-center gap-2">
-        <!-- Vest-vs-single chart mode toggle. "Add idea" lives in the
-             Ideas card header (right of the two side-by-side tables
-             below) so it sits next to the ideas list it manages. -->
+    <PageHeader class="shrink-0" :breadcrumb="[{ label: 'Cap-table model' }, { label: 'Option Pool Impact' }]">
+      <template #title><ArrowDownIcon :size="20" /> Option pool impact</template>
+      <template #description>Chronological view of every event that affects the pool — pool top-ups, outstanding grants, proposed grants, and your future ideas.</template>
+      <template #actions>
+        <!-- Vest-vs-single chart mode toggle. "Add idea" lives in the Ideas
+             card header below, next to the ideas list it manages. -->
         <UiSegmented
           :model-value="mode"
           :options="[{ value: 'single', label: 'Single event' }, { value: 'vest', label: 'Vest schedule' }]"
           @update:model-value="(v) => mode = v as typeof mode"
         />
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- Missing-date callout: when imported grants are missing issue
          dates (the Carta option-plan sheet had a different column name,
