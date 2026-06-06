@@ -111,7 +111,7 @@ function onInput(e: Event) {
       :placeholder="placeholder"
       :disabled="disabled"
       :class="[
-        'flex-1 min-w-0 py-1 text-right text-sm num bg-transparent border-0 focus:outline-none focus:ring-0',
+        'flex-1 min-w-0 py-1 text-left text-sm num bg-transparent border-0 focus:outline-none focus:ring-0',
         prefix ? 'pr-1.5 pl-1' : 'px-1.5',
         disabled ? 'text-ink-500 cursor-not-allowed' : '',
         inputClass,
