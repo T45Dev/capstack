@@ -35,12 +35,20 @@ const { data: roundSummary } = await useFetch<{ rounds: Array<{ round_id: string
 // render agree on "expanded"; the stored value applies post-hydration
 // without a Vue mismatch warning.
 const visualsCollapsed = ref(false)
+// Collapse the whole top card (equation + visuals) down to a one-line summary
+// so the timeline tables get the viewport. Persists per the operator.
+const formulaCollapsed = ref(false)
 onMounted(() => {
   try { visualsCollapsed.value = localStorage.getItem('capstack:pool:visuals-collapsed') === 'true' } catch { /* ignore */ }
+  try { formulaCollapsed.value = localStorage.getItem('capstack:pool:formula-collapsed') === 'true' } catch { /* ignore */ }
 })
 watch(visualsCollapsed, (v) => {
   if (typeof window === 'undefined') return
   try { localStorage.setItem('capstack:pool:visuals-collapsed', String(v)) } catch { /* ignore */ }
+})
+watch(formulaCollapsed, (v) => {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem('capstack:pool:formula-collapsed', String(v)) } catch { /* ignore */ }
 })
 
 // Sensible fallback date used when an event has no date in the source data.
@@ -830,15 +838,6 @@ const chart = computed(() => {
     <PageHeader class="shrink-0" :breadcrumb="[{ label: 'Cap-table model' }, { label: 'Option Pool Impact' }]">
       <template #title><ArrowDownIcon :size="20" /> Option pool impact</template>
       <template #description>Chronological view of every event that affects the pool — pool top-ups, outstanding grants, proposed grants, and your future ideas.</template>
-      <template #actions>
-        <!-- Vest-vs-single chart mode toggle. "Add idea" lives in the Ideas
-             card header below, next to the ideas list it manages. -->
-        <UiSegmented
-          :model-value="mode"
-          :options="[{ value: 'single', label: 'Single event' }, { value: 'vest', label: 'Vest schedule' }]"
-          @update:model-value="(v) => mode = v as typeof mode"
-        />
-      </template>
     </PageHeader>
 
     <!-- Missing-date callout: when imported grants are missing issue
@@ -855,13 +854,28 @@ const chart = computed(() => {
     <!-- Overall heading: pool math as equation + lifetime row + pie/line
          charts side-by-side. Stays put while the timeline below scrolls. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-4 p-4 shrink-0">
-      <!-- Pool math (simplified):
-             Authorized − Outstanding = Available − Proposed − Ideas = Future Available
-           "Outstanding" lumps active grants + exercised options (both have
-           permanently left the pool). When exercised > 0, the tooltip on
-           Outstanding splits the two; the Lifetime row below always shows
-           the full breakdown for audit. -->
-      <div class="flex flex-wrap items-end gap-3 text-ink-900 num">
+      <!-- Pool math: Authorized − Outstanding = Available − Proposed − Ideas
+           = Future Available. Collapsible to a one-line summary so the
+           timeline tables can take the viewport. -->
+      <div class="flex items-center justify-between gap-3">
+        <div v-if="formulaCollapsed" class="flex flex-wrap items-center gap-x-4 gap-y-1 num text-sm">
+          <span class="text-ink-700"><span class="text-[10px] uppercase tracking-wider text-ink-500 mr-1">Authorized</span>{{ fmtShares(totals.poolAuthorized) }}</span>
+          <span><span class="text-[10px] uppercase tracking-wider text-ink-500 mr-1">Available</span><span class="font-medium" :class="totals.availableShares < 0 ? 'text-red-700' : 'text-ok'">{{ fmtShares(totals.availableShares) }}</span></span>
+          <span><span class="text-[10px] uppercase tracking-wider text-ink-500 mr-1">Future</span><span class="font-medium" :class="totals.futureAvailable < 0 ? 'text-red-700' : 'text-ok'">{{ fmtShares(totals.futureAvailable) }}</span></span>
+        </div>
+        <div v-else class="text-[10px] uppercase tracking-wider text-ink-500">Pool</div>
+        <button
+          type="button"
+          class="shrink-0 text-ink-400 hover:text-ink-700"
+          :title="formulaCollapsed ? 'Expand pool summary' : 'Collapse to make room for the tables'"
+          @click="formulaCollapsed = !formulaCollapsed"
+        >
+          <ChevronDown v-if="formulaCollapsed" :size="16" />
+          <ChevronUp v-else :size="16" />
+        </button>
+      </div>
+      <template v-if="!formulaCollapsed">
+      <div class="flex flex-wrap items-end gap-3 text-ink-900 num mt-2">
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Authorized</span>
           <span class="text-2xl font-semibold">{{ fmtShares(totals.poolAuthorized) }}</span>
@@ -892,31 +906,6 @@ const chart = computed(() => {
           <span class="text-2xl font-semibold" :class="totals.futureAvailable < 0 ? 'text-red-700' : 'text-ok'"><UiCalcTip :formula="fFutureAvailable">{{ fmtShares(totals.futureAvailable) }}</UiCalcTip></span>
         </div>
       </div>
-      <!-- Lifetime equation: Issued = Outstanding + Exercised
-           + (Forfeited+Expired). Forfeit and Expire have identical
-           pool effect (Outstanding → Available with Authorized
-           unchanged), so they're combined here. -->
-      <!-- Lifetime decomposition. Where every option ever issued is
-           now — not a formula, just the breakdown for audit. -->
-      <div class="mt-3 pt-3 border-t border-ink-200 flex flex-wrap items-end gap-x-5 gap-y-2 text-ink-700 num text-sm">
-        <span class="text-[10px] uppercase tracking-wider text-ink-500">Lifetime</span>
-        <div class="flex items-end gap-1.5">
-          <span class="text-ink-500">Issued</span>
-          <span class="font-medium">{{ fmtShares(totals.totalIssued) }}</span>
-        </div>
-        <div class="flex items-end gap-1.5">
-          <span class="text-ink-500">Outstanding</span>
-          <span class="font-medium">{{ fmtShares(totals.outstandingShares) }}</span>
-        </div>
-        <div class="flex items-end gap-1.5">
-          <span class="text-ink-500" title="Exercised → Common Stock (left the pool entirely)">Exercised</span>
-          <span class="font-medium" :class="totals.totalExercised > 0 ? 'text-brand-700' : 'text-ink-400'">{{ fmtShares(totals.totalExercised) }}</span>
-        </div>
-        <div class="flex items-end gap-1.5">
-          <span class="text-ink-500">Forfeited/Expired</span>
-          <span class="font-medium" :class="totals.totalForfeitedOrExpired > 0 ? 'text-red-700' : 'text-ink-400'"><UiCalcTip :formula="fForfExp">{{ fmtShares(totals.totalForfeitedOrExpired) }}</UiCalcTip></span>
-        </div>
-      </div>
 
       <!-- Pie + line side-by-side. Collapsible: a click on the section
            header folds the visuals away (persisted in localStorage) so
@@ -934,7 +923,7 @@ const chart = computed(() => {
           <span>Visuals</span>
           <span v-if="visualsCollapsed" class="text-ink-400 normal-case tracking-normal">(hidden)</span>
         </button>
-        <div v-if="!visualsCollapsed" class="mt-3 flex gap-6 flex-wrap items-start">
+        <div v-if="!visualsCollapsed" class="mt-3 flex gap-6 flex-wrap items-center">
           <div v-if="pieTotal > 0" class="flex items-center gap-3 shrink-0">
             <svg viewBox="0 0 120 120" width="100" height="100" class="shrink-0">
               <g>
@@ -955,7 +944,15 @@ const chart = computed(() => {
             </ul>
           </div>
           <div v-if="chartPoints.length" class="flex-1 min-w-[320px]">
-            <div class="text-[10px] uppercase tracking-wider text-ink-500 mb-1">Pool balance over time</div>
+            <div class="flex items-center justify-between gap-2 mb-1">
+              <div class="text-[10px] uppercase tracking-wider text-ink-500">Pool balance over time</div>
+              <UiSegmented
+                size="xs"
+                :model-value="mode"
+                :options="[{ value: 'single', label: 'Single event' }, { value: 'vest', label: 'Vest schedule' }]"
+                @update:model-value="(v) => mode = v as typeof mode"
+              />
+            </div>
             <svg :viewBox="`0 0 ${chartW} ${chartH}`" class="w-full" :style="{ height: chartH + 'px' }">
               <g v-for="(t, i) in chart.yTicks" :key="i">
                 <line :x1="padL" :x2="chartW - padR" :y1="t.y" :y2="t.y" stroke="#e2e8f0" stroke-width="1" />
@@ -973,6 +970,7 @@ const chart = computed(() => {
           </div>
         </div>
       </div>
+      </template>
     </div>
 
     <!-- Two tables side-by-side: real Timeline (left) + hypothetical
