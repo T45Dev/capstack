@@ -98,7 +98,7 @@ function onInput(e: Event) {
   />
   <div
     v-else
-    class="flex items-center rounded-md border focus-within:ring-2 focus-within:ring-brand-500"
+    class="flex items-center w-full min-w-0 rounded-md border focus-within:ring-2 focus-within:ring-brand-500"
     :class="disabled
       ? 'border-ink-200 bg-ink-100 cursor-not-allowed'
       : 'border-ink-300 bg-white focus-within:border-brand-500'"
@@ -111,7 +111,7 @@ function onInput(e: Event) {
       :placeholder="placeholder"
       :disabled="disabled"
       :class="[
-        'flex-1 py-1 text-right text-sm num bg-transparent border-0 focus:outline-none focus:ring-0',
+        'flex-1 min-w-0 py-1 text-right text-sm num bg-transparent border-0 focus:outline-none focus:ring-0',
         prefix ? 'pr-1.5 pl-1' : 'px-1.5',
         disabled ? 'text-ink-500 cursor-not-allowed' : '',
         inputClass,
