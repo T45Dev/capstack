@@ -4,15 +4,72 @@ import {
   Upload, FileSpreadsheet, GitCompare, TrendingDown, FlaskConical, Scale,
   Download, ArrowRight, Check,
 } from 'lucide-vue-next'
-import { PRICING_TIERS } from '~/utils/pricing'
+import { PRICING_TIERS, tierPrice } from '~/utils/pricing'
 
 definePageMeta({ layout: 'marketing' })
+
+const { origin, url } = useSeo({
+  path: '/',
+  title: 'CapStack — Cap Table & Dilution Software | Carta Import to Excel',
+  description: 'CapStack is cap table software for founders and operators. Import your Carta export, model funding rounds, convertible notes, and dilution, then export a board-ready Excel for every option grant.',
+  type: 'website',
+})
+
+// Structured data — one @graph covering the org, the site, the product (with
+// live pricing offers from the single source of truth), and the breadcrumb.
+// Lets search engines render rich results (pricing, app category, sitelinks).
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'Organization',
+      '@id': `${origin}/#organization`,
+      name: 'CapStack',
+      url: origin,
+      logo: `${origin}/og-image.png`,
+      description: 'Cap table and scenario modelling software for founders, operators, and the firms backing them.',
+    },
+    {
+      '@type': 'WebSite',
+      '@id': `${origin}/#website`,
+      url: origin,
+      name: 'CapStack',
+      publisher: { '@id': `${origin}/#organization` },
+      inLanguage: 'en-US',
+    },
+    {
+      '@type': 'SoftwareApplication',
+      '@id': `${origin}/#software`,
+      name: 'CapStack',
+      applicationCategory: 'BusinessApplication',
+      applicationSubCategory: 'Cap Table Management',
+      operatingSystem: 'Web',
+      url: origin,
+      description: 'Import a Carta export, build a chronological record of financings, attribute convertible notes to rounds, model dilution and the option pool, and export a board-ready Excel.',
+      featureList: [
+        'Carta xlsx import', 'Funding round & dilution modeling',
+        'Convertible note attribution', 'Option-pool impact',
+        'Exit-scenario waterfall', 'Board-ready Excel export',
+      ],
+      offers: PRICING_TIERS.map(t => ({
+        '@type': 'Offer',
+        name: `${t.name} plan`,
+        price: tierPrice(t, 'monthly') ?? 0,
+        priceCurrency: 'USD',
+        category: t.id === 'free' ? 'free' : 'subscription',
+        url: `${origin}/pricing`,
+      })),
+    },
+    {
+      '@type': 'BreadcrumbList',
+      itemListElement: [
+        { '@type': 'ListItem', position: 1, name: 'Home', item: url },
+      ],
+    },
+  ],
+}
 useHead({
-  title: 'CapStack — Cap tables, financings & board-ready exports',
-  meta: [{
-    name: 'description',
-    content: 'Import your Carta export, model rounds and convertible notes, see dilution clearly, and ship a board-ready Excel for every option grant.',
-  }],
+  script: [{ type: 'application/ld+json', innerHTML: JSON.stringify(jsonLd) }],
 })
 
 const features = [
@@ -35,7 +92,7 @@ const steps = [
   <div>
     <!-- Hero ────────────────────────────────────────────────────────── -->
     <section class="relative overflow-hidden">
-      <div class="absolute inset-0 bg-gradient-to-b from-brand-50/60 via-white to-white pointer-events-none" />
+      <div aria-hidden="true" class="absolute inset-0 bg-gradient-to-b from-brand-50/60 via-white to-white pointer-events-none" />
       <div class="relative max-w-6xl mx-auto px-5 pt-20 pb-16 sm:pt-28 sm:pb-20">
         <div class="max-w-3xl">
           <span class="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 text-brand-700 text-[12px] font-medium px-3 py-1">
@@ -68,7 +125,7 @@ const steps = [
         </div>
 
         <!-- Visual: a stylized round-stack card echoing the product. -->
-        <div class="mt-14 max-w-3xl">
+        <div aria-hidden="true" class="mt-14 max-w-3xl">
           <div class="rounded-xl border border-ink-200 bg-white shadow-card-hover overflow-hidden">
             <div class="flex items-center gap-2 px-4 py-2.5 border-b border-ink-100 bg-ink-50">
               <span class="w-2.5 h-2.5 rounded-full bg-ink-300" />
