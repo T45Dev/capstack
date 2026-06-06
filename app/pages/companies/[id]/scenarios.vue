@@ -363,7 +363,7 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
     <!-- Create modal — sequential ID is assigned automatically; description
          is the only user-facing label. -->
     <div v-if="showCreate" class="fixed inset-0 z-40 bg-ink-900/40 backdrop-blur-sm grid place-items-center p-4" @click.self="showCreate = false">
-      <div class="w-full max-w-lg rounded-lg border border-ink-300 bg-white p-5 shadow-card-hover">
+      <div class="w-full max-w-2xl rounded-lg border border-ink-300 bg-white p-5 shadow-card-hover">
         <h2 class="text-base font-semibold text-ink-900">New scenario · Scenario {{ (scenarios?.length || 0) + 1 }}</h2>
         <p class="text-xs text-ink-500 mt-1">Once saved, the previous scenario is locked — it stays available for reference but you can't change its inputs.</p>
         <div class="mt-4 grid grid-cols-2 gap-3">
