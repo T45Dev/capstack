@@ -210,7 +210,7 @@ function classBgFooter(kind: string): string {
     />
 
     <div v-else class="rounded-lg border border-ink-300 bg-white overflow-hidden shadow-card">
-      <div class="overflow-x-auto table-scroll">
+      <div class="overflow-x-auto table-scroll table-sticky-head">
         <table class="text-[13px] border-separate" :style="{ borderSpacing: 0 }">
           <thead class="bg-ink-100 text-[11px] uppercase tracking-wider text-ink-500 font-semibold">
             <tr>
