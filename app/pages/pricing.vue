@@ -2,12 +2,15 @@
 // Public pricing page. Tiers + comparison matrix come from the single source
 // of truth in ~/utils/pricing so they can't drift from the homepage teaser.
 import { Check, Minus, ArrowRight } from 'lucide-vue-next'
-import { PRICING_TIERS, COMPARE_GROUPS, type BillingPeriod, type CompareRow } from '~/utils/pricing'
+import { PRICING_TIERS, COMPARE_GROUPS, tierPrice, type BillingPeriod, type CompareRow } from '~/utils/pricing'
 
 definePageMeta({ layout: 'marketing' })
-useHead({
-  title: 'Pricing — CapStack',
-  meta: [{ name: 'description', content: 'Per-company pricing for CapStack. Start free, upgrade for Carta import and board-ready Excel exports.' }],
+
+const { origin, url } = useSeo({
+  path: '/pricing',
+  title: 'Pricing — CapStack Cap Table Software',
+  description: 'Simple per-company pricing for CapStack. Start free on one cap table; upgrade to Pro for Carta import and board-ready Excel exports, or Firm for unlimited multi-seat workspaces.',
+  type: 'product',
 })
 
 const period = ref<BillingPeriod>('annual')
@@ -24,6 +27,47 @@ const faqs = [
   { q: 'Is the Firm plan right for a fund or law firm?', a: 'Yes — unlimited workspaces, up to ten seats on shared workspaces, audit history on every figure, and priority onboarding. Need more than ten seats? Reach out and we\'ll size it with you.' },
 ]
 const openFaq = ref<number | null>(0)
+
+// Structured data: FAQPage (rich result for the questions below) + a Product
+// with the three tier offers, and the breadcrumb trail. Prices come from the
+// single source of truth so the markup can't drift from the cards.
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'FAQPage',
+      '@id': `${url}#faq`,
+      mainEntity: faqs.map(f => ({
+        '@type': 'Question',
+        name: f.q,
+        acceptedAnswer: { '@type': 'Answer', text: f.a },
+      })),
+    },
+    {
+      '@type': 'Product',
+      name: 'CapStack',
+      description: 'Cap table and dilution modelling software with Carta import and board-ready Excel export.',
+      brand: { '@type': 'Brand', name: 'CapStack' },
+      offers: PRICING_TIERS.map(t => ({
+        '@type': 'Offer',
+        name: `${t.name} plan`,
+        price: tierPrice(t, 'monthly') ?? 0,
+        priceCurrency: 'USD',
+        url,
+      })),
+    },
+    {
+      '@type': 'BreadcrumbList',
+      itemListElement: [
+        { '@type': 'ListItem', position: 1, name: 'Home', item: origin + '/' },
+        { '@type': 'ListItem', position: 2, name: 'Pricing', item: url },
+      ],
+    },
+  ],
+}
+useHead({
+  script: [{ type: 'application/ld+json', innerHTML: JSON.stringify(jsonLd) }],
+})
 </script>
 
 <template>
