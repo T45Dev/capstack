@@ -37,12 +37,13 @@ const visualsCollapsed = ref(false)
 // Collapse the whole top card (equation + visuals) down to a one-line summary
 // so the timeline tables get the viewport. Persists per the operator.
 const formulaCollapsed = ref(false)
-// Within the expanded equation, two sub-terms can each fold to a single
-// figure so the identity reads cleanly: the Issued breakdown (= Outstanding +
-// Exercised + Forfeited/Expired) and the Proposed + Ideas deductions. Default
-// collapsed to the single number; the breakdown is one click away. Persisted.
-const issuedCollapsed = ref(true)
-const extrasCollapsed = ref(true)
+// Within the expanded equation, two sub-terms can EACH be folded to a single
+// figure if the operator wants a cleaner identity: the Issued breakdown
+// (= Outstanding + Exercised + Forfeited/Expired) and the Proposed + Ideas
+// deductions. Default expanded (breakdown visible) — collapsing is opt-in via
+// the per-term chevron, and the choice persists.
+const issuedCollapsed = ref(false)
+const extrasCollapsed = ref(false)
 onMounted(() => {
   try { visualsCollapsed.value = localStorage.getItem('capstack:pool:visuals-collapsed') === 'true' } catch { /* ignore */ }
   try { formulaCollapsed.value = localStorage.getItem('capstack:pool:formula-collapsed') === 'true' } catch { /* ignore */ }
