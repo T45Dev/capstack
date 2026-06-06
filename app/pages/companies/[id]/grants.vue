@@ -275,7 +275,7 @@ const futureAvailable = computed(() => availableShares.value - totalProposed.val
 const outOfPool = computed(() => totalOutstanding.value + totalExercised.value)
 
 // Calc-tooltip strings for the pool summary stats.
-const fAvailable = computed(() => `Authorized ${fmtShares(poolAuthorized.value)} − outstanding ${fmtShares(totalOutstanding.value)} − exercised ${fmtShares(totalExercised.value)} = ${fmtShares(availableShares.value)}`)
+const fAvailable = computed(() => `Authorized ${fmtShares(poolAuthorized.value)} − issued ${fmtShares(totalIssued.value)} + forfeited/expired ${fmtShares(totalForfeitedOrExpired.value)} = ${fmtShares(availableShares.value)}`)
 const fFutureAvailable = computed(() => {
   const parts = [`Available ${fmtShares(availableShares.value)}`, `− proposed ${fmtShares(totalProposed.value)}`]
   if (includeIdeas.value) parts.push(`− ideas ${fmtShares(totalIdeas.value)}`)
@@ -897,12 +897,13 @@ const fieldLabels: Record<string, string> = {
       </template>
     </PageHeader>
 
-    <!-- Pool math, broken out so every term matches the Lifetime row:
-           Authorized − Outstanding − Exercised = Available
+    <!-- Pool identity, every term the same size and labeled:
+           Authorized − Issued + Forfeited/Expired = Available
            Available − Proposed [− Ideas] = Future Available
-         Forfeited/Expired returned to the pool (already netted out of
-         Outstanding), so they're shown as "returned", not subtracted.
-         Exercised converted to Common and does NOT return. -->
+         Issued is every option ever granted out of the pool
+         (Outstanding + Exercised + Forfeited/Expired); Forfeited/Expired
+         return to the pool so they're added back. Exercised converted to
+         Common and does NOT return. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-6 p-4">
       <div class="flex items-end justify-between gap-4 flex-wrap">
         <div v-if="formulaCollapsed" class="flex flex-wrap items-center gap-x-4 gap-y-1 num text-sm">
@@ -912,43 +913,40 @@ const fieldLabels: Record<string, string> = {
         </div>
         <div v-else class="flex flex-wrap items-end gap-x-3 gap-y-2 num">
         <div class="flex flex-col items-start">
-          <span class="text-[11px] uppercase tracking-wider text-ink-500">Authorized</span>
-          <span
-            class="text-4xl font-semibold leading-none"
-            :class="futureAvailable >= 0 ? 'text-ok' : 'text-red-700'"
-          >{{ fmtShares(poolAuthorized) }}</span>
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Authorized</span>
+          <span class="text-2xl font-semibold leading-none text-ink-800">{{ fmtShares(poolAuthorized) }}</span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">−</span>
         <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Outstanding</span>
-          <span class="text-2xl font-semibold">{{ fmtShares(totalOutstanding) }}</span>
+          <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Outstanding + Exercised + Forfeited/Expired — every option ever granted out of the pool.">Issued</span>
+          <span class="text-2xl font-semibold leading-none text-ink-800">{{ fmtShares(totalIssued) }}</span>
         </div>
-        <span class="text-2xl text-ink-400 pb-1">−</span>
+        <span class="text-2xl text-ink-400 pb-1">+</span>
         <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Exercised options converted to Common Stock — they left the pool and don't return.">Exercised</span>
-          <span class="text-2xl font-semibold" :class="totalExercised > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totalExercised) }}</span>
+          <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Forfeited or expired grants return to the pool.">Forfeited/Expired</span>
+          <span class="text-2xl font-semibold leading-none" :class="totalForfeitedOrExpired > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totalForfeitedOrExpired) }}</span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">=</span>
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Available</span>
-          <span class="text-2xl font-semibold" :class="availableShares < 0 ? 'text-red-700' : 'text-ok'"><UiCalcTip :formula="fAvailable">{{ fmtShares(availableShares) }}</UiCalcTip></span>
+          <span class="text-2xl font-semibold leading-none" :class="availableShares < 0 ? 'text-red-700' : 'text-ok'"><UiCalcTip :formula="fAvailable">{{ fmtShares(availableShares) }}</UiCalcTip></span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">−</span>
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Proposed</span>
-          <span class="text-2xl font-semibold text-warn">{{ fmtShares(totalProposed) }}</span>
+          <span class="text-2xl font-semibold leading-none text-warn">{{ fmtShares(totalProposed) }}</span>
         </div>
         <template v-if="includeIdeas">
           <span class="text-2xl text-ink-400 pb-1">−</span>
           <div class="flex flex-col items-start">
             <span class="text-[10px] uppercase tracking-wider text-ink-500">Ideas</span>
-            <span class="text-2xl font-semibold text-amber-600">{{ fmtShares(totalIdeas) }}</span>
+            <span class="text-2xl font-semibold leading-none text-amber-600">{{ fmtShares(totalIdeas) }}</span>
           </div>
         </template>
         <span class="text-2xl text-ink-400 pb-1">=</span>
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Future Available</span>
-          <span class="text-2xl font-semibold" :class="futureAvailable < 0 ? 'text-red-700' : 'text-ok'"><UiCalcTip :formula="fFutureAvailable">{{ fmtShares(futureAvailable) }}</UiCalcTip></span>
+          <span class="text-2xl font-semibold leading-none" :class="futureAvailable < 0 ? 'text-red-700' : 'text-ok'"><UiCalcTip :formula="fFutureAvailable">{{ fmtShares(futureAvailable) }}</UiCalcTip></span>
         </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
