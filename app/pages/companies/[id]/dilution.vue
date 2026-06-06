@@ -375,50 +375,37 @@ async function onImported() {
 
 <template>
   <div class="flex flex-col" style="height: calc(100vh - 3.5rem - 3rem)">
-    <!-- Framing banner -->
-    <div class="mb-3 shrink-0">
-      <div class="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 class="text-xl font-semibold tracking-tight text-ink-900 flex items-center gap-2"><GitCompare :size="20" /> Overall Dilution</h1>
-          <p class="text-sm text-ink-600 mt-1">
-            Comparing <span class="font-medium text-ink-800">pre-{{ currentRoundName }}</span> vs.
-            <span class="font-medium text-brand-700">post-{{ currentRoundName }}</span> —
-            same shares against a bigger post denominator, so holders dilute even with no new shares.
-            Δ = post − pre; red = dilution, green = growth.
-          </p>
-        </div>
-        <div class="flex items-center gap-2 flex-wrap">
-          <!-- Bulk-import preferred holders so they tie into the pre-side
-               of the dilution view (via stakeholders + holdings). -->
-          <button
-            type="button"
-            class="inline-flex items-center gap-1.5 text-xs text-ink-700 bg-white border border-ink-300 rounded-md px-3 py-1.5 hover:border-ink-400 hover:bg-ink-50"
-            @click="importOpen = true"
-          >
-            <Upload :size="12" />
-            Import preferred holders
-          </button>
-
-          <!-- Toggle: include preferred-only holders. When off, the
-               table hides rows whose shares come solely from preferred
-               holdings (no options). A linked alias whose primary
-               holds options stays visible regardless — see compute.post
-               for the hasOptions roll-up. -->
-          <label class="inline-flex items-center gap-2 cursor-pointer select-none text-xs text-ink-700 bg-white border border-ink-300 rounded-md px-3 py-1.5 hover:border-ink-400">
-            <input type="checkbox" v-model="includePreferred" class="brand-brand-500" />
-            <span>Include preferred holders</span>
-          </label>
-
-          <!-- Toggle: include proposed + idea grants in the post side.
-               Per the operator's spec, future not-yet-issued shares
-               should fall under "post" (never "pre"). -->
-          <label class="inline-flex items-center gap-2 cursor-pointer select-none text-xs text-ink-700 bg-white border border-ink-300 rounded-md px-3 py-1.5 hover:border-ink-400">
-            <input type="checkbox" v-model="includeFuture" class="brand-brand-500" />
-            <span>Include proposed + ideas in post</span>
-          </label>
-        </div>
-      </div>
-      <div v-if="currentRound" class="mt-2 text-[11px] num text-ink-500 flex flex-wrap items-center gap-x-3 gap-y-1">
+    <PageHeader class="shrink-0" :breadcrumb="[{ label: 'Cap-table model' }, { label: 'Overall Dilution' }]">
+      <template #title><GitCompare :size="20" /> Overall Dilution</template>
+      <template #description>
+        Comparing <span class="font-medium text-ink-800">pre-{{ currentRoundName }}</span> vs.
+        <span class="font-medium text-brand-700">post-{{ currentRoundName }}</span> —
+        same shares against a bigger post denominator, so holders dilute even with no new shares.
+        Δ = post − pre; red = dilution, green = growth.
+      </template>
+      <template #actions>
+        <!-- Bulk-import preferred holders so they tie into the pre-side. -->
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 text-xs text-ink-700 bg-white border border-ink-300 rounded-md px-3 py-1.5 hover:border-ink-400 hover:bg-ink-50"
+          @click="importOpen = true"
+        >
+          <Upload :size="12" />
+          Import preferred holders
+        </button>
+        <label class="inline-flex items-center gap-2 cursor-pointer select-none text-xs text-ink-700 bg-white border border-ink-300 rounded-md px-3 py-1.5 hover:border-ink-400">
+          <input type="checkbox" v-model="includePreferred" class="accent-brand" />
+          <span>Include preferred holders</span>
+        </label>
+        <label class="inline-flex items-center gap-2 cursor-pointer select-none text-xs text-ink-700 bg-white border border-ink-300 rounded-md px-3 py-1.5 hover:border-ink-400">
+          <input type="checkbox" v-model="includeFuture" class="accent-brand" />
+          <span>Include proposed + ideas in post</span>
+        </label>
+      </template>
+    </PageHeader>
+    <!-- Pre/Post FDS reference line. -->
+    <div class="shrink-0 -mt-3 mb-3">
+      <div v-if="currentRound" class="text-[11px] num text-ink-500 flex flex-wrap items-center gap-x-3 gap-y-1">
         <span>
           <span class="uppercase tracking-wider">Pre FDS</span>
           <template v-if="preFDS > 0">
@@ -439,7 +426,7 @@ async function onImported() {
           <span class="ml-1 text-ink-700">${{ pps.toFixed(5) }}</span>
         </span>
       </div>
-      <div v-else class="mt-2 text-[11px] text-amber-700">
+      <div v-else class="text-[11px] text-amber-700">
         No round to model yet — add one on the Financings page to compare pre vs post.
       </div>
     </div>
