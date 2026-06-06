@@ -11,7 +11,6 @@
 //                        cliff date).
 import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, ChevronRight, Lightbulb, TrendingUp, TrendingDown as ArrowDownIcon, X, UploadCloud, AlertTriangle, CheckCircle2 } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtUSD, fmtDate, fmtPricePerShare } from '~/utils/format'
-import { calcSum } from '~/utils/calc'
 import { authorizedPool } from '~/utils/capTable'
 
 const route = useRoute()
@@ -468,13 +467,12 @@ const totals = computed(() => {
   const ideaExercises = events.value.filter(e => isIdea(e.source) && e.type === 'exercise').reduce((a, e) => a + e.shares, 0)
   const floorShares = events.value.filter(e => isIdea(e.source) && e.type === 'floor').reduce((a, e) => Math.max(a, e.shares), 0)
   // Authorized stays CONSTANT. The headline tells a simple story:
-  //   Authorized − Issued + Forfeited/Expired = Available − Proposed − Ideas = Future Available
-  // Issued is every option ever granted out of the pool (Outstanding +
-  // Exercised + Forfeited/Expired); Forfeited/Expired DO return so they're
-  // added back. Exercised converted to Common and DOESN'T return.
-  // Algebraically: Authorized − issued + forfeited/expired
-  //   = Authorized − (outstanding + exercised + forf/exp) + forf/exp
-  //   = Authorized − outstanding − exercised = Authorized − outOfPool.
+  //   Authorized − Outstanding − Exercised = Available − Proposed − Ideas = Future Available
+  // Outstanding = options still held; Exercised converted to Common and left
+  // the pool for good. Forfeited/Expired is NOT a headline term: those shares
+  // are granted then returned, so they net to zero (they're already excluded
+  // from Outstanding). availableShares = Authorized − (outstanding + exercised)
+  //   = Authorized − outOfPool.
   const poolAuthorized = poolAuthorizedOriginal
   const outOfPool = outstandingShares + totalExercised
   const availableShares = poolAuthorized - outOfPool
@@ -483,10 +481,9 @@ const totals = computed(() => {
 })
 
 // Calc-tooltip strings for the pool summary stats.
-const fIssued = computed(() => calcSum([['Outstanding', totals.value.outstandingShares], ['Exercised', totals.value.totalExercised], ['Forfeited/Expired', totals.value.totalForfeitedOrExpired]]))
-const fAvailable = computed(() => `Authorized ${fmtShares(totals.value.poolAuthorized)} − issued ${fmtShares(totals.value.totalIssued)} + forfeited/expired ${fmtShares(totals.value.totalForfeitedOrExpired)} = ${fmtShares(totals.value.availableShares)}`)
+const fOutstanding = computed(() => `Issued ${fmtShares(totals.value.totalIssued)} − exercised ${fmtShares(totals.value.totalExercised)} − forfeited/expired ${fmtShares(totals.value.totalForfeitedOrExpired)} = ${fmtShares(totals.value.outstandingShares)}`)
+const fAvailable = computed(() => `Authorized ${fmtShares(totals.value.poolAuthorized)} − outstanding ${fmtShares(totals.value.outstandingShares)} − exercised ${fmtShares(totals.value.totalExercised)} = ${fmtShares(totals.value.availableShares)}`)
 const fFutureAvailable = computed(() => `Available ${fmtShares(totals.value.availableShares)} − proposed ${fmtShares(totals.value.proposedShares)} − ideas ${fmtShares(totals.value.ideaGrants)} = ${fmtShares(totals.value.futureAvailable)}`)
-const fForfExp = computed(() => calcSum([['Forfeited', totals.value.totalForfeited], ['Expired', totals.value.totalExpired]]))
 
 // ---- Idea modal ----
 const showModal = ref(false)
@@ -855,11 +852,12 @@ const chart = computed(() => {
     <!-- Overall heading: pool math as equation + lifetime row + pie/line
          charts side-by-side. Stays put while the timeline below scrolls. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-4 p-4 shrink-0">
-      <!-- Pool identity: Authorized − Issued + Forfeited/Expired = Available
-           − Proposed − Ideas = Future Available. Issued is every option ever
-           granted out of the pool; Forfeited/Expired return so they're added
-           back. Collapsible to a one-line summary so the timeline tables can
-           take the viewport. -->
+      <!-- Pool identity: Authorized − Outstanding − Exercised = Available
+           − Proposed − Ideas = Future Available. Outstanding = options still
+           held; Exercised = options that converted to Common and left the
+           pool. Forfeited/Expired is NOT a term here: those shares are granted
+           then returned to the pool, so they net to zero. Collapsible to a
+           one-line summary so the timeline tables can take the viewport. -->
       <div class="flex items-center justify-between gap-3">
         <div v-if="formulaCollapsed" class="flex flex-wrap items-center gap-x-4 gap-y-1 num text-sm">
           <span class="text-ink-700"><span class="text-[10px] uppercase tracking-wider text-ink-500 mr-1">Authorized</span>{{ fmtShares(totals.poolAuthorized) }}</span>
@@ -885,13 +883,13 @@ const chart = computed(() => {
         </div>
         <span class="text-2xl text-ink-400 pb-1">−</span>
         <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Outstanding + Exercised + Forfeited/Expired — every option ever granted out of the pool.">Issued</span>
-          <span class="text-2xl font-semibold leading-none text-ink-800"><UiCalcTip :formula="fIssued">{{ fmtShares(totals.totalIssued) }}</UiCalcTip></span>
+          <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Options currently held (granted, not yet exercised, forfeited, or expired).">Outstanding</span>
+          <span class="text-2xl font-semibold leading-none text-ink-800"><UiCalcTip :formula="fOutstanding">{{ fmtShares(totals.outstandingShares) }}</UiCalcTip></span>
         </div>
-        <span class="text-2xl text-ink-400 pb-1">+</span>
+        <span class="text-2xl text-ink-400 pb-1">−</span>
         <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Forfeited or expired grants return to the pool.">Forfeited/Expired</span>
-          <span class="text-2xl font-semibold leading-none" :class="totals.totalForfeitedOrExpired > 0 ? 'text-ink-800' : 'text-ink-400'"><UiCalcTip :formula="fForfExp">{{ fmtShares(totals.totalForfeitedOrExpired) }}</UiCalcTip></span>
+          <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Exercised options converted to Common stock and permanently left the pool.">Exercised</span>
+          <span class="text-2xl font-semibold leading-none" :class="totals.totalExercised > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totals.totalExercised) }}</span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">=</span>
         <div class="flex flex-col items-start">
