@@ -37,9 +37,17 @@ const visualsCollapsed = ref(false)
 // Collapse the whole top card (equation + visuals) down to a one-line summary
 // so the timeline tables get the viewport. Persists per the operator.
 const formulaCollapsed = ref(false)
+// Within the expanded equation, two sub-terms can each fold to a single
+// figure so the identity reads cleanly: the Issued breakdown (= Outstanding +
+// Exercised + Forfeited/Expired) and the Proposed + Ideas deductions. Default
+// collapsed to the single number; the breakdown is one click away. Persisted.
+const issuedCollapsed = ref(true)
+const extrasCollapsed = ref(true)
 onMounted(() => {
   try { visualsCollapsed.value = localStorage.getItem('capstack:pool:visuals-collapsed') === 'true' } catch { /* ignore */ }
   try { formulaCollapsed.value = localStorage.getItem('capstack:pool:formula-collapsed') === 'true' } catch { /* ignore */ }
+  try { const v = localStorage.getItem('capstack:pool:issued-collapsed'); if (v != null) issuedCollapsed.value = v === 'true' } catch { /* ignore */ }
+  try { const v = localStorage.getItem('capstack:pool:extras-collapsed'); if (v != null) extrasCollapsed.value = v === 'true' } catch { /* ignore */ }
 })
 watch(visualsCollapsed, (v) => {
   if (typeof window === 'undefined') return
@@ -48,6 +56,14 @@ watch(visualsCollapsed, (v) => {
 watch(formulaCollapsed, (v) => {
   if (typeof window === 'undefined') return
   try { localStorage.setItem('capstack:pool:formula-collapsed', String(v)) } catch { /* ignore */ }
+})
+watch(issuedCollapsed, (v) => {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem('capstack:pool:issued-collapsed', String(v)) } catch { /* ignore */ }
+})
+watch(extrasCollapsed, (v) => {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem('capstack:pool:extras-collapsed', String(v)) } catch { /* ignore */ }
 })
 
 // Sensible fallback date used when an event has no date in the source data.
@@ -484,6 +500,9 @@ const fOutstanding = computed(() => `Issued ${fmtShares(totals.value.totalIssued
 const fIssued = computed(() => `Outstanding ${fmtShares(totals.value.outstandingShares)} + exercised ${fmtShares(totals.value.totalExercised)} + forfeited/expired ${fmtShares(totals.value.totalForfeitedOrExpired)} = ${fmtShares(totals.value.totalIssued)}`)
 const fAvailable = computed(() => `Authorized ${fmtShares(totals.value.poolAuthorized)} − outstanding ${fmtShares(totals.value.outstandingShares)} − exercised ${fmtShares(totals.value.totalExercised)} = ${fmtShares(totals.value.availableShares)}`)
 const fFutureAvailable = computed(() => `Available ${fmtShares(totals.value.availableShares)} − proposed ${fmtShares(totals.value.proposedShares)} − ideas ${fmtShares(totals.value.ideaGrants)} = ${fmtShares(totals.value.futureAvailable)}`)
+// Combined Proposed + Ideas, shown when those two deductions are folded together.
+const proposedPlusIdeas = computed(() => totals.value.proposedShares + totals.value.ideaGrants)
+const fProposedIdeas = computed(() => `Proposed ${fmtShares(totals.value.proposedShares)} + ideas ${fmtShares(totals.value.ideaGrants)} = ${fmtShares(proposedPlusIdeas.value)}`)
 
 // ---- Idea modal ----
 const showModal = ref(false)
@@ -883,33 +902,47 @@ const chart = computed(() => {
           <span class="text-2xl font-semibold leading-none text-ink-800">{{ fmtShares(totals.poolAuthorized) }}</span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">−</span>
-        <!-- Issued, expanded into where every granted option went. The bordered
-             group equals Issued (Outstanding + Exercised + Forfeited/Expired).
-             Forfeited/Expired is then added back outside because those shares
-             return to the pool, so the two F/E terms cancel — leaving the true
-             reduction, Authorized − Outstanding − Exercised. -->
-        <div class="flex items-end gap-2 rounded-md border border-ink-200 bg-ink-50 px-2 py-1">
+        <!-- Issued — collapses to a single figure, or expands into where every
+             granted option went. The bordered group equals Issued (Outstanding
+             + Exercised + Forfeited/Expired). Forfeited/Expired is then added
+             back outside because those shares return to the pool, so the two
+             F/E terms cancel — leaving the true reduction,
+             Authorized − Outstanding − Exercised. -->
+        <div class="flex items-end gap-2 rounded-md px-2 py-1" :class="issuedCollapsed ? '' : 'border border-ink-200 bg-ink-50'">
           <div class="flex flex-col items-start">
-            <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Every option ever granted out of the pool.">Issued</span>
+            <span class="text-[10px] uppercase tracking-wider text-ink-500 inline-flex items-center gap-1" title="Every option ever granted out of the pool.">
+              Issued
+              <button
+                type="button"
+                class="text-ink-400 hover:text-ink-700"
+                :title="issuedCollapsed ? 'Show Issued breakdown' : 'Collapse Issued to one number'"
+                @click="issuedCollapsed = !issuedCollapsed"
+              >
+                <ChevronRight v-if="issuedCollapsed" :size="11" />
+                <ChevronDown v-else :size="11" />
+              </button>
+            </span>
             <span class="text-2xl font-semibold leading-none text-ink-800"><UiCalcTip :formula="fIssued">{{ fmtShares(totals.totalIssued) }}</UiCalcTip></span>
           </div>
-          <span class="text-2xl text-ink-400 pb-1">=</span>
-          <span class="text-2xl text-ink-400 pb-1">(</span>
-          <div class="flex flex-col items-start">
-            <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Options currently held (granted, not yet exercised, forfeited, or expired).">Outstanding</span>
-            <span class="text-2xl font-semibold leading-none text-ink-800"><UiCalcTip :formula="fOutstanding">{{ fmtShares(totals.outstandingShares) }}</UiCalcTip></span>
-          </div>
-          <span class="text-2xl text-ink-400 pb-1">+</span>
-          <div class="flex flex-col items-start">
-            <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Exercised options converted to Common stock and permanently left the pool.">Exercised</span>
-            <span class="text-2xl font-semibold leading-none" :class="totals.totalExercised > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totals.totalExercised) }}</span>
-          </div>
-          <span class="text-2xl text-ink-400 pb-1">+</span>
-          <div class="flex flex-col items-start">
-            <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Forfeited or expired grants — part of Issued, then returned to the pool below.">Forfeited/Expired</span>
-            <span class="text-2xl font-semibold leading-none" :class="totals.totalForfeitedOrExpired > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totals.totalForfeitedOrExpired) }}</span>
-          </div>
-          <span class="text-2xl text-ink-400 pb-1">)</span>
+          <template v-if="!issuedCollapsed">
+            <span class="text-2xl text-ink-400 pb-1">=</span>
+            <span class="text-2xl text-ink-400 pb-1">(</span>
+            <div class="flex flex-col items-start">
+              <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Options currently held (granted, not yet exercised, forfeited, or expired).">Outstanding</span>
+              <span class="text-2xl font-semibold leading-none text-ink-800"><UiCalcTip :formula="fOutstanding">{{ fmtShares(totals.outstandingShares) }}</UiCalcTip></span>
+            </div>
+            <span class="text-2xl text-ink-400 pb-1">+</span>
+            <div class="flex flex-col items-start">
+              <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Exercised options converted to Common stock and permanently left the pool.">Exercised</span>
+              <span class="text-2xl font-semibold leading-none" :class="totals.totalExercised > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totals.totalExercised) }}</span>
+            </div>
+            <span class="text-2xl text-ink-400 pb-1">+</span>
+            <div class="flex flex-col items-start">
+              <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Forfeited or expired grants — part of Issued, then returned to the pool below.">Forfeited/Expired</span>
+              <span class="text-2xl font-semibold leading-none" :class="totals.totalForfeitedOrExpired > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totals.totalForfeitedOrExpired) }}</span>
+            </div>
+            <span class="text-2xl text-ink-400 pb-1">)</span>
+          </template>
         </div>
         <span class="text-2xl text-ink-400 pb-1">+</span>
         <div class="flex flex-col items-start">
@@ -921,16 +954,47 @@ const chart = computed(() => {
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Available</span>
           <span class="text-2xl font-semibold leading-none" :class="totals.availableShares < 0 ? 'text-red-700' : 'text-ok'"><UiCalcTip :formula="fAvailable">{{ fmtShares(totals.availableShares) }}</UiCalcTip></span>
         </div>
-        <span class="text-2xl text-ink-400 pb-1">−</span>
-        <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Proposed</span>
-          <span class="text-2xl font-semibold leading-none text-warn">{{ fmtShares(totals.proposedShares) }}</span>
-        </div>
-        <span class="text-2xl text-ink-400 pb-1">−</span>
-        <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Ideas</span>
-          <span class="text-2xl font-semibold leading-none text-amber-500">{{ fmtShares(totals.ideaGrants) }}</span>
-        </div>
+        <!-- Proposed and Ideas — the two future deductions. Collapse to a
+             single "Proposed + Ideas" figure, or expand to the two terms. -->
+        <template v-if="extrasCollapsed">
+          <span class="text-2xl text-ink-400 pb-1">−</span>
+          <div class="flex flex-col items-start">
+            <span class="text-[10px] uppercase tracking-wider text-ink-500 inline-flex items-center gap-1">
+              Proposed + Ideas
+              <button
+                type="button"
+                class="text-ink-400 hover:text-ink-700"
+                title="Show Proposed and Ideas separately"
+                @click="extrasCollapsed = false"
+              >
+                <ChevronRight :size="11" />
+              </button>
+            </span>
+            <span class="text-2xl font-semibold leading-none text-warn"><UiCalcTip :formula="fProposedIdeas">{{ fmtShares(proposedPlusIdeas) }}</UiCalcTip></span>
+          </div>
+        </template>
+        <template v-else>
+          <span class="text-2xl text-ink-400 pb-1">−</span>
+          <div class="flex flex-col items-start">
+            <span class="text-[10px] uppercase tracking-wider text-ink-500 inline-flex items-center gap-1">
+              Proposed
+              <button
+                type="button"
+                class="text-ink-400 hover:text-ink-700"
+                title="Combine Proposed and Ideas into one number"
+                @click="extrasCollapsed = true"
+              >
+                <ChevronDown :size="11" />
+              </button>
+            </span>
+            <span class="text-2xl font-semibold leading-none text-warn">{{ fmtShares(totals.proposedShares) }}</span>
+          </div>
+          <span class="text-2xl text-ink-400 pb-1">−</span>
+          <div class="flex flex-col items-start">
+            <span class="text-[10px] uppercase tracking-wider text-ink-500">Ideas</span>
+            <span class="text-2xl font-semibold leading-none text-amber-500">{{ fmtShares(totals.ideaGrants) }}</span>
+          </div>
+        </template>
         <span class="text-2xl text-ink-400 pb-1">=</span>
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Future Available</span>

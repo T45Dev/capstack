@@ -110,7 +110,7 @@ function exportCsv() { /* No-op on the simplified layout. Kept on the page heade
          side-by-side on wide screens, stacked on narrow. Once the Round
          history has rows it takes the left column (replacing the typed
          Previous-Round card). -->
-    <div v-show="activeTab === 'financings'" class="grid gap-4 items-start lg:grid-cols-2">
+    <div v-show="activeTab === 'financings'" class="grid gap-4 items-start lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
       <FdsTimelineCard v-if="hasTimeline" :company-id="id" @changed="refreshMilestones" />
       <PreviousRoundCard v-else :company-id="id" @update:saving-count="(n: number) => prevSaving = n" />
       <OpenRoundCard :company-id="id" @update:saving-count="(n: number) => openSaving = n" @refreshed="() => { refreshRoundSummary(); refreshMilestones() }" />
