@@ -275,6 +275,7 @@ const futureAvailable = computed(() => availableShares.value - totalProposed.val
 const outOfPool = computed(() => totalOutstanding.value + totalExercised.value)
 
 // Calc-tooltip strings for the pool summary stats.
+const fIssued = computed(() => `Outstanding ${fmtShares(totalOutstanding.value)} + exercised ${fmtShares(totalExercised.value)} + forfeited/expired ${fmtShares(totalForfeitedOrExpired.value)} = ${fmtShares(totalIssued.value)}`)
 const fAvailable = computed(() => `Authorized ${fmtShares(poolAuthorized.value)} − outstanding ${fmtShares(totalOutstanding.value)} − exercised ${fmtShares(totalExercised.value)} = ${fmtShares(availableShares.value)}`)
 const fFutureAvailable = computed(() => {
   const parts = [`Available ${fmtShares(availableShares.value)}`, `− proposed ${fmtShares(totalProposed.value)}`]
@@ -896,13 +897,13 @@ const fieldLabels: Record<string, string> = {
       </template>
     </PageHeader>
 
-    <!-- Pool identity, every term the same size and labeled:
-           Authorized − Outstanding − Exercised = Available
-           Available − Proposed [− Ideas] = Future Available
-         Outstanding = options currently held; Exercised = options that
-         converted to Common and permanently left the pool. Forfeited/Expired
-         is NOT shown: those shares are granted then returned to the pool, so
-         they net to zero in this identity. -->
+    <!-- Pool identity, every term the same size and labeled. Issued is shown
+         expanded into its components, then Forfeited/Expired is added back
+         because those shares return to the pool (the two F/E terms cancel):
+           Authorized − Issued(Outstanding + Exercised + Forfeited/Expired)
+             + Forfeited/Expired = Available − Proposed [− Ideas] = Future Available
+         Net effect = Authorized − Outstanding − Exercised. Exercised converted
+         to Common and does NOT return. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-6 p-4">
       <div class="flex items-end justify-between gap-4 flex-wrap">
         <div v-if="formulaCollapsed" class="flex flex-wrap items-center gap-x-4 gap-y-1 num text-sm">
@@ -916,14 +917,38 @@ const fieldLabels: Record<string, string> = {
           <span class="text-2xl font-semibold leading-none text-ink-800">{{ fmtShares(poolAuthorized) }}</span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">−</span>
-        <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Options currently held (granted, not yet exercised, forfeited, or expired).">Outstanding</span>
-          <span class="text-2xl font-semibold leading-none text-ink-800">{{ fmtShares(totalOutstanding) }}</span>
+        <!-- Issued, expanded into where every granted option went. The bordered
+             group equals Issued (Outstanding + Exercised + Forfeited/Expired).
+             Forfeited/Expired is then added back outside the group because those
+             shares return to the pool, so the two F/E terms cancel — leaving the
+             true reduction, Authorized − Outstanding − Exercised. -->
+        <div class="flex items-end gap-2 rounded-md border border-ink-200 bg-ink-50 px-2 py-1">
+          <div class="flex flex-col items-start">
+            <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Every option ever granted out of the pool.">Issued</span>
+            <span class="text-2xl font-semibold leading-none text-ink-800"><UiCalcTip :formula="fIssued">{{ fmtShares(totalIssued) }}</UiCalcTip></span>
+          </div>
+          <span class="text-2xl text-ink-400 pb-1">=</span>
+          <span class="text-2xl text-ink-400 pb-1">(</span>
+          <div class="flex flex-col items-start">
+            <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Options currently held (granted, not yet exercised, forfeited, or expired).">Outstanding</span>
+            <span class="text-2xl font-semibold leading-none text-ink-800">{{ fmtShares(totalOutstanding) }}</span>
+          </div>
+          <span class="text-2xl text-ink-400 pb-1">+</span>
+          <div class="flex flex-col items-start">
+            <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Exercised options converted to Common stock and permanently left the pool.">Exercised</span>
+            <span class="text-2xl font-semibold leading-none" :class="totalExercised > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totalExercised) }}</span>
+          </div>
+          <span class="text-2xl text-ink-400 pb-1">+</span>
+          <div class="flex flex-col items-start">
+            <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Forfeited or expired grants — part of Issued, then returned to the pool below.">Forfeited/Expired</span>
+            <span class="text-2xl font-semibold leading-none" :class="totalForfeitedOrExpired > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totalForfeitedOrExpired) }}</span>
+          </div>
+          <span class="text-2xl text-ink-400 pb-1">)</span>
         </div>
-        <span class="text-2xl text-ink-400 pb-1">−</span>
+        <span class="text-2xl text-ink-400 pb-1">+</span>
         <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Exercised options converted to Common stock and permanently left the pool.">Exercised</span>
-          <span class="text-2xl font-semibold leading-none" :class="totalExercised > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totalExercised) }}</span>
+          <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Forfeited/expired shares return to the pool, cancelling their inclusion in Issued.">Forfeited/Expired</span>
+          <span class="text-2xl font-semibold leading-none" :class="totalForfeitedOrExpired > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totalForfeitedOrExpired) }}</span>
         </div>
         <span class="text-2xl text-ink-400 pb-1">=</span>
         <div class="flex flex-col items-start">
