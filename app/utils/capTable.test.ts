@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest'
 // Import the canonical shared module directly (vitest resolves the relative
 // path without the Nuxt `~~` alias that the re-export in ./capTable uses).
-import { newSharesIssued, openRoundPostFds, authorizedPool, availablePool } from '../../shared/capTableModel'
+import { newSharesIssued, openRoundPostFds, authorizedPool, availablePool, poolEquation } from '../../shared/capTableModel'
 
 describe('newSharesIssued', () => {
   it('floors new money ÷ share price', () => {
@@ -77,5 +77,37 @@ describe('availablePool', () => {
   })
   it('can go negative when over-allocated', () => {
     expect(availablePool(1_000_000, { outstanding: 1_200_000, exercised: 100_000 })).toBe(-300_000)
+  })
+})
+
+describe('poolEquation', () => {
+  const counts = {
+    authorized: 5_000_000,
+    outstanding: 1_200_000,
+    exercised: 300_000,
+    forfeitedOrExpired: 200_000,
+    proposed: 400_000,
+    ideas: 150_000,
+  }
+  it('derives issued, available and future available from the identity', () => {
+    const f = poolEquation(counts)
+    expect(f.issued).toBe(1_700_000)            // 1.2M + 300k + 200k
+    expect(f.available).toBe(3_500_000)          // 5M − 1.2M − 300k
+    expect(f.futureAvailable).toBe(2_950_000)    // 3.5M − 400k − 150k (ideas in)
+  })
+  it('mirrors availablePool for the available figure', () => {
+    const f = poolEquation(counts)
+    expect(f.available).toBe(availablePool(counts.authorized, { outstanding: counts.outstanding, exercised: counts.exercised }))
+  })
+  it('excludes ideas from future available when includeIdeas is false', () => {
+    const f = poolEquation({ ...counts, includeIdeas: false })
+    expect(f.futureAvailable).toBe(3_100_000)    // 3.5M − 400k, ideas not deducted
+    expect(f.ideas).toBe(150_000)                // still reported for display
+  })
+  it('treats missing parts as zero', () => {
+    const f = poolEquation({ authorized: 1000, outstanding: 0, exercised: 0, forfeitedOrExpired: 0, proposed: 0 })
+    expect(f.issued).toBe(0)
+    expect(f.available).toBe(1000)
+    expect(f.futureAvailable).toBe(1000)
   })
 })
