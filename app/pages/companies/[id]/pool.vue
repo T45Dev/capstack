@@ -897,19 +897,24 @@ const chart = computed(() => {
         </button>
       </div>
       <template v-if="!formulaCollapsed">
-      <div class="flex flex-wrap items-end gap-3 text-ink-900 num mt-2">
-        <div class="flex flex-col items-start">
+      <!-- Every term is a chip with identical vertical metrics (transparent
+           border + px-2 py-1); the operator signs carry the same py/border.
+           With items-end that lines up every figure on one baseline, and the
+           Issued box just swaps its transparent border for a visible one when
+           expanded — so collapsing/expanding it never shifts the row. -->
+      <div class="flex flex-wrap items-end gap-1.5 text-ink-900 num mt-2">
+        <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Authorized</span>
           <span class="text-2xl font-semibold leading-none text-ink-800">{{ fmtShares(totals.poolAuthorized) }}</span>
         </div>
-        <span class="text-2xl text-ink-400 pb-1">−</span>
+        <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">−</span>
         <!-- Issued — collapses to a single figure, or expands into where every
              granted option went. The bordered group equals Issued (Outstanding
              + Exercised + Forfeited/Expired). Forfeited/Expired is then added
              back outside because those shares return to the pool, so the two
              F/E terms cancel — leaving the true reduction,
              Authorized − Outstanding − Exercised. -->
-        <div class="flex items-end gap-2 rounded-md px-2 py-1" :class="issuedCollapsed ? '' : 'border border-ink-200 bg-ink-50'">
+        <div class="flex items-end gap-2 rounded-md border px-2 py-1" :class="issuedCollapsed ? 'border-transparent' : 'border-ink-200 bg-ink-50'">
           <div class="flex flex-col items-start">
             <span class="text-[10px] uppercase tracking-wider text-ink-500 inline-flex items-center gap-1" title="Every option ever granted out of the pool.">
               Issued
@@ -926,40 +931,40 @@ const chart = computed(() => {
             <span class="text-2xl font-semibold leading-none text-ink-800"><UiCalcTip :formula="fIssued">{{ fmtShares(totals.totalIssued) }}</UiCalcTip></span>
           </div>
           <template v-if="!issuedCollapsed">
-            <span class="text-2xl text-ink-400 pb-1">=</span>
-            <span class="text-2xl text-ink-400 pb-1">(</span>
+            <span class="text-2xl text-ink-400 leading-none">=</span>
+            <span class="text-2xl text-ink-400 leading-none">(</span>
             <div class="flex flex-col items-start">
               <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Options currently held (granted, not yet exercised, forfeited, or expired).">Outstanding</span>
               <span class="text-2xl font-semibold leading-none text-ink-800"><UiCalcTip :formula="fOutstanding">{{ fmtShares(totals.outstandingShares) }}</UiCalcTip></span>
             </div>
-            <span class="text-2xl text-ink-400 pb-1">+</span>
+            <span class="text-2xl text-ink-400 leading-none">+</span>
             <div class="flex flex-col items-start">
               <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Exercised options converted to Common stock and permanently left the pool.">Exercised</span>
               <span class="text-2xl font-semibold leading-none" :class="totals.totalExercised > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totals.totalExercised) }}</span>
             </div>
-            <span class="text-2xl text-ink-400 pb-1">+</span>
+            <span class="text-2xl text-ink-400 leading-none">+</span>
             <div class="flex flex-col items-start">
               <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Forfeited or expired grants — part of Issued, then returned to the pool below.">Forfeited/Expired</span>
               <span class="text-2xl font-semibold leading-none" :class="totals.totalForfeitedOrExpired > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totals.totalForfeitedOrExpired) }}</span>
             </div>
-            <span class="text-2xl text-ink-400 pb-1">)</span>
+            <span class="text-2xl text-ink-400 leading-none">)</span>
           </template>
         </div>
-        <span class="text-2xl text-ink-400 pb-1">+</span>
-        <div class="flex flex-col items-start">
+        <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">+</span>
+        <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
           <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Forfeited/expired shares return to the pool, cancelling their inclusion in Issued.">Forfeited/Expired</span>
           <span class="text-2xl font-semibold leading-none" :class="totals.totalForfeitedOrExpired > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totals.totalForfeitedOrExpired) }}</span>
         </div>
-        <span class="text-2xl text-ink-400 pb-1">=</span>
-        <div class="flex flex-col items-start">
+        <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">=</span>
+        <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Available</span>
           <span class="text-2xl font-semibold leading-none" :class="totals.availableShares < 0 ? 'text-red-700' : 'text-ok'"><UiCalcTip :formula="fAvailable">{{ fmtShares(totals.availableShares) }}</UiCalcTip></span>
         </div>
         <!-- Proposed and Ideas — the two future deductions. Collapse to a
              single "Proposed + Ideas" figure, or expand to the two terms. -->
         <template v-if="extrasCollapsed">
-          <span class="text-2xl text-ink-400 pb-1">−</span>
-          <div class="flex flex-col items-start">
+          <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">−</span>
+          <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
             <span class="text-[10px] uppercase tracking-wider text-ink-500 inline-flex items-center gap-1">
               Proposed + Ideas
               <button
@@ -975,8 +980,8 @@ const chart = computed(() => {
           </div>
         </template>
         <template v-else>
-          <span class="text-2xl text-ink-400 pb-1">−</span>
-          <div class="flex flex-col items-start">
+          <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">−</span>
+          <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
             <span class="text-[10px] uppercase tracking-wider text-ink-500 inline-flex items-center gap-1">
               Proposed
               <button
@@ -990,14 +995,14 @@ const chart = computed(() => {
             </span>
             <span class="text-2xl font-semibold leading-none text-warn">{{ fmtShares(totals.proposedShares) }}</span>
           </div>
-          <span class="text-2xl text-ink-400 pb-1">−</span>
-          <div class="flex flex-col items-start">
+          <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">−</span>
+          <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
             <span class="text-[10px] uppercase tracking-wider text-ink-500">Ideas</span>
             <span class="text-2xl font-semibold leading-none text-amber-500">{{ fmtShares(totals.ideaGrants) }}</span>
           </div>
         </template>
-        <span class="text-2xl text-ink-400 pb-1">=</span>
-        <div class="flex flex-col items-start">
+        <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">=</span>
+        <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
           <span class="text-[10px] uppercase tracking-wider text-ink-500">Future Available</span>
           <span class="text-2xl font-semibold leading-none" :class="totals.futureAvailable < 0 ? 'text-red-700' : 'text-ok'"><UiCalcTip :formula="fFutureAvailable">{{ fmtShares(totals.futureAvailable) }}</UiCalcTip></span>
         </div>
