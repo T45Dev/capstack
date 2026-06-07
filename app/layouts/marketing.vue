@@ -18,9 +18,8 @@ const year = new Date().getFullYear()
   <div class="min-h-screen bg-white text-ink-900 flex flex-col">
     <header class="h-14 border-b border-ink-200/70 bg-white/80 backdrop-blur sticky top-0 z-30">
       <div class="max-w-6xl mx-auto h-full px-5 flex items-center gap-6">
-        <NuxtLink to="/" class="flex items-center gap-2.5 shrink-0">
-          <Brandmark :size="28" :open="true" />
-          <span class="text-[15px] font-bold tracking-tight text-ink-900">Pariva</span>
+        <NuxtLink to="/" class="flex items-center shrink-0">
+          <img src="/pariva-logo.svg" alt="Pariva" width="119" height="28" class="h-7 w-auto" />
         </NuxtLink>
 
         <nav class="hidden sm:flex items-center gap-1 ml-2">
@@ -52,10 +51,9 @@ const year = new Date().getFullYear()
 
     <footer class="border-t border-ink-200 bg-ink-50">
       <div class="max-w-6xl mx-auto px-5 py-10 flex flex-col sm:flex-row gap-6 sm:items-center justify-between">
-        <div class="flex items-center gap-2.5">
-          <Brandmark :size="24" :open="true" />
-          <span class="text-[13px] font-semibold tracking-tight text-ink-900">Pariva</span>
-          <span class="text-[12px] text-ink-400 ml-2">Cap tables, financings & board-ready exports.</span>
+        <div class="flex items-center gap-3">
+          <img src="/pariva-logo.svg" alt="Pariva" width="85" height="20" class="h-5 w-auto" />
+          <span class="text-[12px] text-ink-400">Cap tables, financings & board-ready exports.</span>
         </div>
         <div class="flex items-center gap-5 text-[13px] text-ink-500">
           <NuxtLink to="/#features" class="hover:text-ink-900">Features</NuxtLink>
