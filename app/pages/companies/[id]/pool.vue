@@ -11,7 +11,7 @@
 //                        cliff date).
 import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, ChevronRight, Lightbulb, TrendingUp, TrendingDown as ArrowDownIcon, X, UploadCloud, AlertTriangle, CheckCircle2 } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtUSD, fmtDate, fmtPricePerShare } from '~/utils/format'
-import { authorizedPool } from '~/utils/capTable'
+import { authorizedPool, poolEquation } from '~/utils/capTable'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -37,18 +37,9 @@ const visualsCollapsed = ref(false)
 // Collapse the whole top card (equation + visuals) down to a one-line summary
 // so the timeline tables get the viewport. Persists per the operator.
 const formulaCollapsed = ref(false)
-// Within the expanded equation, two sub-terms can EACH be folded to a single
-// figure if the operator wants a cleaner identity: the Issued breakdown
-// (= Outstanding + Exercised + Forfeited/Expired) and the Proposed + Ideas
-// deductions. Default expanded (breakdown visible) — collapsing is opt-in via
-// the per-term chevron, and the choice persists.
-const issuedCollapsed = ref(false)
-const extrasCollapsed = ref(false)
 onMounted(() => {
   try { visualsCollapsed.value = localStorage.getItem('capstack:pool:visuals-collapsed') === 'true' } catch { /* ignore */ }
   try { formulaCollapsed.value = localStorage.getItem('capstack:pool:formula-collapsed') === 'true' } catch { /* ignore */ }
-  try { const v = localStorage.getItem('capstack:pool:issued-collapsed'); if (v != null) issuedCollapsed.value = v === 'true' } catch { /* ignore */ }
-  try { const v = localStorage.getItem('capstack:pool:extras-collapsed'); if (v != null) extrasCollapsed.value = v === 'true' } catch { /* ignore */ }
 })
 watch(visualsCollapsed, (v) => {
   if (typeof window === 'undefined') return
@@ -57,14 +48,6 @@ watch(visualsCollapsed, (v) => {
 watch(formulaCollapsed, (v) => {
   if (typeof window === 'undefined') return
   try { localStorage.setItem('capstack:pool:formula-collapsed', String(v)) } catch { /* ignore */ }
-})
-watch(issuedCollapsed, (v) => {
-  if (typeof window === 'undefined') return
-  try { localStorage.setItem('capstack:pool:issued-collapsed', String(v)) } catch { /* ignore */ }
-})
-watch(extrasCollapsed, (v) => {
-  if (typeof window === 'undefined') return
-  try { localStorage.setItem('capstack:pool:extras-collapsed', String(v)) } catch { /* ignore */ }
 })
 
 // Sensible fallback date used when an event has no date in the source data.
@@ -489,21 +472,30 @@ const totals = computed(() => {
   //     = Available − Proposed − Ideas = Future Available
   // Net effect = Authorized − (outstanding + exercised) = Authorized − outOfPool.
   // Exercised converted to Common and DOESN'T return.
-  const poolAuthorized = poolAuthorizedOriginal
+  // Derive Issued / Available / Future Available through the shared identity so
+  // this headline can't drift from the Option Grants page (decision #11).
+  const eq = poolEquation({
+    authorized: poolAuthorizedOriginal,
+    outstanding: outstandingShares,
+    exercised: totalExercised,
+    forfeitedOrExpired: totalForfeitedOrExpired,
+    proposed: proposedShares,
+    ideas: ideaGrants,
+  })
   const outOfPool = outstandingShares + totalExercised
-  const availableShares = poolAuthorized - outOfPool
-  const futureAvailable = availableShares - proposedShares - ideaGrants
-  return { poolAuthorized, outstandingShares, outOfPool, proposedShares, ideaGrants, ideaTopups, ideaForfeits, ideaExercises, floorShares, availableShares, futureAvailable, totalExercised, totalForfeited, totalExpired, totalForfeitedOrExpired, totalIssued }
+  return { poolAuthorized: eq.authorized, outstandingShares, outOfPool, proposedShares, ideaGrants, ideaTopups, ideaForfeits, ideaExercises, floorShares, availableShares: eq.available, futureAvailable: eq.futureAvailable, totalExercised, totalForfeited, totalExpired, totalForfeitedOrExpired, totalIssued: eq.issued }
 })
 
-// Calc-tooltip strings for the pool summary stats.
-const fOutstanding = computed(() => `Issued ${fmtShares(totals.value.totalIssued)} − exercised ${fmtShares(totals.value.totalExercised)} − forfeited/expired ${fmtShares(totals.value.totalForfeitedOrExpired)} = ${fmtShares(totals.value.outstandingShares)}`)
-const fIssued = computed(() => `Outstanding ${fmtShares(totals.value.outstandingShares)} + exercised ${fmtShares(totals.value.totalExercised)} + forfeited/expired ${fmtShares(totals.value.totalForfeitedOrExpired)} = ${fmtShares(totals.value.totalIssued)}`)
-const fAvailable = computed(() => `Authorized ${fmtShares(totals.value.poolAuthorized)} − outstanding ${fmtShares(totals.value.outstandingShares)} − exercised ${fmtShares(totals.value.totalExercised)} = ${fmtShares(totals.value.availableShares)}`)
-const fFutureAvailable = computed(() => `Available ${fmtShares(totals.value.availableShares)} − proposed ${fmtShares(totals.value.proposedShares)} − ideas ${fmtShares(totals.value.ideaGrants)} = ${fmtShares(totals.value.futureAvailable)}`)
-// Combined Proposed + Ideas, shown when those two deductions are folded together.
-const proposedPlusIdeas = computed(() => totals.value.proposedShares + totals.value.ideaGrants)
-const fProposedIdeas = computed(() => `Proposed ${fmtShares(totals.value.proposedShares)} + ideas ${fmtShares(totals.value.ideaGrants)} = ${fmtShares(proposedPlusIdeas.value)}`)
+// Figures the shared OptionPoolEquation component renders. Ideas always count
+// on this page (the Grants page gates them behind a toggle).
+const poolFigures = computed(() => poolEquation({
+  authorized: totals.value.poolAuthorized,
+  outstanding: totals.value.outstandingShares,
+  exercised: totals.value.totalExercised,
+  forfeitedOrExpired: totals.value.totalForfeitedOrExpired,
+  proposed: totals.value.proposedShares,
+  ideas: totals.value.ideaGrants,
+}))
 
 // ---- Idea modal ----
 const showModal = ref(false)
@@ -897,116 +889,7 @@ const chart = computed(() => {
         </button>
       </div>
       <template v-if="!formulaCollapsed">
-      <!-- Every term is a chip with identical vertical metrics (transparent
-           border + px-2 py-1); the operator signs carry the same py/border.
-           With items-end that lines up every figure on one baseline, and the
-           Issued box just swaps its transparent border for a visible one when
-           expanded — so collapsing/expanding it never shifts the row. -->
-      <div class="flex flex-wrap items-end gap-1.5 text-ink-900 num mt-2">
-        <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Authorized</span>
-          <span class="text-2xl font-semibold leading-none text-ink-800">{{ fmtShares(totals.poolAuthorized) }}</span>
-        </div>
-        <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">−</span>
-        <!-- Issued — collapses to a single figure, or expands into where every
-             granted option went. The bordered group equals Issued (Outstanding
-             + Exercised + Forfeited/Expired). Forfeited/Expired is then added
-             back outside because those shares return to the pool, so the two
-             F/E terms cancel — leaving the true reduction,
-             Authorized − Outstanding − Exercised. -->
-        <div class="flex items-end gap-2 rounded-md border px-2 py-1" :class="issuedCollapsed ? 'border-transparent' : 'border-ink-200 bg-ink-50'">
-          <div class="flex flex-col items-start">
-            <span class="text-[10px] uppercase tracking-wider text-ink-500 inline-flex items-center gap-1" title="Every option ever granted out of the pool.">
-              Issued
-              <button
-                type="button"
-                class="text-ink-400 hover:text-ink-700"
-                :title="issuedCollapsed ? 'Show Issued breakdown' : 'Collapse Issued to one number'"
-                @click="issuedCollapsed = !issuedCollapsed"
-              >
-                <ChevronRight v-if="issuedCollapsed" :size="11" />
-                <ChevronDown v-else :size="11" />
-              </button>
-            </span>
-            <span class="text-2xl font-semibold leading-none text-ink-800"><UiCalcTip :formula="fIssued">{{ fmtShares(totals.totalIssued) }}</UiCalcTip></span>
-          </div>
-          <template v-if="!issuedCollapsed">
-            <span class="text-2xl text-ink-400 leading-none">=</span>
-            <span class="text-2xl text-ink-400 leading-none">(</span>
-            <div class="flex flex-col items-start">
-              <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Options currently held (granted, not yet exercised, forfeited, or expired).">Outstanding</span>
-              <span class="text-2xl font-semibold leading-none text-ink-800"><UiCalcTip :formula="fOutstanding">{{ fmtShares(totals.outstandingShares) }}</UiCalcTip></span>
-            </div>
-            <span class="text-2xl text-ink-400 leading-none">+</span>
-            <div class="flex flex-col items-start">
-              <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Exercised options converted to Common stock and permanently left the pool.">Exercised</span>
-              <span class="text-2xl font-semibold leading-none" :class="totals.totalExercised > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totals.totalExercised) }}</span>
-            </div>
-            <span class="text-2xl text-ink-400 leading-none">+</span>
-            <div class="flex flex-col items-start">
-              <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Forfeited or expired grants — part of Issued, then returned to the pool below.">Forfeited/Expired</span>
-              <span class="text-2xl font-semibold leading-none" :class="totals.totalForfeitedOrExpired > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totals.totalForfeitedOrExpired) }}</span>
-            </div>
-            <span class="text-2xl text-ink-400 leading-none">)</span>
-          </template>
-        </div>
-        <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">+</span>
-        <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Forfeited/expired shares return to the pool, cancelling their inclusion in Issued.">Forfeited/Expired</span>
-          <span class="text-2xl font-semibold leading-none" :class="totals.totalForfeitedOrExpired > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totals.totalForfeitedOrExpired) }}</span>
-        </div>
-        <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">=</span>
-        <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Available</span>
-          <span class="text-2xl font-semibold leading-none" :class="totals.availableShares < 0 ? 'text-red-700' : 'text-ok'"><UiCalcTip :formula="fAvailable">{{ fmtShares(totals.availableShares) }}</UiCalcTip></span>
-        </div>
-        <!-- Proposed and Ideas — the two future deductions. Collapse to a
-             single "Proposed + Ideas" figure, or expand to the two terms. -->
-        <template v-if="extrasCollapsed">
-          <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">−</span>
-          <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
-            <span class="text-[10px] uppercase tracking-wider text-ink-500 inline-flex items-center gap-1">
-              Proposed + Ideas
-              <button
-                type="button"
-                class="text-ink-400 hover:text-ink-700"
-                title="Show Proposed and Ideas separately"
-                @click="extrasCollapsed = false"
-              >
-                <ChevronRight :size="11" />
-              </button>
-            </span>
-            <span class="text-2xl font-semibold leading-none text-warn"><UiCalcTip :formula="fProposedIdeas">{{ fmtShares(proposedPlusIdeas) }}</UiCalcTip></span>
-          </div>
-        </template>
-        <template v-else>
-          <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">−</span>
-          <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
-            <span class="text-[10px] uppercase tracking-wider text-ink-500 inline-flex items-center gap-1">
-              Proposed
-              <button
-                type="button"
-                class="text-ink-400 hover:text-ink-700"
-                title="Combine Proposed and Ideas into one number"
-                @click="extrasCollapsed = true"
-              >
-                <ChevronDown :size="11" />
-              </button>
-            </span>
-            <span class="text-2xl font-semibold leading-none text-warn">{{ fmtShares(totals.proposedShares) }}</span>
-          </div>
-          <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">−</span>
-          <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
-            <span class="text-[10px] uppercase tracking-wider text-ink-500">Ideas</span>
-            <span class="text-2xl font-semibold leading-none text-amber-500">{{ fmtShares(totals.ideaGrants) }}</span>
-          </div>
-        </template>
-        <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">=</span>
-        <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Future Available</span>
-          <span class="text-2xl font-semibold leading-none" :class="totals.futureAvailable < 0 ? 'text-red-700' : 'text-ok'"><UiCalcTip :formula="fFutureAvailable">{{ fmtShares(totals.futureAvailable) }}</UiCalcTip></span>
-        </div>
-      </div>
+      <OptionPoolEquation :figures="poolFigures" storage-prefix="capstack:pool" class="mt-2" />
 
       <!-- Pie + line side-by-side. Collapsible: a click on the section
            header folds the visuals away (persisted in localStorage) so

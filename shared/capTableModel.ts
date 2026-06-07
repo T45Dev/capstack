@@ -84,3 +84,60 @@ export function availablePool(
 ): number {
   return authorized - (used.outstanding || 0) - (used.exercised || 0)
 }
+
+export interface PoolEquationCounts {
+  /** Authorized pool — from authorizedPool(). */
+  authorized: number
+  /** Options currently held (issued net of exercised/forfeited/expired). */
+  outstanding: number
+  /** Options exercised → converted to common, permanently out of the pool. */
+  exercised: number
+  /** Forfeited + expired — part of issued, but returned to the pool. */
+  forfeitedOrExpired: number
+  /** Proposed grants modeled but not yet issued. */
+  proposed: number
+  /** "Idea" grants/reserves (hypothetical), default 0. */
+  ideas?: number
+  /** Whether ideas deduct from Future Available. Default true. */
+  includeIdeas?: boolean
+}
+
+export interface PoolEquationFigures {
+  authorized: number
+  /** Issued = outstanding + exercised + forfeited/expired. */
+  issued: number
+  outstanding: number
+  exercised: number
+  forfeitedOrExpired: number
+  /** Available = authorized − outstanding − exercised. */
+  available: number
+  proposed: number
+  ideas: number
+  /** Future Available = available − proposed − (ideas, when included). */
+  futureAvailable: number
+}
+
+/**
+ * The Option-Pool identity, in ONE place so the Pool Impact and Option Grants
+ * pages (and anything else that shows it) can never disagree on the arithmetic:
+ *
+ *   Issued          = Outstanding + Exercised + Forfeited/Expired
+ *   Available        = Authorized − Outstanding − Exercised
+ *   Future Available = Available − Proposed − Ideas(when included)
+ *
+ * Forfeited/Expired is part of Issued but returns to the pool, so it cancels
+ * out of Available; Exercised converted to common and does NOT return.
+ */
+export function poolEquation(c: PoolEquationCounts): PoolEquationFigures {
+  const authorized = c.authorized || 0
+  const outstanding = c.outstanding || 0
+  const exercised = c.exercised || 0
+  const forfeitedOrExpired = c.forfeitedOrExpired || 0
+  const proposed = c.proposed || 0
+  const ideas = c.ideas || 0
+  const issued = outstanding + exercised + forfeitedOrExpired
+  const available = availablePool(authorized, { outstanding, exercised })
+  const ideasDeducted = (c.includeIdeas ?? true) ? ideas : 0
+  const futureAvailable = available - proposed - ideasDeducted
+  return { authorized, issued, outstanding, exercised, forfeitedOrExpired, available, proposed, ideas, futureAvailable }
+}

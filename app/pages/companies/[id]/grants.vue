@@ -2,7 +2,7 @@
 import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle, UploadCloud, AlertTriangle, CheckCircle2, X, Award } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtDate, fmtPricePerShare, normalizeDate } from '~/utils/format'
 import { calcSum, calcPct, calcValueUSD } from '~/utils/calc'
-import { authorizedPool } from '~/utils/capTable'
+import { authorizedPool, poolEquation } from '~/utils/capTable'
 
 // Badge color per explicit award type (ISO/NSO/RSU). Blank → no badge.
 function awardTypeClass(t: string | null | undefined): string {
@@ -256,7 +256,6 @@ const includeIdeas = ref(false)
 const IDEAS_KEY = 'capstack:grants:includeIdeas'
 onMounted(() => { try { includeIdeas.value = localStorage.getItem(IDEAS_KEY) === 'true' } catch { /* ignore */ } })
 watch(includeIdeas, v => { try { localStorage.setItem(IDEAS_KEY, String(v)) } catch { /* ignore */ } })
-const ideasDeducted = computed(() => includeIdeas.value ? totalIdeas.value : 0)
 
 // Collapse the pool equation down to a one-line summary so the grant tables
 // get more room. Persists per the operator.
@@ -265,23 +264,22 @@ const FORMULA_KEY = 'capstack:grants:formulaCollapsed'
 onMounted(() => { try { formulaCollapsed.value = localStorage.getItem(FORMULA_KEY) === 'true' } catch { /* ignore */ } })
 watch(formulaCollapsed, v => { try { localStorage.setItem(FORMULA_KEY, String(v)) } catch { /* ignore */ } })
 
-// Available = Authorized − Outstanding − Exercised. Forfeited/Expired already
-// returned to the pool (netted out of Outstanding), so they're NOT subtracted
-// here — they're surfaced separately as "returned". Exercised converted to
-// Common and does NOT return, so it stays subtracted.
-const availableShares = computed(() => poolAuthorized.value - totalOutstanding.value - totalExercised.value)
-const futureAvailable = computed(() => availableShares.value - totalProposed.value - ideasDeducted.value)
+// Pool figures via the shared identity (decision #11) so this page and the
+// Pool Impact page can never disagree on the arithmetic. Ideas only deduct
+// from Future Available when the operator flips "Include ideas".
+const poolFigures = computed(() => poolEquation({
+  authorized: poolAuthorized.value,
+  outstanding: totalOutstanding.value,
+  exercised: totalExercised.value,
+  forfeitedOrExpired: totalForfeitedOrExpired.value,
+  proposed: totalProposed.value,
+  ideas: totalIdeas.value,
+  includeIdeas: includeIdeas.value,
+}))
+const availableShares = computed(() => poolFigures.value.available)
+const futureAvailable = computed(() => poolFigures.value.futureAvailable)
 // Legacy lump (outstanding + exercised) — kept for any callers/tooltips.
 const outOfPool = computed(() => totalOutstanding.value + totalExercised.value)
-
-// Calc-tooltip strings for the pool summary stats.
-const fIssued = computed(() => `Outstanding ${fmtShares(totalOutstanding.value)} + exercised ${fmtShares(totalExercised.value)} + forfeited/expired ${fmtShares(totalForfeitedOrExpired.value)} = ${fmtShares(totalIssued.value)}`)
-const fAvailable = computed(() => `Authorized ${fmtShares(poolAuthorized.value)} − outstanding ${fmtShares(totalOutstanding.value)} − exercised ${fmtShares(totalExercised.value)} = ${fmtShares(availableShares.value)}`)
-const fFutureAvailable = computed(() => {
-  const parts = [`Available ${fmtShares(availableShares.value)}`, `− proposed ${fmtShares(totalProposed.value)}`]
-  if (includeIdeas.value) parts.push(`− ideas ${fmtShares(totalIdeas.value)}`)
-  return `${parts.join(' ')} = ${fmtShares(futureAvailable.value)}`
-})
 // Kept for the FDS denominator below (its old semantic: Authorized minus
 // everything carved-out, including proposed). Same value as futureAvailable.
 const poolAvailable = futureAvailable
@@ -911,68 +909,7 @@ const fieldLabels: Record<string, string> = {
           <span><span class="text-[10px] uppercase tracking-wider text-ink-500 mr-1">Available</span><span class="font-medium" :class="availableShares < 0 ? 'text-red-700' : 'text-ok'">{{ fmtShares(availableShares) }}</span></span>
           <span><span class="text-[10px] uppercase tracking-wider text-ink-500 mr-1">Future</span><span class="font-medium" :class="futureAvailable < 0 ? 'text-red-700' : 'text-ok'">{{ fmtShares(futureAvailable) }}</span></span>
         </div>
-        <div v-else class="flex flex-wrap items-end gap-x-3 gap-y-2 num">
-        <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Authorized</span>
-          <span class="text-2xl font-semibold leading-none text-ink-800">{{ fmtShares(poolAuthorized) }}</span>
-        </div>
-        <span class="text-2xl text-ink-400 pb-1">−</span>
-        <!-- Issued, expanded into where every granted option went. The bordered
-             group equals Issued (Outstanding + Exercised + Forfeited/Expired).
-             Forfeited/Expired is then added back outside the group because those
-             shares return to the pool, so the two F/E terms cancel — leaving the
-             true reduction, Authorized − Outstanding − Exercised. -->
-        <div class="flex items-end gap-2 rounded-md border border-ink-200 bg-ink-50 px-2 py-1">
-          <div class="flex flex-col items-start">
-            <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Every option ever granted out of the pool.">Issued</span>
-            <span class="text-2xl font-semibold leading-none text-ink-800"><UiCalcTip :formula="fIssued">{{ fmtShares(totalIssued) }}</UiCalcTip></span>
-          </div>
-          <span class="text-2xl text-ink-400 pb-1">=</span>
-          <span class="text-2xl text-ink-400 pb-1">(</span>
-          <div class="flex flex-col items-start">
-            <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Options currently held (granted, not yet exercised, forfeited, or expired).">Outstanding</span>
-            <span class="text-2xl font-semibold leading-none text-ink-800">{{ fmtShares(totalOutstanding) }}</span>
-          </div>
-          <span class="text-2xl text-ink-400 pb-1">+</span>
-          <div class="flex flex-col items-start">
-            <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Exercised options converted to Common stock and permanently left the pool.">Exercised</span>
-            <span class="text-2xl font-semibold leading-none" :class="totalExercised > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totalExercised) }}</span>
-          </div>
-          <span class="text-2xl text-ink-400 pb-1">+</span>
-          <div class="flex flex-col items-start">
-            <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Forfeited or expired grants — part of Issued, then returned to the pool below.">Forfeited/Expired</span>
-            <span class="text-2xl font-semibold leading-none" :class="totalForfeitedOrExpired > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totalForfeitedOrExpired) }}</span>
-          </div>
-          <span class="text-2xl text-ink-400 pb-1">)</span>
-        </div>
-        <span class="text-2xl text-ink-400 pb-1">+</span>
-        <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Forfeited/expired shares return to the pool, cancelling their inclusion in Issued.">Forfeited/Expired</span>
-          <span class="text-2xl font-semibold leading-none" :class="totalForfeitedOrExpired > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(totalForfeitedOrExpired) }}</span>
-        </div>
-        <span class="text-2xl text-ink-400 pb-1">=</span>
-        <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Available</span>
-          <span class="text-2xl font-semibold leading-none" :class="availableShares < 0 ? 'text-red-700' : 'text-ok'"><UiCalcTip :formula="fAvailable">{{ fmtShares(availableShares) }}</UiCalcTip></span>
-        </div>
-        <span class="text-2xl text-ink-400 pb-1">−</span>
-        <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Proposed</span>
-          <span class="text-2xl font-semibold leading-none text-warn">{{ fmtShares(totalProposed) }}</span>
-        </div>
-        <template v-if="includeIdeas">
-          <span class="text-2xl text-ink-400 pb-1">−</span>
-          <div class="flex flex-col items-start">
-            <span class="text-[10px] uppercase tracking-wider text-ink-500">Ideas</span>
-            <span class="text-2xl font-semibold leading-none text-amber-600">{{ fmtShares(totalIdeas) }}</span>
-          </div>
-        </template>
-        <span class="text-2xl text-ink-400 pb-1">=</span>
-        <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Future Available</span>
-          <span class="text-2xl font-semibold leading-none" :class="futureAvailable < 0 ? 'text-red-700' : 'text-ok'"><UiCalcTip :formula="fFutureAvailable">{{ fmtShares(futureAvailable) }}</UiCalcTip></span>
-        </div>
-        </div>
+        <OptionPoolEquation v-else :figures="poolFigures" :show-ideas="includeIdeas" storage-prefix="capstack:grants" />
         <div class="flex items-center gap-2 shrink-0">
           <label class="inline-flex items-center gap-1.5 text-[11px] text-ink-600 border border-ink-300 rounded px-2 py-1 cursor-pointer select-none hover:bg-ink-50">
             <input v-model="includeIdeas" type="checkbox" class="accent-brand">
