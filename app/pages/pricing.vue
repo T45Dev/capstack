@@ -8,8 +8,8 @@ definePageMeta({ layout: 'marketing' })
 
 const { origin, url } = useSeo({
   path: '/pricing',
-  title: 'Pricing — CapStack Cap Table Software',
-  description: 'Simple per-company pricing for CapStack. Start free on one cap table; upgrade to Pro for Carta import and board-ready Excel exports, or Firm for unlimited multi-seat workspaces.',
+  title: 'Pricing — Pariva Cap Table Software',
+  description: 'Simple per-company pricing for Pariva. Start free on one cap table; upgrade to Pro for Carta import and board-ready Excel exports, or Firm for unlimited multi-seat workspaces.',
   type: 'product',
 })
 
@@ -45,9 +45,9 @@ const jsonLd = {
     },
     {
       '@type': 'Product',
-      name: 'CapStack',
+      name: 'Pariva',
       description: 'Cap table and dilution modelling software with Carta import and board-ready Excel export.',
-      brand: { '@type': 'Brand', name: 'CapStack' },
+      brand: { '@type': 'Brand', name: 'Pariva' },
       offers: PRICING_TIERS.map(t => ({
         '@type': 'Offer',
         name: `${t.name} plan`,

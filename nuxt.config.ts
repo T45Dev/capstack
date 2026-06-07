@@ -9,7 +9,7 @@ export default defineNuxtConfig({
       version: CAPSTACK_VERSION,
       // Canonical origin for SEO (canonical links, og:url, sitemap, robots).
       // Override per-deploy with NUXT_PUBLIC_SITE_URL=https://your-domain.
-      siteUrl: process.env.NUXT_PUBLIC_SITE_URL || 'https://capstack.app',
+      siteUrl: process.env.NUXT_PUBLIC_SITE_URL || 'https://pariva.app',
     },
   },
   tailwindcss: {
@@ -18,7 +18,7 @@ export default defineNuxtConfig({
   app: {
     head: {
       htmlAttrs: { lang: 'en' },
-      title: 'CapStack — Cap Tables & Scenarios',
+      title: 'Pariva — Cap Tables & Scenarios',
       link: [
         { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
         { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
@@ -29,7 +29,7 @@ export default defineNuxtConfig({
         { name: 'description', content: 'Cap table & dilution software: import your Carta export, model rounds and convertible notes, and export a board-ready Excel.' },
         { name: 'theme-color', content: '#1d4ed8' },
         { name: 'format-detection', content: 'telephone=no' },
-        { property: 'og:site_name', content: 'CapStack' },
+        { property: 'og:site_name', content: 'Pariva' },
         { property: 'og:locale', content: 'en_US' },
       ],
     },

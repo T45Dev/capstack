@@ -20,7 +20,7 @@ export default defineEventHandler(async (event) => {
   const included = data.holders.filter(h => h.include)
 
   const wb = new ExcelJS.Workbook()
-  wb.creator = 'CapStack'
+  wb.creator = 'Pariva'
   wb.created = new Date()
 
   const sectionFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FF4B5F74' } }

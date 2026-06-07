@@ -18,9 +18,7 @@ const config = useRuntimeConfig()
     <!-- Brand: mark + wordmark. Clicking the brand returns to Companies. -->
     <NuxtLink to="/app" class="flex items-center gap-2.5 shrink-0">
       <Brandmark :size="26" :open="true" />
-      <span class="text-[14px] font-bold text-ink-900 tracking-tight">
-        Cap<span class="text-brand">Stack</span>
-      </span>
+      <span class="text-[14px] font-bold text-ink-900 tracking-tight">Pariva</span>
     </NuxtLink>
 
     <!-- Workspace breadcrumb. When inside a company, show the company name

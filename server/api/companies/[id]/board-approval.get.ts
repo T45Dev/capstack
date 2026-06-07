@@ -116,7 +116,7 @@ export default defineEventHandler(async (event) => {
 
   // ---- Build workbook ----
   const wb = new ExcelJS.Workbook()
-  wb.creator = 'CapStack'
+  wb.creator = 'Pariva'
   wb.created = new Date()
   const ws = wb.addWorksheet('Board Approval', {
     pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 },
