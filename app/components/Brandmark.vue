@@ -1,8 +1,8 @@
 <script setup lang="ts">
-// Pariva brand mark — four horizontal bars stacked, growing in width to
-// suggest accumulating valuation. The bottom layer flips to a teal fill
-// when `open` is true so the mark itself signals that a round is open for
-// modeling — a literal visual metaphor for what the product does.
+// Pariva brand mark — the open "P" ring with two ledger bars extending left:
+// a blue top bar and a teal accent bar. The teal bar is the "open round"
+// signal (matching the product's open-round accent); when `open` is false the
+// accent bar drops to brand blue so the mark itself reads as "no open round".
 interface Props {
   size?: number | string
   open?: boolean
@@ -11,11 +11,15 @@ withDefaults(defineProps<Props>(), { size: 28, open: true })
 </script>
 
 <template>
-  <svg :width="size" :height="size" viewBox="0 0 32 32" aria-label="Pariva">
-    <rect x="0" y="0" width="32" height="32" rx="7.5" fill="#1d4ed8" />
-    <rect x="7" y="7"  width="11" height="3.2" rx="1.6" fill="white" opacity="0.55" />
-    <rect x="7" y="12" width="15" height="3.2" rx="1.6" fill="white" opacity="0.75" />
-    <rect x="7" y="17" width="19" height="3.2" rx="1.6" fill="white" opacity="0.95" />
-    <rect x="7" y="22" width="13" height="3.2" rx="1.6" :fill="open ? '#5eead4' : 'white'" :opacity="open ? 1 : 0.6" />
+  <svg :width="size" :height="size" viewBox="0 0 113 125" fill="none" aria-label="Pariva">
+    <path
+      d="M49.37,14c26.78.24,49.18,21.58,49.18,48.36s-21.71,48.49-48.49,48.49"
+      fill="none" stroke="#1d4ed8" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"
+    />
+    <line x1="48.02" y1="14" x2="14" y2="14" stroke="#1d4ed8" stroke-width="28" stroke-linecap="round" />
+    <line
+      x1="41.35" y1="62.42" x2="14" y2="62.42"
+      :stroke="open ? '#5eead4' : '#1d4ed8'" stroke-width="28" stroke-linecap="round"
+    />
   </svg>
 </template>
