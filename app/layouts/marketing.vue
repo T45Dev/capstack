@@ -20,7 +20,7 @@ const year = new Date().getFullYear()
       <div class="max-w-6xl mx-auto h-full px-5 flex items-center gap-6">
         <NuxtLink to="/" class="flex items-center gap-2.5 shrink-0">
           <Brandmark :size="28" :open="true" />
-          <span class="text-[15px] font-bold tracking-tight">Cap<span class="text-brand">Stack</span></span>
+          <span class="text-[15px] font-bold tracking-tight text-ink-900">Pariva</span>
         </NuxtLink>
 
         <nav class="hidden sm:flex items-center gap-1 ml-2">
@@ -54,7 +54,7 @@ const year = new Date().getFullYear()
       <div class="max-w-6xl mx-auto px-5 py-10 flex flex-col sm:flex-row gap-6 sm:items-center justify-between">
         <div class="flex items-center gap-2.5">
           <Brandmark :size="24" :open="true" />
-          <span class="text-[13px] font-semibold tracking-tight">Cap<span class="text-brand">Stack</span></span>
+          <span class="text-[13px] font-semibold tracking-tight text-ink-900">Pariva</span>
           <span class="text-[12px] text-ink-400 ml-2">Cap tables, financings & board-ready exports.</span>
         </div>
         <div class="flex items-center gap-5 text-[13px] text-ink-500">
@@ -64,7 +64,7 @@ const year = new Date().getFullYear()
         </div>
       </div>
       <div class="max-w-6xl mx-auto px-5 pb-8 text-[12px] text-ink-400">
-        © {{ year }} CapStack. All rights reserved.
+        © {{ year }} Pariva. All rights reserved.
       </div>
     </footer>
   </div>

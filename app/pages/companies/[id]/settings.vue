@@ -217,7 +217,7 @@ function resetIdeaMapping(f: CanonicalField) {
       </UiCard>
 
       <!-- Import template field mapping -->
-      <UiCard title="Import template fields" subtitle="The column headers CapStack looks for when importing proposed grants, and the grant field each maps to.">
+      <UiCard title="Import template fields" subtitle="The column headers Pariva looks for when importing proposed grants, and the grant field each maps to.">
         <template #header>
           <span v-if="mappingsSaved" class="text-xs text-emerald-700 font-medium">Saved ✓</span>
           <UiButton variant="primary" :disabled="savingMappings" @click="saveMappings">
@@ -259,7 +259,7 @@ function resetIdeaMapping(f: CanonicalField) {
 
     <!-- Option Pool tab -->
     <div v-else-if="activeTab === 'pool'" class="space-y-6 max-w-4xl">
-      <UiCard title="Ideas import template fields" subtitle="Column headers CapStack looks for when importing option-grant Ideas, and the pool-event field each maps to.">
+      <UiCard title="Ideas import template fields" subtitle="Column headers Pariva looks for when importing option-grant Ideas, and the pool-event field each maps to.">
         <template #header>
           <span v-if="ideaMappingsSaved" class="text-xs text-emerald-700 font-medium">Saved ✓</span>
           <UiButton variant="primary" :disabled="savingIdeaMappings" @click="saveIdeaMappings">

@@ -10,8 +10,8 @@ definePageMeta({ layout: 'marketing' })
 
 const { origin, url } = useSeo({
   path: '/',
-  title: 'CapStack — Cap Table & Dilution Software | Carta Import to Excel',
-  description: 'CapStack is cap table software for founders and operators. Import your Carta export, model funding rounds, convertible notes, and dilution, then export a board-ready Excel for every option grant.',
+  title: 'Pariva — Cap Table & Dilution Software | Carta Import to Excel',
+  description: 'Pariva is cap table software for founders and operators. Import your Carta export, model funding rounds, convertible notes, and dilution, then export a board-ready Excel for every option grant.',
   type: 'website',
 })
 
@@ -24,7 +24,7 @@ const jsonLd = {
     {
       '@type': 'Organization',
       '@id': `${origin}/#organization`,
-      name: 'CapStack',
+      name: 'Pariva',
       url: origin,
       logo: `${origin}/og-image.png`,
       description: 'Cap table and scenario modelling software for founders, operators, and the firms backing them.',
@@ -33,14 +33,14 @@ const jsonLd = {
       '@type': 'WebSite',
       '@id': `${origin}/#website`,
       url: origin,
-      name: 'CapStack',
+      name: 'Pariva',
       publisher: { '@id': `${origin}/#organization` },
       inLanguage: 'en-US',
     },
     {
       '@type': 'SoftwareApplication',
       '@id': `${origin}/#software`,
-      name: 'CapStack',
+      name: 'Pariva',
       applicationCategory: 'BusinessApplication',
       applicationSubCategory: 'Cap Table Management',
       operatingSystem: 'Web',
@@ -103,7 +103,7 @@ const steps = [
             to <span class="text-brand">board-ready Excel</span>.
           </h1>
           <p class="mt-5 text-lg text-ink-600 leading-relaxed max-w-2xl">
-            CapStack is the cap-table and scenario modeller for operators. Import your Carta export,
+            Pariva is the cap-table and scenario modeller for operators. Import your Carta export,
             build a clean record of financings, attribute convertible notes, model dilution, and
             export the spreadsheet your board signs off on.
           </p>
