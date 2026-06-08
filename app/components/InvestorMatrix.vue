@@ -47,6 +47,22 @@ function cnFor(stakeholderId: string): CnEntry | null {
   return data.value?.cn?.[stakeholderId] || null
 }
 
+// Resizable columns — widths only (the matrix keeps its own sort). The round
+// columns are dynamic, so re-sync the width list when they change, preserving
+// any widths the operator has dragged.
+const colsTable = useSortableTable({ key: 'capstack:investor-matrix:widths', columns: [] })
+watch(() => data.value?.rounds, (rounds) => {
+  const defs = [
+    { key: 'investor', label: 'Investor', width: 220, sortable: false, align: 'left' as const },
+    ...(rounds || []).map(r => ({ key: r.id, label: r.code, width: 150, sortable: false, align: 'right' as const })),
+    { key: 'cn', label: 'CN', width: 130, sortable: false, align: 'right' as const },
+    { key: 'total', label: 'Total', width: 140, sortable: false, align: 'right' as const },
+  ]
+  const widthMap: Record<string, number> = {}
+  for (const c of colsTable.cols) widthMap[c.key] = c.width
+  colsTable.cols.splice(0, colsTable.cols.length, ...defs.map(d => ({ ...d, width: widthMap[d.key] ?? d.width })))
+}, { immediate: true, deep: true })
+
 // Local drafts buffer cell edits so we commit one PATCH per blurred
 // cell. Stored as AMOUNTS ($) since that's what round_investors holds;
 // when the operator edits shares we convert via the round's
@@ -255,22 +271,17 @@ function fRoundReconcile(r: MatrixRound): string {
     </div>
     <div v-else class="overflow-x-auto table-scroll">
       <table class="border-separate" :style="{ borderSpacing: 0 }">
-        <colgroup>
-          <col style="width: 220px" />
-          <col v-for="r in data.rounds" :key="r.id" style="min-width: 150px" />
-          <col style="width: 130px" /> <!-- CN column -->
-          <col style="width: 140px" />
-          <col style="width: 40px" />
-        </colgroup>
+        <TableColgroup :cols="colsTable.cols" :trailing="[40]" />
         <thead class="bg-ink-50/60">
           <tr>
-            <th class="px-3 py-2 border-b border-ink-200 text-left sticky left-0 z-20 bg-ink-50/95 backdrop-blur shadow-[1px_0_0_0_rgb(0_0_0/0.06)]">
+            <th class="relative px-3 py-2 border-b border-ink-200 text-left sticky left-0 z-20 bg-ink-50/95 backdrop-blur shadow-[1px_0_0_0_rgb(0_0_0/0.06)]">
               <span class="text-[10.5px] uppercase tracking-[0.08em] text-ink-500 font-semibold">Investor</span>
+              <span class="resize-handle" @mousedown.prevent.stop="colsTable.startResize($event, 'investor')" @click.stop />
             </th>
             <th
               v-for="r in data.rounds"
               :key="r.id"
-              class="px-3 py-2 border-b border-ink-200 text-right"
+              class="relative px-3 py-2 border-b border-ink-200 text-right"
               :class="r.kind === 'open' ? 'bg-brand-soft/40' : ''"
             >
               <div class="flex items-center justify-end gap-1.5">
@@ -297,15 +308,18 @@ function fRoundReconcile(r: MatrixRound): string {
                   @keydown.enter="(e: KeyboardEvent) => (e.target as HTMLInputElement).blur()"
                 />
               </div>
+              <span class="resize-handle" @mousedown.prevent.stop="colsTable.startResize($event, r.id)" @click.stop />
             </th>
-            <th class="px-3 py-2 border-b border-ink-200 text-right bg-amber-50/40">
+            <th class="relative px-3 py-2 border-b border-ink-200 text-right bg-amber-50/40">
               <div class="flex items-center justify-end gap-1.5">
                 <span class="text-[11.5px] font-medium text-amber-700">Convertible notes</span>
               </div>
               <div class="text-[10px] text-ink-400 mt-0.5">principal + accrued</div>
+              <span class="resize-handle" @mousedown.prevent.stop="colsTable.startResize($event, 'cn')" @click.stop />
             </th>
-            <th class="px-3 py-2 border-b border-ink-200 text-right">
+            <th class="relative px-3 py-2 border-b border-ink-200 text-right">
               <span class="text-[10.5px] uppercase tracking-[0.08em] text-ink-500 font-semibold">Total shares</span>
+              <span class="resize-handle" @mousedown.prevent.stop="colsTable.startResize($event, 'total')" @click.stop />
             </th>
             <th class="px-3 py-2 border-b border-ink-200"></th>
           </tr>

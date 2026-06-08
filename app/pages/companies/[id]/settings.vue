@@ -25,6 +25,18 @@ const { data: schedules, refresh: refreshSchedules } = await useFetch<VestingSch
   { watch: [id], default: () => [] },
 )
 
+// Resizable columns (widths persisted). Not sortable — a config table keeps
+// insertion order — so we use the composable purely for width + resize.
+const vestTable = useSortableTable({
+  key: 'capstack:settings:vesting',
+  columns: [
+    { key: 'name', label: 'Name', width: 240, sortable: false, align: 'left' },
+    { key: 'vest_months', label: 'Total months', width: 128, sortable: false, align: 'right' },
+    { key: 'cliff_months', label: 'Cliff months', width: 128, sortable: false, align: 'right' },
+    { key: 'cadence', label: 'Cadence', width: 144, sortable: false, align: 'left' },
+  ],
+})
+
 const newSched = reactive({ name: '', vest_months: 48, cliff_months: 12, cadence: 'monthly' as const })
 const addingSched = ref(false)
 async function addSchedule() {
@@ -144,12 +156,18 @@ function resetIdeaMapping(f: CanonicalField) {
       <UiCard title="Vesting schedules" subtitle="Named schedules you can apply to grants and reference in imports." :padded="false">
         <div class="overflow-x-auto table-scroll table-sticky-head">
           <table class="text-[13px] border-separate" style="border-spacing: 0;">
+            <TableColgroup :cols="vestTable.cols" :trailing="[48]" />
             <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide">
               <tr>
-                <th class="px-3 py-2 border-b border-ink-200 font-semibold bg-ink-100">Name</th>
-                <th class="px-3 py-2 border-b border-ink-200 font-semibold bg-ink-100 text-right w-32">Total months</th>
-                <th class="px-3 py-2 border-b border-ink-200 font-semibold bg-ink-100 text-right w-32">Cliff months</th>
-                <th class="px-3 py-2 border-b border-ink-200 font-semibold bg-ink-100 w-36">Cadence</th>
+                <th
+                  v-for="c in vestTable.cols"
+                  :key="c.key"
+                  class="relative px-3 py-2 border-b border-ink-200 font-semibold bg-ink-100"
+                  :class="c.align === 'right' ? 'text-right' : 'text-left'"
+                >
+                  {{ c.label }}
+                  <span class="resize-handle" @mousedown.prevent.stop="vestTable.startResize($event, c.key)" @click.stop />
+                </th>
                 <th class="px-3 py-2 border-b border-ink-200 font-semibold bg-ink-100 w-12"></th>
               </tr>
             </thead>
