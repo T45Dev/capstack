@@ -8,5 +8,18 @@ services:
     volumes:
       - capstack-data:/app/data
 
+  # Cloudflare Tunnel — exposes the app at pariva.t45labs.com without opening
+  # any inbound ports. Ingress rules live in ./cloudflared/config.yml (tracked);
+  # credentials.json is a secret and stays gitignored. See cloudflared/README.md.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: capstack-tunnel
+    restart: unless-stopped
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+    depends_on:
+      - capstack
+
 volumes:
   capstack-data:
