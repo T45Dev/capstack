@@ -320,26 +320,37 @@ const tabs = [
 // applySort(rows) that sorts by row[key]. We register one instance per table;
 // derived display columns (basis-dependent shares, market median) are surfaced
 // as plain props on the row so they can be sorted like any other.
-const sc = (key: string, align?: 'left' | 'right' | 'center') => ({ key, label: key, width: 100, sortable: true, align })
+const sc = (key: string, align?: 'left' | 'right' | 'center', width = 120) => ({ key, label: key, width, sortable: true, align })
 
 const rosterTable = useSortableTable({
   key: 'capstack:fairness:roster',
   defaultSort: { key: 'name', dir: 'asc' },
-  columns: ['name', 'awardTypes', 'title', 'level', 'startDate', 'salary', 'salaryMidpoint', 'benchmarkRole', 'optionShares'].map(k => sc(k)),
+  columns: [
+    sc('name', 'left', 200), sc('awardTypes', 'left', 90), sc('title', 'left', 170),
+    sc('level', 'left', 70), sc('startDate', 'left', 130), sc('salary', 'right', 112),
+    sc('salaryMidpoint', 'right', 112), sc('benchmarkRole', 'left', 192), sc('optionShares', 'right', 110),
+  ],
 })
 const rosterRows = computed(() => rosterTable.applySort((data.value?.holders || []) as any[]))
 
 const holdingsTable = useSortableTable({
   key: 'capstack:fairness:holdings',
   defaultSort: { key: 'postPct', dir: 'desc' },
-  columns: ['name', 'level', 'grantShares', 'totalShares', 'prePct', 'postPct', 'entryPct', 'value'].map(k => sc(k)),
+  columns: [
+    sc('name', 'left', 200), sc('level', 'left', 90), sc('grantShares', 'right', 110),
+    sc('totalShares', 'right', 120), sc('prePct', 'right', 95), sc('postPct', 'right', 95),
+    sc('entryPct', 'right', 100), sc('value', 'right', 110),
+  ],
 })
 const holdingsRows = computed(() => holdingsTable.applySort(included.value as any[]))
 
 const recTable = useSortableTable({
   key: 'capstack:fairness:recommend',
   defaultSort: { key: 'recommendedAddl', dir: 'desc' },
-  columns: ['name', 'postPct', 'flag', 'recommendedAddl', 'recommendedPct'].map(k => sc(k)),
+  columns: [
+    sc('name', 'left', 220), sc('postPct', 'right', 130), sc('flag', 'left', 130),
+    sc('recommendedAddl', 'right', 150), sc('recommendedPct', 'right', 130),
+  ],
 })
 
 // Calibration: per-grade benchmark table. Augment each grade with its market
@@ -347,7 +358,12 @@ const recTable = useSortableTable({
 const calGradeTable = useSortableTable({
   key: 'capstack:fairness:calGrade',
   defaultSort: { key: 'level', dir: 'desc' },
-  columns: ['level', 'n', 'med', 'lo', 'medPct', '_market', 'medValue', 'medMult'].map(k => sc(k)),
+  columns: [
+    sc('level', 'left', 90), sc('n', 'right', 60),
+    { key: 'confidence', label: 'confidence', width: 110, sortable: false, align: 'left' as const },
+    sc('med', 'right', 110), sc('lo', 'right', 110),
+    sc('medPct', 'right', 95), sc('_market', 'right', 110), sc('medValue', 'right', 120), sc('medMult', 'right', 95),
+  ],
 })
 const calGradeRows = computed(() =>
   calGradeTable.applySort(gradeStats.value.map(g => ({ ...g, _market: marketByGrade.value.get(g.level)?.med ?? null }))),
@@ -359,7 +375,12 @@ const calGradeRows = computed(() =>
 const calDetailTable = useSortableTable({
   key: 'capstack:fairness:calDetail',
   defaultSort: { key: 'level', dir: 'desc' },
-  columns: ['level', 'name', '_year', '_shares', '_pct', '_marketMed', '_value', 'salary', '_mult'].map(k => sc(k)),
+  columns: [
+    sc('level', 'right', 80), sc('name', 'left', 200), sc('_year', 'right', 80), sc('_shares', 'right', 110),
+    sc('_pct', 'right', 95), sc('_marketMed', 'right', 120),
+    { key: 'vsmarket', label: 'vs market', width: 110, sortable: false, align: 'left' as const },
+    sc('_value', 'right', 110), sc('salary', 'right', 110), sc('_mult', 'right', 90),
+  ],
 })
 const calDetailRows = computed(() =>
   calDetailTable.applySort(isoDetail.value.map(h => ({
@@ -422,9 +443,10 @@ const calDetailRows = computed(() =>
     <!-- TAB 1: Optionholders roster -->
     <UiCard v-else-if="tab === 'roster'" :padded="false" class="max-w-7xl" subtitle="Edit inline. Start date is the hire-basis for a not-yet-issued grant — set it for veterans so their first grant reflects when they joined, not today.">
       <table class="text-sm">
+        <TableColgroup :cols="rosterTable.cols" :leading="[64]" />
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
-            <th class="text-center font-medium px-3 py-2 w-16">Include</th>
+            <th class="relative text-center font-medium px-3 py-2 w-16">Include</th>
             <SortTh :table="rosterTable" col="name" th-class="text-left font-medium px-4 py-2">Optionholder</SortTh>
             <SortTh :table="rosterTable" col="awardTypes" th-class="text-left font-medium px-3 py-2 w-20">Award</SortTh>
             <SortTh :table="rosterTable" col="title" th-class="text-left font-medium px-3 py-2 w-40">Title</SortTh>
@@ -499,6 +521,7 @@ const calDetailRows = computed(() =>
         a <span class="italic">then</span> figure, so an early hire looks large there even with few shares.
       </p>
       <table class="text-sm num">
+        <TableColgroup :cols="holdingsTable.cols" />
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
             <SortTh :table="holdingsTable" col="name" th-class="text-left font-medium px-4 py-2">Optionholder</SortTh>
@@ -552,6 +575,7 @@ const calDetailRows = computed(() =>
             </div>
           </template>
           <table class="text-sm num">
+            <TableColgroup :cols="recTable.cols" />
             <thead>
               <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
                 <SortTh :table="recTable" col="name" th-class="text-left font-medium px-4 py-2">Optionholder</SortTh>
@@ -718,6 +742,7 @@ const calDetailRows = computed(() =>
 
           <UiCard :padded="false" class="mb-5" subtitle="Per-grade ISO benchmarks (median; range = min–max after outlier removal)">
             <table class="text-sm num">
+              <TableColgroup :cols="calGradeTable.cols" />
               <thead>
                 <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
                   <SortTh :table="calGradeTable" col="level" th-class="text-left font-medium px-4 py-2">Grade</SortTh>
@@ -749,6 +774,7 @@ const calDetailRows = computed(() =>
 
           <UiCard :padded="false" subtitle="Every ISO grant, by grade then hire year — spot drift + outliers">
             <table class="text-sm num">
+              <TableColgroup :cols="calDetailTable.cols" />
               <thead>
                 <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
                   <SortTh :table="calDetailTable" col="level" align="right" th-class="text-right font-medium px-3 py-2 w-14">Grade</SortTh>

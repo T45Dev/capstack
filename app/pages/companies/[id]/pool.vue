@@ -334,6 +334,28 @@ const ideaEventsList = computed(() =>
   events.value.filter(e => e.source === 'idea'),
 )
 
+// Resizable columns (widths only — these timeline tables stay in chronological
+// order, so no sort). One width table per grid so widths persist independently.
+const timelineCols = useSortableTable({
+  key: 'capstack:pool:timeline',
+  columns: [
+    { key: 'date', label: 'Date', width: 110, sortable: false, align: 'left' },
+    { key: 'name', label: 'Event', width: 220, sortable: false, align: 'left' },
+    { key: 'type', label: 'Type', width: 120, sortable: false, align: 'left' },
+    { key: 'shares', label: 'Shares', width: 120, sortable: false, align: 'right' },
+    { key: 'running', label: 'Running pool', width: 130, sortable: false, align: 'right' },
+  ],
+})
+const ideasCols = useSortableTable({
+  key: 'capstack:pool:ideas',
+  columns: [
+    { key: 'date', label: 'Date', width: 110, sortable: false, align: 'left' },
+    { key: 'name', label: 'Idea', width: 220, sortable: false, align: 'left' },
+    { key: 'type', label: 'Type', width: 120, sortable: false, align: 'left' },
+    { key: 'shares', label: 'Shares', width: 120, sortable: false, align: 'right' },
+  ],
+})
+
 // Per-type filter for the timeline table only (ideas live in their
 // own table now, so the 'idea' filter is gone).
 type EventFilter = 'all' | 'pool_topup' | 'grant' | 'exercise' | 'forfeit'
@@ -1005,13 +1027,18 @@ const chart = computed(() => {
         </div>
         <div v-else class="overflow-y-auto min-h-0 flex-1">
           <table class="text-[13px] num">
+            <TableColgroup :cols="timelineCols.cols" />
             <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100 sticky top-0 z-10">
               <tr>
-                <th class="px-2.5 py-1.5 font-semibold w-24">Date</th>
-                <th class="px-2.5 py-1.5 font-semibold">Event</th>
-                <th class="px-2.5 py-1.5 font-semibold w-28">Type</th>
-                <th class="px-2.5 py-1.5 font-semibold text-right w-28">Shares</th>
-                <th class="px-2.5 py-1.5 font-semibold text-right w-28">Running pool</th>
+                <th
+                  v-for="c in timelineCols.cols"
+                  :key="c.key"
+                  class="relative px-2.5 py-1.5 font-semibold"
+                  :class="c.align === 'right' ? 'text-right' : 'text-left'"
+                >
+                  {{ c.label }}
+                  <span class="resize-handle" @mousedown.prevent.stop="timelineCols.startResize($event, c.key)" @click.stop />
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -1084,12 +1111,18 @@ const chart = computed(() => {
         </div>
         <div v-else class="overflow-y-auto min-h-0 flex-1">
           <table class="text-[13px] num">
+            <TableColgroup :cols="ideasCols.cols" :trailing="[80]" />
             <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100 sticky top-0 z-10">
               <tr>
-                <th class="px-2.5 py-1.5 font-semibold w-24">Date</th>
-                <th class="px-2.5 py-1.5 font-semibold">Idea</th>
-                <th class="px-2.5 py-1.5 font-semibold w-28">Type</th>
-                <th class="px-2.5 py-1.5 font-semibold text-right w-28">Shares</th>
+                <th
+                  v-for="c in ideasCols.cols"
+                  :key="c.key"
+                  class="relative px-2.5 py-1.5 font-semibold"
+                  :class="c.align === 'right' ? 'text-right' : 'text-left'"
+                >
+                  {{ c.label }}
+                  <span class="resize-handle" @mousedown.prevent.stop="ideasCols.startResize($event, c.key)" @click.stop />
+                </th>
                 <th class="px-2.5 py-1.5 font-semibold text-right w-20"></th>
               </tr>
             </thead>

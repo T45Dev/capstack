@@ -49,6 +49,22 @@ const filtered = computed<Primary[]>(() => {
 
 const shareClasses = computed<ShareClass[]>(() => data.value?.share_classes || [])
 
+// Resizable columns — widths only (the inline sort below stays). Share-class
+// columns are dynamic, so re-sync the width list when they load, preserving any
+// widths the operator has already dragged.
+const colsTable = useSortableTable({ key: 'capstack:shareholders:widths', columns: [] })
+watch(shareClasses, (scs) => {
+  const defs = [
+    { key: 'name', label: 'Stakeholder', width: 240, sortable: false, align: 'left' as const },
+    ...scs.map(sc => ({ key: sc.code, label: sc.code, width: 110, sortable: false, align: 'right' as const })),
+    { key: 'options', label: 'Options', width: 110, sortable: false, align: 'right' as const },
+    { key: 'total', label: 'Total', width: 120, sortable: false, align: 'right' as const },
+  ]
+  const widthMap: Record<string, number> = {}
+  for (const c of colsTable.cols) widthMap[c.key] = c.width
+  colsTable.cols.splice(0, colsTable.cols.length, ...defs.map(d => ({ ...d, width: widthMap[d.key] ?? d.width })))
+}, { immediate: true })
+
 // Column sort. Dynamic share-class columns make a fixed useSortableTable
 // column list awkward, so this is a lightweight inline sort keyed by 'name',
 // a share-class code, 'options', or 'total'. Primaries sort; aliases stay
@@ -212,35 +228,40 @@ function classBgFooter(kind: string): string {
     <div v-else class="rounded-lg border border-ink-300 bg-white overflow-hidden shadow-card">
       <div class="overflow-x-auto table-scroll table-sticky-head">
         <table class="text-[13px] border-separate" :style="{ borderSpacing: 0 }">
+          <TableColgroup :cols="colsTable.cols" :trailing="[100]" />
           <thead class="bg-ink-100 text-[11px] uppercase tracking-wider text-ink-500 font-semibold">
             <tr>
-              <th class="px-3 py-2 border-b border-ink-200 text-left sticky left-0 bg-ink-100 z-10">
+              <th class="relative px-3 py-2 border-b border-ink-200 text-left sticky left-0 bg-ink-100 z-10">
                 <button type="button" class="inline-flex items-center gap-1 hover:text-ink-800 select-none uppercase tracking-[0.06em]" @click="toggleSort('name')">
                   Stakeholder <component :is="sortIcon('name')" v-if="sortIcon('name')" :size="11" class="text-brand-600" />
                 </button>
+                <span class="resize-handle" @mousedown.prevent.stop="colsTable.startResize($event, 'name')" @click.stop />
               </th>
               <th
                 v-for="sc in shareClasses"
                 :key="sc.code"
-                class="px-3 py-2 border-b border-ink-200 text-right"
+                class="relative px-3 py-2 border-b border-ink-200 text-right"
                 :class="classBgFooter(sc.kind)"
                 :title="sc.name"
               >
                 <button type="button" class="inline-flex items-center gap-1 flex-row-reverse hover:text-ink-800 select-none uppercase tracking-[0.06em]" @click="toggleSort(sc.code)">
                   {{ sc.code }} <component :is="sortIcon(sc.code)" v-if="sortIcon(sc.code)" :size="11" class="text-brand-600" />
                 </button>
+                <span class="resize-handle" @mousedown.prevent.stop="colsTable.startResize($event, sc.code)" @click.stop />
               </th>
-              <th class="px-3 py-2 border-b border-ink-200 text-right bg-ink-50">
+              <th class="relative px-3 py-2 border-b border-ink-200 text-right bg-ink-50">
                 <button type="button" class="inline-flex items-center gap-1 flex-row-reverse hover:text-ink-800 select-none uppercase tracking-[0.06em]" @click="toggleSort('options')">
                   Options <component :is="sortIcon('options')" v-if="sortIcon('options')" :size="11" class="text-brand-600" />
                 </button>
+                <span class="resize-handle" @mousedown.prevent.stop="colsTable.startResize($event, 'options')" @click.stop />
               </th>
-              <th class="px-3 py-2 border-b border-ink-200 text-right">
+              <th class="relative px-3 py-2 border-b border-ink-200 text-right">
                 <button type="button" class="inline-flex items-center gap-1 flex-row-reverse hover:text-ink-800 select-none uppercase tracking-[0.06em]" @click="toggleSort('total')">
                   Total <component :is="sortIcon('total')" v-if="sortIcon('total')" :size="11" class="text-brand-600" />
                 </button>
+                <span class="resize-handle" @mousedown.prevent.stop="colsTable.startResize($event, 'total')" @click.stop />
               </th>
-              <th class="px-3 py-2 border-b border-ink-200 text-right" style="width: 100px">Action</th>
+              <th class="px-3 py-2 border-b border-ink-200 text-right">Action</th>
             </tr>
           </thead>
           <tbody>
