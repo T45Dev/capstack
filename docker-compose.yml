@@ -5,6 +5,12 @@ services:
     restart: unless-stopped
     ports:
       - "3100:3100"
+    environment:
+      # Basic Auth gate. Set these in a .env file next to this compose file
+      # (gitignored) — docker compose substitutes them here. Leave unset to
+      # disable the gate. See .env.example.
+      NUXT_BASIC_AUTH_USER: ${NUXT_BASIC_AUTH_USER:-}
+      NUXT_BASIC_AUTH_PASS: ${NUXT_BASIC_AUTH_PASS:-}
     volumes:
       - capstack-data:/app/data
 

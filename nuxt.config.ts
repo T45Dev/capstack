@@ -5,6 +5,11 @@ export default defineNuxtConfig({
   devtools: { enabled: true },
   modules: ['@nuxtjs/tailwindcss'],
   runtimeConfig: {
+    // Optional HTTP Basic Auth gate (server/middleware/basic-auth.ts).
+    // Enforced only when BOTH are set, via NUXT_BASIC_AUTH_USER /
+    // NUXT_BASIC_AUTH_PASS in the deploy environment. Empty = gate off.
+    basicAuthUser: '',
+    basicAuthPass: '',
     public: {
       version: CAPSTACK_VERSION,
       // Canonical origin for SEO (canonical links, og:url, sitemap, robots).
