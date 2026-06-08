@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
   const qs = new URLSearchParams()
   if (q.round) qs.set('round', String(q.round))
   if (q.includeFuture) qs.set('includeFuture', String(q.includeFuture))
-  const data = await $fetch<FairnessResult & { company: { name: string; slug: string } }>(
+  const data = await event.$fetch<FairnessResult & { company: { name: string; slug: string } }>(
     `/api/companies/${id}/grant-fairness${qs.toString() ? `?${qs}` : ''}`,
   )
   const sel = data.rounds.find(r => r.code === data.selectedRoundCode)
