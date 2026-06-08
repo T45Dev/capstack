@@ -322,6 +322,14 @@ const tabs = [
 // as plain props on the row so they can be sorted like any other.
 const sc = (key: string, align?: 'left' | 'right' | 'center', width = 120) => ({ key, label: key, width, sortable: true, align })
 
+// Min table width = Σ column widths (+ any leading/trailing non-data columns).
+// Paired with an overflow-x-auto wrapper so the table renders at its natural
+// width and scrolls instead of squeezing columns (which forced cell wrapping
+// and made the resize handles feel dead).
+function minW(cols: { width: number }[], extra = 0) {
+  return cols.reduce((s, c) => s + c.width, 0) + extra
+}
+
 const rosterTable = useSortableTable({
   key: 'capstack:fairness:roster',
   defaultSort: { key: 'name', dir: 'asc' },
@@ -442,7 +450,8 @@ const calDetailRows = computed(() =>
 
     <!-- TAB 1: Optionholders roster -->
     <UiCard v-else-if="tab === 'roster'" :padded="false" class="max-w-7xl" subtitle="Edit inline. Start date is the hire-basis for a not-yet-issued grant — set it for veterans so their first grant reflects when they joined, not today.">
-      <table class="text-sm">
+      <div class="overflow-x-auto">
+      <table class="text-sm" :style="{ minWidth: minW(rosterTable.cols, 64) + 'px' }">
         <TableColgroup :cols="rosterTable.cols" :leading="[64]" />
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
@@ -511,6 +520,7 @@ const calDetailRows = computed(() =>
           </tr>
         </tbody>
       </table>
+      </div>
     </UiCard>
 
     <!-- TAB 2: Current holdings, fully diluted to the selected round -->
@@ -520,7 +530,8 @@ const calDetailRows = computed(() =>
         <span class="font-medium text-ink-700">% at hire</span> is each holder's slice at the round they were granted in —
         a <span class="italic">then</span> figure, so an early hire looks large there even with few shares.
       </p>
-      <table class="text-sm num">
+      <div class="overflow-x-auto">
+      <table class="text-sm num" :style="{ minWidth: minW(holdingsTable.cols) + 'px' }">
         <TableColgroup :cols="holdingsTable.cols" />
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
@@ -550,11 +561,12 @@ const calDetailRows = computed(() =>
           </tr>
         </tbody>
       </table>
+      </div>
     </UiCard>
 
     <!-- TAB 3: Recommended grant model -->
     <template v-else-if="tab === 'recommend'">
-      <div class="max-w-3xl">
+      <div class="max-w-5xl">
       <div class="rounded-lg border border-ink-200 bg-ink-50/60 px-4 py-2.5 mb-5 flex items-start gap-2">
         <Info :size="15" class="text-ink-400 mt-0.5 shrink-0" />
         <p class="text-xs text-ink-600 leading-relaxed">{{ data.methodology }}</p>
@@ -574,7 +586,8 @@ const calDetailRows = computed(() =>
               </span>
             </div>
           </template>
-          <table class="text-sm num">
+          <div class="overflow-x-auto">
+          <table class="text-sm num" :style="{ minWidth: minW(recTable.cols) + 'px' }">
             <TableColgroup :cols="recTable.cols" />
             <thead>
               <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
@@ -593,7 +606,7 @@ const calDetailRows = computed(() =>
                 </td>
                 <td class="px-3 py-1.5 text-right text-ink-700"><UiCalcTip :formula="fPost(h)">{{ fmtPct(h.postPct, 3) }}</UiCalcTip></td>
                 <td class="px-3 py-1.5 pl-6">
-                  <span class="inline-block text-[11px] px-2 py-0.5 rounded border" :class="flagMeta[h.flag].cls">{{ flagMeta[h.flag].label }}</span>
+                  <span class="inline-block whitespace-nowrap text-[11px] px-2 py-0.5 rounded border" :class="flagMeta[h.flag].cls">{{ flagMeta[h.flag].label }}</span>
                 </td>
                 <td class="px-3 py-1.5 text-right font-medium" :class="h.recommendedAddl > 0 ? 'text-brand' : 'text-ink-400'">
                   <UiCalcTip :formula="fRec(h, lvl.post.target)">{{ h.recommendedAddl > 0 ? '+' + fmtShares(h.recommendedAddl) : '—' }}</UiCalcTip>
@@ -602,6 +615,7 @@ const calDetailRows = computed(() =>
               </tr>
             </tbody>
           </table>
+          </div>
         </UiCard>
 
         <!-- Pool ideas: not compared against a band — shown as recommended
@@ -741,7 +755,8 @@ const calDetailRows = computed(() =>
           </UiCard>
 
           <UiCard :padded="false" class="mb-5" subtitle="Per-grade ISO benchmarks (median; range = min–max after outlier removal)">
-            <table class="text-sm num">
+            <div class="overflow-x-auto">
+            <table class="text-sm num" :style="{ minWidth: minW(calGradeTable.cols) + 'px' }">
               <TableColgroup :cols="calGradeTable.cols" />
               <thead>
                 <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
@@ -770,10 +785,12 @@ const calDetailRows = computed(() =>
                 </tr>
               </tbody>
             </table>
+            </div>
           </UiCard>
 
           <UiCard :padded="false" subtitle="Every ISO grant, by grade then hire year — spot drift + outliers">
-            <table class="text-sm num">
+            <div class="overflow-x-auto">
+            <table class="text-sm num" :style="{ minWidth: minW(calDetailTable.cols) + 'px' }">
               <TableColgroup :cols="calDetailTable.cols" />
               <thead>
                 <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
@@ -807,6 +824,7 @@ const calDetailRows = computed(() =>
                 </tr>
               </tbody>
             </table>
+            </div>
           </UiCard>
         </template>
       </div>
