@@ -266,8 +266,8 @@ function classBgFooter(kind: string): string {
           </thead>
           <tbody>
             <template v-for="(p, pi) in sortedRows" :key="p.id">
-              <tr class="group hover:bg-brand-50/50 transition-colors" :class="pi % 2 ? 'bg-ink-50/60' : ''">
-                <td class="px-3 py-2 sticky left-0 z-[5] group-hover:bg-brand-50" :class="pi % 2 ? 'bg-ink-50' : 'bg-white'">
+              <tr class="group hover:bg-brand-50/50 transition-colors">
+                <td class="px-3 py-2 sticky left-0 z-[5] group-hover:bg-brand-50 bg-white">
                   <div class="flex items-center gap-2">
                     <button
                       v-if="p.aliases.length"
