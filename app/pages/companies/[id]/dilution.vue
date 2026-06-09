@@ -473,7 +473,7 @@ async function onImported() {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in sortedRows" :key="r.stakeholderId" class="even:bg-ink-50/60 hover:bg-brand-50/70 transition-colors">
+            <tr v-for="r in sortedRows" :key="r.stakeholderId" class="hover:bg-brand-50/70 transition-colors">
               <td class="px-3 py-1.5">
                 <NameCell
                   :name="r.name"

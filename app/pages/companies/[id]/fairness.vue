@@ -461,7 +461,7 @@ const calDetailRows = computed(() =>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="h in rosterRows" :key="h.stakeholderId || `${h.source}:${h.name}`" class="even:bg-ink-50/50 hover:bg-brand-50/50 transition-colors" :class="h.include ? '' : 'opacity-55'">
+          <tr v-for="h in rosterRows" :key="h.stakeholderId || `${h.source}:${h.name}`" class="hover:bg-brand-50/50 transition-colors" :class="h.include ? '' : 'opacity-55'">
             <td class="px-3 py-1.5 text-center">
               <input
                 type="checkbox"
@@ -760,7 +760,7 @@ const calDetailRows = computed(() =>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="g in calGradeRows" :key="g.level" class="even:bg-ink-50/50 hover:bg-brand-50/50 transition-colors">
+                <tr v-for="g in calGradeRows" :key="g.level" class="hover:bg-brand-50/50 transition-colors">
                   <td class="px-4 py-1.5 font-medium" :class="g.interpolated ? 'text-ink-400 italic' : 'text-ink-900'">{{ g.level }}<span v-if="g.interpolated" class="ml-1 text-[9px] uppercase tracking-wide text-ink-400">interp</span></td>
                   <td class="px-3 py-1.5 text-right text-ink-500">{{ g.interpolated ? '—' : g.n }}<span v-if="g.removed" class="text-red-400 text-[10px]" :title="`${g.removed} outlier(s) removed`"> −{{ g.removed }}</span></td>
                   <td class="px-3 py-1.5 pl-4"><span class="inline-block text-[10px] px-1.5 py-0.5 rounded border" :class="confMeta[g.confidence].cls">{{ confMeta[g.confidence].label }}</span></td>
@@ -795,7 +795,7 @@ const calDetailRows = computed(() =>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="h in calDetailRows" :key="h.stakeholderId || h.name" class="even:bg-ink-50/50 hover:bg-brand-50/50 transition-colors">
+                <tr v-for="h in calDetailRows" :key="h.stakeholderId || h.name" class="hover:bg-brand-50/50 transition-colors">
                   <td class="px-3 py-1.5 text-right text-ink-700">{{ h.level }}</td>
                   <td class="px-4 py-1.5"><NameCell :name="h.name" :award="h.awardTypes[0] || null" :source="h.source" /></td>
                   <td class="px-3 py-1.5 text-right text-ink-500">{{ cohortYear(h) }}</td>

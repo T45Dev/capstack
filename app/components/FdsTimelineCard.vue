@@ -73,7 +73,7 @@ async function deleteMilestone(m: Milestone) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="m in milestones" :key="m.id" class="even:bg-ink-50/50 border-b border-ink-100 last:border-0">
+          <tr v-for="m in milestones" :key="m.id" class="border-b border-ink-100 last:border-0">
             <td class="px-3 py-1.5 pl-4">
               <DateInput variant="bare" no-hint :model-value="m.as_of_date" @update:model-value="(v) => patchMilestone(m, 'as_of_date', v)" />
             </td>
