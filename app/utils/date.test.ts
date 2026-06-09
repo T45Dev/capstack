@@ -108,10 +108,10 @@ describe('formatDateDisplay', () => {
     expect(formatDateDisplay('')).toBe('')
   })
 
-  it('formats ISO dates as "Mon D, YYYY"', () => {
-    expect(formatDateDisplay('2024-01-15')).toBe('Jan 15, 2024')
-    expect(formatDateDisplay('2023-12-31')).toBe('Dec 31, 2023')
-    expect(formatDateDisplay('2019-03-01')).toBe('Mar 1, 2019')
+  it('formats ISO dates as YYYY-MM-DD', () => {
+    expect(formatDateDisplay('2024-01-15')).toBe('2024-01-15')
+    expect(formatDateDisplay('2023-12-31')).toBe('2023-12-31')
+    expect(formatDateDisplay('2019-03-01')).toBe('2019-03-01')
   })
 
   it('returns the input as-is when it isn\'t a parseable ISO date', () => {

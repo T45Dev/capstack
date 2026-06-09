@@ -106,13 +106,10 @@ export function parseDate(raw: string | null | undefined): string | null {
 }
 
 // Format an ISO date string for display. Returns the placeholder when the
-// input is empty or unparseable. Defaults to "Mon D, YYYY" (e.g. "Mar 22, 2023")
-// which is the most-readable format for finance UIs.
+// input is empty or unparseable. Canonical display format is ISO YYYY-MM-DD.
 export function formatDateDisplay(iso: string | null | undefined): string {
   if (!iso) return ''
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
   if (!m) return iso
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
-  if (isNaN(d.getTime())) return iso
-  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  return `${m[1]}-${m[2]}-${m[3]}`
 }
