@@ -37,9 +37,16 @@ export function fmtPricePerShare(n: number | null | undefined): string {
 
 export function fmtDate(s: string | null | undefined): string {
   if (!s) return '—'
+  // Canonical display is ISO YYYY-MM-DD. When the input is already an ISO date
+  // or timestamp (YYYY-MM-DD...), take the date part verbatim so we don't shift
+  // a day by re-parsing in the local timezone.
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s)
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
   const d = new Date(s)
   if (isNaN(d.getTime())) return s
-  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  // Non-ISO input (rare) — render from UTC components to avoid a tz rollover.
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`
 }
 
 // Tax classification of an option grant. Employees get ISOs; everyone else

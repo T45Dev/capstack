@@ -4,7 +4,7 @@
 // Plain <input type="text"> backed by a robust parser — accepts US M/D/YY,
 // ISO YYYY-MM-DD, "Mar 22, 2023", "15-Jan-2024", "today", "yesterday", and
 // a few other ways humans write dates (see app/utils/date.ts). The display
-// always normalizes to "Mon D, YYYY" on blur; the model value is always
+// always normalizes to ISO YYYY-MM-DD on blur; the model value is always
 // ISO YYYY-MM-DD (or null when empty).
 //
 // Why not <input type="date">? Three reasons:
@@ -33,7 +33,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  placeholder: 'MM/DD/YYYY',
+  placeholder: 'YYYY-MM-DD',
   variant: 'boxed',
   noHint: false,
 })
@@ -50,7 +50,7 @@ const text = ref('')
 
 // Keep the visible text in sync with the bound ISO value when not focused.
 // On focus the display swaps to whatever the user types; on blur we
-// re-render the canonical "Mon D, YYYY" form.
+// re-render the canonical ISO YYYY-MM-DD form.
 watchEffect(() => {
   if (!focused.value) text.value = formatDateDisplay(props.modelValue)
 })
@@ -65,17 +65,10 @@ const parseError = computed(() => focused.value && !isEmpty.value && parsed.valu
 
 function onFocus() {
   focused.value = true
-  // Swap to a typeable format while focused — using the M/D/YYYY shape lets
-  // the operator quickly tweak (e.g. fix a typo'd month) instead of fighting
-  // the longer display form. ISO month-day order on the model means we
-  // already have the parts we need.
-  if (props.modelValue) {
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(props.modelValue)
-    if (m) text.value = `${Number(m[2])}/${Number(m[3])}/${m[1]}`
-    else text.value = props.modelValue
-  } else {
-    text.value = ''
-  }
+  // Edit in the same ISO YYYY-MM-DD form we display, so the format stays
+  // consistent through the edit. The parser still accepts M/D/YYYY etc. if the
+  // operator pastes a spreadsheet value.
+  text.value = props.modelValue || ''
   // Select-all after the value swap takes effect so the next keystroke
   // overwrites cleanly. The Element-select doubles as a visual cue that
   // typing is now editing.
@@ -143,7 +136,7 @@ function onKeyDown(e: KeyboardEvent) {
       :class="parsed ? 'text-ink-700' : 'text-warn'"
     >
       <template v-if="parsed">→ {{ formatDateDisplay(parsed) }}</template>
-      <template v-else>Can't read — try 1/15/2024 or "today"</template>
+      <template v-else>Can't read — try YYYY-MM-DD or "today"</template>
     </div>
   </div>
 
@@ -172,7 +165,7 @@ function onKeyDown(e: KeyboardEvent) {
       :class="parseError ? 'text-warn' : 'text-ink-500'"
     >
       <template v-if="focused && !isEmpty && parsed">→ {{ formatDateDisplay(parsed) }}</template>
-      <template v-else-if="parseError">Can't read — try 1/15/2024 or "today"</template>
+      <template v-else-if="parseError">Can't read — try YYYY-MM-DD or "today"</template>
     </div>
   </div>
 </template>
