@@ -54,7 +54,7 @@ async function deleteMilestone(m: Milestone) {
 <template>
   <UiCard title="Round history (FDS timeline)" subtitle="One row per historical round — date · FDS · price · pool increase. The latest row sets the Previous-Round base; rows feed the Fairness hire-basis and dated Option Pool top-ups. Only the open round needs full economics (above)." :padded="false">
     <div class="overflow-x-auto">
-      <table class="text-[13px] num" :style="{ tableLayout: 'fixed', minWidth: totalWidth + 'px' }">
+      <table class="text-[13px] num data-table" :style="{ tableLayout: 'fixed', minWidth: totalWidth + 'px' }">
         <colgroup>
           <col v-for="col in table.cols" :key="col.key" :style="{ width: col.width + 'px' }" />
           <col :style="{ width: ACTIONS_WIDTH + 'px' }" />

@@ -437,7 +437,7 @@ async function onImported() {
         No data yet — add a round on the Financings page and import or enter holders to model dilution.
       </div>
       <div v-else class="overflow-auto min-h-0 flex-1">
-        <table class="text-[13px] num border-separate" style="border-spacing: 0;">
+        <table class="text-[13px] num border-separate data-table" style="border-spacing: 0;">
           <colgroup>
             <col v-for="c in table.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
           </colgroup>
@@ -475,15 +475,13 @@ async function onImported() {
           <tbody>
             <tr v-for="r in sortedRows" :key="r.stakeholderId" class="even:bg-ink-50/60 hover:bg-brand-50/70 transition-colors">
               <td class="px-3 py-1.5">
-                <span class="text-ink-900 font-medium" :title="r.aliasNames.length ? `Includes: ${r.aliasNames.join(', ')}` : r.name">{{ r.name }}</span>
-                <span v-if="r.type" class="ml-1.5 text-[9px] uppercase tracking-wide text-ink-500 bg-ink-100 border border-ink-200 px-1 py-0.5 rounded align-middle">{{ r.type }}</span>
-                <span v-if="r.isFuture" class="ml-1.5 text-[9px] uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded align-middle">future</span>
-                <span v-else-if="r.isNewRound" class="ml-1.5 text-[9px] uppercase tracking-wide text-brand-700 bg-brand-50 border border-brand-200 px-1 py-0.5 rounded align-middle">new</span>
-                <span
-                  v-if="r.aliasNames.length"
-                  class="ml-1.5 text-[9px] uppercase tracking-wide text-brand-edge bg-brand-soft border border-brand-200 px-1 py-0.5 rounded align-middle"
-                  :title="`Rolls up: ${r.aliasNames.join(', ')}`"
-                >+{{ r.aliasNames.length }} linked</span>
+                <NameCell
+                  :name="r.name"
+                  :source="r.type === 'proposed' ? 'proposed' : r.type === 'idea' ? 'idea' : null"
+                  :linked="r.aliasNames.length"
+                  :linked-names="r.aliasNames"
+                  :title="r.aliasNames.length ? `Includes: ${r.aliasNames.join(', ')}` : r.name"
+                />
               </td>
 
               <!-- ---- Shares group: Pre / Δ / Post ---- -->
