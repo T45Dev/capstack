@@ -24,7 +24,7 @@ export default defineEventHandler(async (event) => {
   const selectedRound = (q.round as string) || null
 
   // Per-round cumulative FDS + share price, chronological (open last).
-  const summary = await $fetch<{ rounds: any[] }>(`/api/companies/${id}/round-summary`)
+  const summary = await event.$fetch<{ rounds: any[] }>(`/api/companies/${id}/round-summary`)
   const rcols = summary?.rounds ?? []
   const rounds: FairnessRound[] = rcols.map((rc, i) => ({
     code: rc.code,
@@ -43,7 +43,7 @@ export default defineEventHandler(async (event) => {
   // per-round cumulative total_shares_fds above accumulates from 0, so using it
   // as the denominator double-counts prior history. Overriding just the open
   // round's entry fixes the Current holdings Pre %, Post %, and % at hire.
-  const agg = await $fetch<{ total_shares_fds: number | null }>(`/api/companies/${id}/aggregate-round`).catch(() => null)
+  const agg = await event.$fetch<{ total_shares_fds: number | null }>(`/api/companies/${id}/aggregate-round`).catch(() => null)
   const aggFds = Number(agg?.total_shares_fds) || 0
   const openIdx = rounds.findIndex(r => r.kind === 'open')
   if (openIdx >= 0 && aggFds > 0) {
@@ -133,7 +133,7 @@ export default defineEventHandler(async (event) => {
   let ideasShares = 0
   const ideaList: Array<{ id: string; name: string; shares: number; kind: string | null; title: string | null; level: string | null }> = []
   try {
-    const ideas = await $fetch<any[]>(`/api/companies/${id}/pool-events`)
+    const ideas = await event.$fetch<any[]>(`/api/companies/${id}/pool-events`)
     for (const ie of (ideas || [])) {
       if (ie.type === 'grant' || ie.type === 'reserve') {
         ideasShares += ie.shares || 0
