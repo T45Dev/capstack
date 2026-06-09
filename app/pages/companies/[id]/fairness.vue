@@ -451,12 +451,12 @@ const calDetailRows = computed(() =>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
             <th class="relative text-center font-medium px-3 py-2 w-16">Include</th>
             <SortTh :table="rosterTable" col="name" th-class="text-left font-medium px-4 py-2">Optionholder</SortTh>
-            <SortTh :table="rosterTable" col="title" th-class="text-left font-medium px-3 py-2 w-40">Title</SortTh>
-            <SortTh :table="rosterTable" col="level" th-class="text-left font-medium px-3 py-2 w-16">Level</SortTh>
-            <SortTh :table="rosterTable" col="startDate" th-class="text-left font-medium px-3 py-2 w-32">Start date</SortTh>
-            <SortTh :table="rosterTable" col="salary" align="right" th-class="text-right font-medium px-3 py-2 w-28">Salary</SortTh>
-            <SortTh :table="rosterTable" col="salaryMidpoint" align="right" th-class="text-right font-medium px-3 py-2 w-28">Midpoint</SortTh>
-            <SortTh :table="rosterTable" col="benchmarkRole" th-class="text-left font-medium px-3 py-2 w-48">Market role</SortTh>
+            <SortTh :table="rosterTable" col="title" th-class="text-left font-medium px-3 py-2">Title</SortTh>
+            <SortTh :table="rosterTable" col="level" th-class="text-left font-medium px-3 py-2">Level</SortTh>
+            <SortTh :table="rosterTable" col="startDate" th-class="text-left font-medium px-3 py-2">Start date</SortTh>
+            <SortTh :table="rosterTable" col="salary" align="right" th-class="text-right font-medium px-3 py-2">Salary</SortTh>
+            <SortTh :table="rosterTable" col="salaryMidpoint" align="right" th-class="text-right font-medium px-3 py-2">Midpoint</SortTh>
+            <SortTh :table="rosterTable" col="benchmarkRole" th-class="text-left font-medium px-3 py-2">Market role</SortTh>
             <SortTh :table="rosterTable" col="optionShares" align="right" th-class="text-right font-medium px-3 py-2 num">Options</SortTh>
           </tr>
         </thead>
@@ -782,9 +782,9 @@ const calDetailRows = computed(() =>
               <TableColgroup :cols="calDetailTable.cols" />
               <thead>
                 <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
-                  <SortTh :table="calDetailTable" col="level" align="right" th-class="text-right font-medium px-3 py-2 w-14">Grade</SortTh>
+                  <SortTh :table="calDetailTable" col="level" align="right" th-class="text-right font-medium px-3 py-2">Grade</SortTh>
                   <SortTh :table="calDetailTable" col="name" th-class="text-left font-medium px-4 py-2">Optionholder</SortTh>
-                  <SortTh :table="calDetailTable" col="_year" align="right" th-class="text-right font-medium px-3 py-2 w-16">Year</SortTh>
+                  <SortTh :table="calDetailTable" col="_year" align="right" th-class="text-right font-medium px-3 py-2">Year</SortTh>
                   <SortTh :table="calDetailTable" col="_shares" align="right" th-class="text-right font-medium px-3 py-2">Granted</SortTh>
                   <SortTh :table="calDetailTable" col="_pct" align="right" th-class="text-right font-medium px-3 py-2">% at hire</SortTh>
                   <SortTh :table="calDetailTable" col="_marketMed" align="right" th-class="text-right font-medium px-3 py-2">Market med %</SortTh>
