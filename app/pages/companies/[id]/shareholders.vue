@@ -227,7 +227,7 @@ function classBgFooter(kind: string): string {
 
     <div v-else class="rounded-lg border border-ink-300 bg-white overflow-hidden shadow-card">
       <div class="overflow-x-auto table-scroll table-sticky-head">
-        <table class="text-[13px] border-separate" :style="{ borderSpacing: 0 }">
+        <table class="text-[13px] border-separate data-table" :style="{ borderSpacing: 0 }">
           <TableColgroup :cols="colsTable.cols" :trailing="[100]" />
           <thead class="bg-ink-100 text-[11px] uppercase tracking-wider text-ink-500 font-semibold">
             <tr>
@@ -280,11 +280,7 @@ function classBgFooter(kind: string): string {
                       <ChevronRight v-else :size="14" />
                     </button>
                     <span v-else class="w-3.5"></span>
-                    <span class="text-ink-900 font-medium">{{ p.name }}</span>
-                    <span v-if="p.type" class="text-[10px] uppercase tracking-wide text-ink-500 bg-ink-100 border border-ink-200 px-1.5 py-0.5 rounded">{{ p.type }}</span>
-                    <span v-if="p.aliases.length" class="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-brand-edge bg-brand-soft border border-brand-200 px-1.5 py-0.5 rounded">
-                      <Link2 :size="10" /> {{ p.aliases.length }} alias{{ p.aliases.length === 1 ? '' : 'es' }}
-                    </span>
+                    <NameCell :name="p.name" :linked="p.aliases.length" :linked-names="p.aliases.map(a => a.name)" />
                   </div>
                 </td>
                 <td

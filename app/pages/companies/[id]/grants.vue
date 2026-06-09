@@ -4,13 +4,6 @@ import { fmtShares, fmtPct, fmtDate, fmtPricePerShare, normalizeDate } from '~/u
 import { calcSum, calcPct, calcValueUSD } from '~/utils/calc'
 import { authorizedPool, poolEquation } from '~/utils/capTable'
 
-// Badge color per explicit award type (ISO/NSO/RSU). Blank → no badge.
-function awardTypeClass(t: string | null | undefined): string {
-  if (t === 'ISO') return 'border-emerald-300 bg-emerald-50 text-emerald-800'
-  if (t === 'RSU') return 'border-indigo-300 bg-indigo-50 text-indigo-800'
-  return 'border-slate-300 bg-slate-100 text-slate-700' // NSO / other
-}
-
 const route = useRoute()
 const id = computed(() => route.params.id as string)
 
@@ -950,7 +943,7 @@ const fieldLabels: Record<string, string> = {
         </template>
         <div v-if="!outstanding.length" class="text-sm text-ink-500 px-4 py-6 text-center">No outstanding grants.</div>
         <div v-else class="overflow-x-auto table-scroll table-sticky-head">
-          <table class="text-[13px] border-separate" style="border-spacing: 0; table-layout: fixed;">
+          <table class="text-[13px] border-separate data-table" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
               <col v-for="c in outstandingVisibleCols" :key="c.key" :style="{ width: c.width + 'px' }" />
             </colgroup>
@@ -986,13 +979,8 @@ const fieldLabels: Record<string, string> = {
               </tr>
               <tr v-else class="group">
                 <template v-for="c in outstandingVisibleCols" :key="c.key">
-                  <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-brand-50/40" :title="g.recipient_name">
-                    <span
-                      v-if="g.award_type"
-                      class="mr-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle"
-                      :class="awardTypeClass(g.award_type)"
-                    >{{ g.award_type }}</span>
-                    <span>{{ g.recipient_name }}</span>
+                  <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium border-b border-ink-200 bg-white group-hover:bg-brand-50/40" :title="g.recipient_name">
+                    <NameCell :name="g.recipient_name" :award="g.award_type || null" />
                     <span v-if="!g.linked_stakeholder" class="ml-1 text-[9px] uppercase tracking-wide text-amber-700">unlinked</span>
                   </td>
                   <td v-else-if="c.key === 'strike'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">{{ fmtPricePerShare(g.strike) }}</td>
@@ -1056,7 +1044,7 @@ const fieldLabels: Record<string, string> = {
         </template>
         <div v-if="!proposed.length && !ideaRows.length && !adding" class="text-sm text-ink-500 px-4 py-6 text-center">No proposed grants. Click "Propose grant" to draft one.</div>
         <div v-else class="overflow-x-auto table-scroll table-sticky-head">
-          <table class="text-[13px] border-separate" style="border-spacing: 0; table-layout: fixed;">
+          <table class="text-[13px] border-separate data-table" style="border-spacing: 0; table-layout: fixed;">
             <colgroup>
               <col v-for="c in proposedVisibleCols" :key="c.key" :style="{ width: c.width + 'px' }" />
             </colgroup>
@@ -1098,17 +1086,8 @@ const fieldLabels: Record<string, string> = {
               </tr>
               <tr v-else class="group">
                 <template v-for="c in proposedVisibleCols" :key="c.key">
-                  <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium text-ink-900 border-b border-ink-200 truncate bg-white group-hover:bg-brand-50/40" :title="g.recipient_name">
-                    <span
-                      v-if="g.award_type"
-                      class="mr-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle"
-                      :class="awardTypeClass(g.award_type)"
-                    >{{ g.award_type }}</span>
-                    <span
-                      v-if="g.isIdea"
-                      class="mr-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle border-amber-300 bg-amber-50 text-amber-700"
-                    >Idea</span>
-                    <span>{{ g.recipient_name }}</span>
+                  <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium border-b border-ink-200 bg-white group-hover:bg-brand-50/40" :title="g.recipient_name">
+                    <NameCell :name="g.recipient_name" :award="g.award_type || null" :source="g.isIdea ? 'idea' : 'proposed'" />
                   </td>
                   <td v-else-if="c.key === 'existing_options'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">
                     <span v-if="g.existing_options">{{ fmtShares(g.existing_options) }}</span>

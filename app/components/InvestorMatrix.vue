@@ -270,7 +270,7 @@ function fRoundReconcile(r: MatrixRound): string {
       Add a round on the Rounds tab to start attributing investors.
     </div>
     <div v-else class="overflow-x-auto table-scroll">
-      <table class="border-separate" :style="{ borderSpacing: 0 }">
+      <table class="border-separate data-table" :style="{ borderSpacing: 0 }">
         <TableColgroup :cols="colsTable.cols" :trailing="[40]" />
         <thead class="bg-ink-50/60">
           <tr>

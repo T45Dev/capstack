@@ -255,12 +255,6 @@ function fRec(h: Holder, target: number): string | null {
 }
 function fRecPct(h: Holder): string { return calcPct(h.totalShares + h.recommendedAddl, data.value?.selectedPostFDS || 0) }
 
-// Source chip — distinguishes not-yet-issued rows from live grants.
-const sourceMeta: Record<string, { label: string; cls: string }> = {
-  proposed: { label: 'Proposed', cls: 'border-blue-200 bg-blue-50 text-blue-700' },
-  idea: { label: 'Idea', cls: 'border-amber-300 bg-amber-50 text-amber-700' },
-}
-
 const flagMeta: Record<string, { label: string; cls: string }> = {
   under: { label: 'Under-granted', cls: 'bg-red-50 text-red-700 border-red-200' },
   over: { label: 'Over-granted', cls: 'bg-amber-50 text-amber-800 border-amber-300' },
@@ -334,7 +328,7 @@ const rosterTable = useSortableTable({
   key: 'capstack:fairness:roster',
   defaultSort: { key: 'name', dir: 'asc' },
   columns: [
-    sc('name', 'left', 200), sc('awardTypes', 'left', 90), sc('title', 'left', 170),
+    sc('name', 'left', 240), sc('title', 'left', 170),
     sc('level', 'left', 70), sc('startDate', 'left', 130), sc('salary', 'right', 112),
     sc('salaryMidpoint', 'right', 112), sc('benchmarkRole', 'left', 192), sc('optionShares', 'right', 110),
   ],
@@ -451,13 +445,12 @@ const calDetailRows = computed(() =>
     <!-- TAB 1: Optionholders roster -->
     <UiCard v-else-if="tab === 'roster'" :padded="false" class="max-w-7xl" subtitle="Edit inline. Start date is the hire-basis for a not-yet-issued grant — set it for veterans so their first grant reflects when they joined, not today.">
       <div class="overflow-x-auto">
-      <table class="text-sm" :style="{ tableLayout: 'fixed', minWidth: minW(rosterTable.cols, 64) + 'px' }">
+      <table class="text-sm data-table" :style="{ tableLayout: 'fixed', minWidth: minW(rosterTable.cols, 64) + 'px' }">
         <TableColgroup :cols="rosterTable.cols" :leading="[64]" />
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
             <th class="relative text-center font-medium px-3 py-2 w-16">Include</th>
             <SortTh :table="rosterTable" col="name" th-class="text-left font-medium px-4 py-2">Optionholder</SortTh>
-            <SortTh :table="rosterTable" col="awardTypes" th-class="text-left font-medium px-3 py-2 w-20">Award</SortTh>
             <SortTh :table="rosterTable" col="title" th-class="text-left font-medium px-3 py-2 w-40">Title</SortTh>
             <SortTh :table="rosterTable" col="level" th-class="text-left font-medium px-3 py-2 w-16">Level</SortTh>
             <SortTh :table="rosterTable" col="startDate" th-class="text-left font-medium px-3 py-2 w-32">Start date</SortTh>
@@ -480,10 +473,8 @@ const calDetailRows = computed(() =>
               >
             </td>
             <td class="px-4 py-1.5 text-ink-900">
-              {{ h.name }}
-              <span v-if="sourceMeta[h.source]" class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle" :class="sourceMeta[h.source].cls">{{ sourceMeta[h.source].label }}</span>
+              <NameCell :name="h.name" :award="h.awardTypes[0] || null" :source="h.source" />
             </td>
-            <td class="px-3 py-1.5 text-ink-600 num text-[12px]">{{ h.awardTypes.join(', ') || '—' }}</td>
             <td class="px-3 py-1.5">
               <input :class="amberInput" :value="h.title || ''" :disabled="!h.editId" placeholder="title"
                      @change="(ev) => saveGrade(h, 'title', (ev.target as HTMLInputElement).value)">
@@ -531,7 +522,7 @@ const calDetailRows = computed(() =>
         a <span class="italic">then</span> figure, so an early hire looks large there even with few shares.
       </p>
       <div class="overflow-x-auto">
-      <table class="text-sm num" :style="{ tableLayout: 'fixed', minWidth: minW(holdingsTable.cols) + 'px' }">
+      <table class="text-sm num data-table" :style="{ tableLayout: 'fixed', minWidth: minW(holdingsTable.cols) + 'px' }">
         <TableColgroup :cols="holdingsTable.cols" />
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
@@ -548,8 +539,7 @@ const calDetailRows = computed(() =>
         <tbody>
           <tr v-for="h in holdingsRows" :key="h.stakeholderId || `${h.source}:${h.name}`" class="border-b border-ink-100 last:border-0 hover:bg-ink-50/40">
             <td class="px-4 py-1.5 text-ink-900">
-              {{ h.name }}
-              <span v-if="sourceMeta[h.source]" class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle" :class="sourceMeta[h.source].cls">{{ sourceMeta[h.source].label }}</span>
+              <NameCell :name="h.name" :award="h.awardTypes[0] || null" :source="h.source" />
             </td>
             <td class="px-3 py-1.5 text-ink-600">{{ h.level || '—' }}</td>
             <td class="px-3 py-1.5 text-right text-ink-800">{{ fmtShares(h.grantShares) }}</td>
@@ -587,7 +577,7 @@ const calDetailRows = computed(() =>
             </div>
           </template>
           <div class="overflow-x-auto">
-          <table class="text-sm num" :style="{ tableLayout: 'fixed', minWidth: minW(recTable.cols) + 'px' }">
+          <table class="text-sm num data-table" :style="{ tableLayout: 'fixed', minWidth: minW(recTable.cols) + 'px' }">
             <TableColgroup :cols="recTable.cols" />
             <thead>
               <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
@@ -600,9 +590,8 @@ const calDetailRows = computed(() =>
             </thead>
             <tbody>
               <tr v-for="h in recTable.applySort(lvl.holders)" :key="h.stakeholderId || `${h.source}:${h.name}`" class="border-b border-ink-100 last:border-0">
-                <td class="px-4 py-1.5 text-ink-900">
-                  {{ h.name }}
-                  <span v-if="sourceMeta[h.source]" class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle" :class="sourceMeta[h.source].cls">{{ sourceMeta[h.source].label }}</span>
+                <td class="px-4 py-1.5">
+                  <NameCell :name="h.name" :award="h.awardTypes[0] || null" :source="h.source" />
                 </td>
                 <td class="px-3 py-1.5 text-right text-ink-700"><UiCalcTip :formula="fPost(h)">{{ fmtPct(h.postPct, 3) }}</UiCalcTip></td>
                 <td class="px-3 py-1.5 pl-6">
@@ -627,7 +616,7 @@ const calDetailRows = computed(() =>
               <span class="text-[11px] text-ink-500">recommended placement</span>
             </div>
           </template>
-          <table class="text-sm num">
+          <table class="text-sm num data-table">
             <thead>
               <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
                 <th class="text-left font-medium px-4 py-2">Idea</th>
@@ -638,9 +627,8 @@ const calDetailRows = computed(() =>
             </thead>
             <tbody>
               <tr v-for="h in ideaRecs" :key="`idea:${h.name}`" class="border-b border-ink-100 last:border-0">
-                <td class="px-4 py-1.5 text-ink-900">
-                  {{ h.name }}
-                  <span class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle border-amber-300 bg-amber-50 text-amber-700">Idea</span>
+                <td class="px-4 py-1.5">
+                  <NameCell :name="h.name" source="idea" />
                 </td>
                 <td class="px-3 py-1.5 text-right font-medium text-brand">+{{ fmtShares(h.grantShares) }}</td>
                 <td class="px-3 py-1.5 text-right text-ink-600"><UiCalcTip :formula="fPost(h)">{{ fmtPct(h.postPct, 3) }}</UiCalcTip></td>
@@ -756,7 +744,7 @@ const calDetailRows = computed(() =>
 
           <UiCard :padded="false" class="mb-5" subtitle="Per-grade ISO benchmarks (median; range = min–max after outlier removal)">
             <div class="overflow-x-auto">
-            <table class="text-sm num" :style="{ tableLayout: 'fixed', minWidth: minW(calGradeTable.cols) + 'px' }">
+            <table class="text-sm num data-table" :style="{ tableLayout: 'fixed', minWidth: minW(calGradeTable.cols) + 'px' }">
               <TableColgroup :cols="calGradeTable.cols" />
               <thead>
                 <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
@@ -790,7 +778,7 @@ const calDetailRows = computed(() =>
 
           <UiCard :padded="false" subtitle="Every ISO grant, by grade then hire year — spot drift + outliers">
             <div class="overflow-x-auto">
-            <table class="text-sm num" :style="{ tableLayout: 'fixed', minWidth: minW(calDetailTable.cols) + 'px' }">
+            <table class="text-sm num data-table" :style="{ tableLayout: 'fixed', minWidth: minW(calDetailTable.cols) + 'px' }">
               <TableColgroup :cols="calDetailTable.cols" />
               <thead>
                 <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
@@ -809,7 +797,7 @@ const calDetailRows = computed(() =>
               <tbody>
                 <tr v-for="h in calDetailRows" :key="h.stakeholderId || h.name" class="even:bg-ink-50/50 hover:bg-brand-50/50 transition-colors">
                   <td class="px-3 py-1.5 text-right text-ink-700">{{ h.level }}</td>
-                  <td class="px-4 py-1.5 text-ink-900">{{ h.name }}</td>
+                  <td class="px-4 py-1.5"><NameCell :name="h.name" :award="h.awardTypes[0] || null" :source="h.source" /></td>
                   <td class="px-3 py-1.5 text-right text-ink-500">{{ cohortYear(h) }}</td>
                   <td class="px-3 py-1.5 text-right text-ink-900 font-medium">{{ fmtShares(calShares(h)) }}</td>
                   <td class="px-3 py-1.5 text-right text-ink-600"><UiCalcTip :formula="calcPct(calShares(h), h.entryFDS)">{{ fmtPct(calPct(h), 3) }}</UiCalcTip></td>

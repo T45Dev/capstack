@@ -59,6 +59,18 @@ input[type='number'] {
   max-height: calc(100vh - 13rem);
 }
 
+/* One row height for every data table. Add the `data-table` class to the
+   <table>. This sets only the VERTICAL padding (and a consistent line-height)
+   so the row height is identical everywhere — horizontal padding utilities
+   (pl-6 column grouping, pl-10 alias indent, sticky-col px) are left alone.
+   `.data-table :is(td, th)` outranks the py-* utilities so it wins. The cell
+   height matches the Dilution table (px-3 py-1.5). */
+.data-table :is(td, th) {
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
+  line-height: 1.25rem;
+}
+
 /* Freeze the header row while the body scrolls. A stuck <th> paints its own
    background — the <thead>'s background scrolls away with the flow and does
    NOT follow the pinned cells — so any <th> without an opaque background lets

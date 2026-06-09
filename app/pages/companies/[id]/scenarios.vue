@@ -299,7 +299,7 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
 
           <div class="rounded-lg border border-ink-300 bg-white shadow-card overflow-hidden">
             <div class="overflow-x-auto table-scroll table-sticky-head">
-              <table class="text-[13px] border-separate" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: payoutWidth + 'px' }">
+              <table class="text-[13px] border-separate data-table" :style="{ borderSpacing: 0, tableLayout: 'fixed', minWidth: payoutWidth + 'px' }">
                 <colgroup>
                   <col v-for="c in payoutTable.cols" :key="c.key" :style="{ width: c.width + 'px' }" />
                 </colgroup>

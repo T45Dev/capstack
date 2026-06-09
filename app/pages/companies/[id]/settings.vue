@@ -155,7 +155,7 @@ function resetIdeaMapping(f: CanonicalField) {
       <!-- Vesting schedules -->
       <UiCard title="Vesting schedules" subtitle="Named schedules you can apply to grants and reference in imports." :padded="false">
         <div class="overflow-x-auto table-scroll table-sticky-head">
-          <table class="text-[13px] border-separate" style="border-spacing: 0;">
+          <table class="text-[13px] border-separate data-table" style="border-spacing: 0;">
             <TableColgroup :cols="vestTable.cols" :trailing="[48]" />
             <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide">
               <tr>

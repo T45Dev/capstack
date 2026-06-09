@@ -1026,7 +1026,7 @@ const chart = computed(() => {
           <button type="button" class="ml-2 text-brand-600 hover:text-brand-700 underline" @click="eventFilter = 'all'">Show all</button>
         </div>
         <div v-else class="overflow-y-auto min-h-0 flex-1">
-          <table class="text-[13px] num">
+          <table class="text-[13px] num data-table">
             <TableColgroup :cols="timelineCols.cols" />
             <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100 sticky top-0 z-10">
               <tr>
@@ -1110,7 +1110,7 @@ const chart = computed(() => {
           No ideas yet. Click <span class="font-medium text-ink-700">Add idea</span> to model a future top-up, grant, exercise, forfeit, or floor.
         </div>
         <div v-else class="overflow-y-auto min-h-0 flex-1">
-          <table class="text-[13px] num">
+          <table class="text-[13px] num data-table">
             <TableColgroup :cols="ideasCols.cols" :trailing="[80]" />
             <thead class="text-left text-ink-500 text-[11px] uppercase tracking-wide bg-ink-100 sticky top-0 z-10">
               <tr>
