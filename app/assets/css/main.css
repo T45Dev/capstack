@@ -59,16 +59,20 @@ input[type='number'] {
   max-height: calc(100vh - 13rem);
 }
 
-/* Freeze the header row while the body scrolls. Requires the <th> cells to
-   carry an opaque background (they do across our tables — bg-ink-100 /
-   bg-ink-50). The z-index uses :where() so it stays a low-specificity
-   default — header cells that pin a corner with their own higher z-index
-   (e.g. a sticky-left first column) keep it. */
+/* Freeze the header row while the body scrolls. A stuck <th> paints its own
+   background — the <thead>'s background scrolls away with the flow and does
+   NOT follow the pinned cells — so any <th> without an opaque background lets
+   the scrolling body bleed through it. We give every sticky header cell a
+   default opaque tint (ink-100, the header color) so this can't happen, and
+   use :where() so its specificity stays 0 — a per-<th> utility bg class
+   (bg-ink-50, etc.) still wins. The z-index default works the same way:
+   header cells that pin a corner with a higher z-index keep it. */
 .table-sticky-head thead th {
   position: sticky;
   top: 0;
 }
 :where(.table-sticky-head thead th) {
+  background-color: #eef0f3; /* ink-100 — default header tint */
   z-index: 3;
 }
 .table-sticky-head thead th.sticky-col {
