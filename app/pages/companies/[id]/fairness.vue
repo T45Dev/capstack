@@ -451,7 +451,7 @@ const calDetailRows = computed(() =>
     <!-- TAB 1: Optionholders roster -->
     <UiCard v-else-if="tab === 'roster'" :padded="false" class="max-w-7xl" subtitle="Edit inline. Start date is the hire-basis for a not-yet-issued grant — set it for veterans so their first grant reflects when they joined, not today.">
       <div class="overflow-x-auto">
-      <table class="text-sm" :style="{ minWidth: minW(rosterTable.cols, 64) + 'px' }">
+      <table class="text-sm" :style="{ tableLayout: 'fixed', minWidth: minW(rosterTable.cols, 64) + 'px' }">
         <TableColgroup :cols="rosterTable.cols" :leading="[64]" />
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
@@ -531,7 +531,7 @@ const calDetailRows = computed(() =>
         a <span class="italic">then</span> figure, so an early hire looks large there even with few shares.
       </p>
       <div class="overflow-x-auto">
-      <table class="text-sm num" :style="{ minWidth: minW(holdingsTable.cols) + 'px' }">
+      <table class="text-sm num" :style="{ tableLayout: 'fixed', minWidth: minW(holdingsTable.cols) + 'px' }">
         <TableColgroup :cols="holdingsTable.cols" />
         <thead>
           <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
@@ -587,7 +587,7 @@ const calDetailRows = computed(() =>
             </div>
           </template>
           <div class="overflow-x-auto">
-          <table class="text-sm num" :style="{ minWidth: minW(recTable.cols) + 'px' }">
+          <table class="text-sm num" :style="{ tableLayout: 'fixed', minWidth: minW(recTable.cols) + 'px' }">
             <TableColgroup :cols="recTable.cols" />
             <thead>
               <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
@@ -756,7 +756,7 @@ const calDetailRows = computed(() =>
 
           <UiCard :padded="false" class="mb-5" subtitle="Per-grade ISO benchmarks (median; range = min–max after outlier removal)">
             <div class="overflow-x-auto">
-            <table class="text-sm num" :style="{ minWidth: minW(calGradeTable.cols) + 'px' }">
+            <table class="text-sm num" :style="{ tableLayout: 'fixed', minWidth: minW(calGradeTable.cols) + 'px' }">
               <TableColgroup :cols="calGradeTable.cols" />
               <thead>
                 <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
@@ -790,7 +790,7 @@ const calDetailRows = computed(() =>
 
           <UiCard :padded="false" subtitle="Every ISO grant, by grade then hire year — spot drift + outliers">
             <div class="overflow-x-auto">
-            <table class="text-sm num" :style="{ minWidth: minW(calDetailTable.cols) + 'px' }">
+            <table class="text-sm num" :style="{ tableLayout: 'fixed', minWidth: minW(calDetailTable.cols) + 'px' }">
               <TableColgroup :cols="calDetailTable.cols" />
               <thead>
                 <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
