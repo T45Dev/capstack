@@ -18,7 +18,6 @@ const route = useRoute()
 const id = computed(() => route.params.id as string)
 
 const tab = ref<'roster' | 'holdings' | 'recommend' | 'calibration' | 'newhire'>('roster')
-const selectedRound = ref<string>('')
 const includeFuture = ref(false)
 const FUTURE_KEY = 'capstack:fairness:includeFuture'
 onMounted(() => { try { includeFuture.value = localStorage.getItem(FUTURE_KEY) === 'true' } catch { /* ignore */ } })
@@ -82,11 +81,10 @@ interface FairnessData {
 const { data, pending, refresh } = await useFetch<FairnessData>(
   () => {
     const qs = new URLSearchParams()
-    if (selectedRound.value) qs.set('round', selectedRound.value)
     if (includeFuture.value) qs.set('includeFuture', '1')
     return `/api/companies/${id.value}/grant-fairness${qs.toString() ? `?${qs}` : ''}`
   },
-  { watch: [id, selectedRound, includeFuture], default: () => null as any },
+  { watch: [id, includeFuture], default: () => null as any },
 )
 
 const included = computed(() => (data.value?.holders || []).filter(h => h.include))
@@ -295,7 +293,6 @@ async function toggleInclude(h: Holder, ev: Event) {
 }
 function exportXlsx() {
   const qs = new URLSearchParams()
-  if (selectedRound.value) qs.set('round', selectedRound.value)
   if (includeFuture.value) qs.set('includeFuture', '1')
   window.location.href = `/api/companies/${id.value}/fairness-export${qs.toString() ? `?${qs}` : ''}`
 }
@@ -406,14 +403,7 @@ const calDetailRows = computed(() =>
         model tops them up toward their level’s median.
       </template>
       <template #actions>
-        <label class="text-xs text-ink-500">Basis</label>
-        <select
-          v-model="selectedRound"
-          class="text-sm border border-ink-300 rounded px-2 py-1.5 bg-white text-ink-900 focus:outline-none focus:border-ink-500"
-        >
-          <option value="">Auto ({{ selName }})</option>
-          <option v-for="r in data.rounds" :key="r.code" :value="r.code">{{ r.name }}</option>
-        </select>
+        <span class="text-xs text-ink-500">Basis <span class="text-ink-700 font-medium">{{ selName }}</span> <span class="text-ink-400">(most recent round)</span></span>
         <label class="flex items-center gap-1.5 text-xs text-ink-600 border border-ink-300 rounded px-2 py-1.5 bg-white cursor-pointer select-none">
           <input v-model="includeFuture" type="checkbox" class="accent-brand"> Include proposed + ideas
         </label>
