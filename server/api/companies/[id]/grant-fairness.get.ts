@@ -45,11 +45,22 @@ export default defineEventHandler(async (event) => {
   // round's entry fixes the Current holdings Pre %, Post %, and % at hire.
   const agg = await event.$fetch<{ total_shares_fds: number | null }>(`/api/companies/${id}/aggregate-round`).catch(() => null)
   const aggFds = Number(agg?.total_shares_fds) || 0
-  const openIdx = rounds.findIndex(r => r.kind === 'open')
-  if (openIdx >= 0 && aggFds > 0) {
-    const rc = rcols[openIdx]
-    rounds[openIdx] = {
-      ...rounds[openIdx],
+  // The current round is simply the MOST RECENT round — the one flagged
+  // kind='open' if any, else the last round. A round can be "closed" once its
+  // funding has happened; we still treat the latest as the current one and
+  // compare it against the penultimate state (the aggregate base). This mirrors
+  // how Overall Dilution picks the round (dilution.vue: find(open) || last), so
+  // the two pages' pre/post denominators can't diverge. Previously this only
+  // fired for a kind='open' row, so with no round flagged open the page fell
+  // back to round-summary's cumulative walk over the (Carta-seeded) rounds —
+  // which is exactly what made the Fairness denominator read 23.7M instead of
+  // the timeline-derived aggregate Dilution uses.
+  let curIdx = rounds.findIndex(r => r.kind === 'open')
+  if (curIdx < 0) curIdx = rounds.length - 1
+  if (curIdx >= 0 && aggFds > 0) {
+    const rc = rcols[curIdx]
+    rounds[curIdx] = {
+      ...rounds[curIdx],
       preFDS: aggFds,
       postFDS: openRoundPostFds({
         base: aggFds,
