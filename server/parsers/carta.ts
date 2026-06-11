@@ -104,6 +104,10 @@ export interface ParsedCartaCapTable {
   rounds: ParsedRound[]
   poolAuthorized: number
   poolAvailable: number
+  // Carta's own stated fully-diluted total (Σ of the per-stakeholder "Fully
+  // Diluted Shares" column). The authoritative figure to reconcile our
+  // computed Total FDS against. Null when the column wasn't present.
+  fullyDilutedTotal: number | null
   warnings: string[]
 }
 
@@ -480,6 +484,7 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
     rounds: [],
     poolAuthorized: 0,
     poolAvailable: 0,
+    fullyDilutedTotal: null,
     warnings,
   }
 
@@ -628,6 +633,7 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
 
   // Walk rows below header
   const seenStakeholders = new Set<string>()
+  let fdsTotal = 0   // Σ of the per-stakeholder Fully Diluted Shares column.
   let r = headerRow + 1
   while (r <= detailed.rowCount) {
     const row = detailed.getRow(r)
@@ -692,8 +698,17 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
       }
     }
 
+    // Carta's authoritative per-stakeholder fully-diluted count — summed
+    // across stakeholder rows for the reconciliation total. (Summary rows
+    // above already `continue` out, so this only sees real holders.)
+    if (fdsCol) {
+      const f = asNumber(row.getCell(fdsCol.col).value)
+      if (f > 0) fdsTotal += f
+    }
+
     r++
   }
+  if (fdsTotal > 0) result.fullyDilutedTotal = Math.round(fdsTotal)
 
   // ----- Summary Cap Table: pull authorized counts & total pool -----
   // Layout: col 1 = label, col 2 = Shares Authorized, col 3 = Issued, col 4 = FDS

@@ -381,6 +381,9 @@ function migrate(d: Database.Database): void {
   // to decide between "Welcome" and "Re-import" framing; nothing else
   // gates on it now that the setup wizard is gone.
   ensureColumn('companies', 'setup_completed_at', 'TEXT')
+  // Carta's own stated fully-diluted total at last import — the authoritative
+  // figure the Rounds page reconciles its computed Total FDS against.
+  ensureColumn('companies', 'imported_fds_total', 'INTEGER')
   ensureColumn('grants', 'approval_status', 'TEXT')
   // Per-grant details the Carta "Stock Option and Incentive Plan" sheet
   // carries. quantity_issued is the original grant size; quantity_exercised /

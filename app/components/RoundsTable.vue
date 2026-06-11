@@ -10,7 +10,7 @@
 // useSortableTable (the config/timeline pattern — rows stay in server order,
 // so sorting is off). table-fixed + a <colgroup> let the <col> widths drive
 // the layout.
-import { Plus, Trash2, Save, Undo2, Check, ChevronRight, ChevronDown } from 'lucide-vue-next'
+import { Plus, Trash2, Save, Undo2, Check, ChevronRight, ChevronDown, CheckCircle2, AlertTriangle } from 'lucide-vue-next'
 import { fmtShares, fmtUSD } from '~/utils/format'
 import { newSharesIssued, openRoundPostFds } from '~/utils/capTable'
 
@@ -39,10 +39,21 @@ interface RoundCol {
   share_class_code: string | null
 }
 
-const { data: roundSummary, refresh: refreshSummary } = await useFetch<{ rounds: RoundCol[] }>(
+interface FdsReconciliation { imported_fds: number | null; computed_fds: number; delta: number | null }
+const { data: roundSummary, refresh: refreshSummary } = await useFetch<{ rounds: RoundCol[]; fds_reconciliation?: FdsReconciliation }>(
   () => `/api/companies/${props.companyId}/round-summary`,
-  { watch: [() => props.companyId], default: () => ({ rounds: [] }) },
+  { watch: [() => props.companyId], default: () => ({ rounds: [], fds_reconciliation: undefined }) },
 )
+// Reconciliation badge: compare our computed current-cap-table FDS against
+// Carta's own fully-diluted total from the last import. A small gap is just
+// share-level rounding; a larger one flags a modeling mismatch to chase down.
+const recon = computed(() => roundSummary.value?.fds_reconciliation)
+const reconStatus = computed<'ok' | 'off' | null>(() => {
+  const r = recon.value
+  if (!r || r.imported_fds == null || r.delta == null || !r.computed_fds) return null
+  const tolerance = Math.max(50, Math.round(r.imported_fds * 0.0005))
+  return Math.abs(r.delta) <= tolerance ? 'ok' : 'off'
+})
 const { data: agg, refresh: refreshAgg } = await useFetch<{ total_shares_fds: number | null }>(
   () => `/api/companies/${props.companyId}/aggregate-round`,
   { watch: [() => props.companyId], default: () => ({ total_shares_fds: null }) },
@@ -253,8 +264,17 @@ onBeforeUnmount(() => { if (savedTimer) clearTimeout(savedTimer) })
 const isEditingOpen = computed(() => draft.kind === 'open')
 const previewNewShares = computed(() =>
   draft.new_money && draft.share_price ? newSharesIssued(draft.new_money, draft.share_price) : null)
-const previewPostMoney = computed(() =>
-  draft.pre_money == null && draft.new_money == null ? null : (draft.pre_money || 0) + (draft.new_money || 0))
+// Pre-money is derivable from the prior round's post-money (the round before
+// this one chronologically). The pre_money field overrides that derivation.
+const prevPostMoney = computed(() => {
+  const idx = rounds.value.findIndex(x => x.round_id === expandedId.value)
+  return idx > 0 ? (rounds.value[idx - 1]?.post_money ?? null) : null
+})
+const effectivePreMoney = computed(() => draft.pre_money ?? prevPostMoney.value)
+const previewPostMoney = computed(() => {
+  if (effectivePreMoney.value == null && draft.new_money == null) return null
+  return (effectivePreMoney.value || 0) + (draft.new_money || 0)
+})
 const previewPostFds = computed(() => {
   const base = agg.value?.total_shares_fds ?? 0
   const notes = draft.notes_converted_override ?? expandedRound.value?.notes_converted ?? 0
@@ -268,6 +288,15 @@ const previewPostFds = computed(() => {
 })
 const previewOwnership = computed(() =>
   previewNewShares.value && previewPostFds.value ? previewNewShares.value / previewPostFds.value : null)
+
+// Add-form: a new round appends after the last one, so its derived pre-money
+// is the last existing round's post-money.
+const newPrevPostMoney = computed(() => rounds.value.length ? (rounds.value[rounds.value.length - 1]?.post_money ?? null) : null)
+const newDraftPostMoney = computed(() => {
+  const pre = newDraft.pre_money ?? newPrevPostMoney.value
+  if (pre == null && newDraft.new_money == null) return null
+  return (pre || 0) + (newDraft.new_money || 0)
+})
 </script>
 
 <template>
@@ -283,6 +312,19 @@ const previewOwnership = computed(() =>
         <button type="button" class="rounded border border-amber-400 bg-white px-2.5 py-1 text-[11.5px] font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50" :disabled="busyMigrate" @click="rebuildFromTimeline">Rebuild from my FDS timeline</button>
         <button type="button" class="rounded px-2.5 py-1 text-[11.5px] font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50" :disabled="busyMigrate" @click="clearImported">Remove imported rounds</button>
       </div>
+    </div>
+    <div v-if="reconStatus" class="mx-4 mt-4 flex items-start gap-2 rounded-lg border px-4 py-2.5 text-[12.5px]" :class="reconStatus === 'ok' ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-amber-300 bg-amber-50 text-amber-900'">
+      <component :is="reconStatus === 'ok' ? CheckCircle2 : AlertTriangle" :size="15" class="mt-0.5 shrink-0" />
+      <p v-if="reconStatus === 'ok'">
+        Computed Total FDS <span class="font-medium">{{ fmtShares(recon!.computed_fds) }}</span> ties to your Carta import
+        <span class="text-emerald-700">({{ recon!.delta === 0 ? 'exact' : (Math.abs(recon!.delta!) + ' shares — rounding') }}).</span>
+      </p>
+      <p v-else>
+        Computed Total FDS <span class="font-medium">{{ fmtShares(recon!.computed_fds) }}</span> differs from your Carta import
+        (<span class="font-medium">{{ fmtShares(recon!.imported_fds!) }}</span>) by
+        <span class="font-medium">{{ (recon!.delta! > 0 ? '+' : '') + fmtShares(recon!.delta!) }}</span> shares —
+        usually exercised/forfeited options or note conversions modeled differently. Worth reconciling before you rely on the export.
+      </p>
     </div>
     <div class="overflow-x-auto">
       <table class="text-[13px] num data-table w-full" :style="{ tableLayout: 'fixed', minWidth: totalWidth + 'px' }">
@@ -318,8 +360,7 @@ const previewOwnership = computed(() =>
                 <ChevronRight v-else :size="14" class="inline" />
               </td>
               <td class="px-3 py-2 text-left">
-                <span class="font-medium text-ink-900">{{ r.name || r.code }}</span>
-                <span class="text-ink-400 ml-1 text-[11px]">{{ r.code }}</span>
+                <span class="font-medium text-ink-900">{{ r.name || 'Untitled round' }}</span>
               </td>
               <td class="px-3 py-2 text-right">
                 <span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide" :class="kindMeta[r.kind].cls">{{ kindMeta[r.kind].label }}</span>
@@ -346,85 +387,83 @@ const previewOwnership = computed(() =>
             <!-- Inline edit form -->
             <tr v-if="expandedId === r.round_id" class="bg-ink-50/40 border-b border-ink-200">
               <td :colspan="colCount" class="px-5 py-4">
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
-                  <div>
-                    <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Round name</label>
-                    <input v-model="draft.name" type="text" class="w-full px-2 py-1.5 text-sm border border-ink-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand/30" :placeholder="r.code">
-                  </div>
-                  <div>
-                    <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Close date</label>
-                    <DateInput v-model="draft.close_date" class="w-full" />
-                  </div>
-                  <div>
-                    <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Kind</label>
-                    <div class="inline-flex rounded-md border border-ink-200 overflow-hidden text-[12px]">
-                      <button type="button" class="px-2.5 py-1.5" :class="draft.kind === 'formation' ? 'bg-ink-700 text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="draft.kind = 'formation'">Formation</button>
-                      <button type="button" class="px-2.5 py-1.5 border-l border-ink-200" :class="draft.kind === 'closed' ? 'bg-ink-700 text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="draft.kind = 'closed'">Closed</button>
-                      <button type="button" class="px-2.5 py-1.5 border-l border-ink-200" :class="draft.kind === 'open' ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="draft.kind = 'open'">Open</button>
+                <div class="max-w-5xl space-y-3.5">
+                  <!-- Identity row -->
+                  <div class="flex flex-wrap items-end gap-3">
+                    <label class="flex flex-col gap-1">
+                      <span class="text-[10px] uppercase tracking-wider text-ink-500">Round name</span>
+                      <input v-model="draft.name" type="text" class="w-44 px-2 py-1 text-sm border border-ink-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand/30" placeholder="Series B">
+                    </label>
+                    <label class="flex flex-col gap-1">
+                      <span class="text-[10px] uppercase tracking-wider text-ink-500">Close date</span>
+                      <DateInput v-model="draft.close_date" class="w-36" />
+                    </label>
+                    <div class="flex flex-col gap-1">
+                      <span class="text-[10px] uppercase tracking-wider text-ink-500">Status</span>
+                      <div class="inline-flex rounded-md border border-ink-200 overflow-hidden text-[12px]">
+                        <button type="button" class="px-2.5 py-1" :class="draft.kind === 'formation' ? 'bg-ink-700 text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="draft.kind = 'formation'">Formation</button>
+                        <button type="button" class="px-2.5 py-1 border-l border-ink-200" :class="draft.kind === 'closed' ? 'bg-ink-700 text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="draft.kind = 'closed'">Closed</button>
+                        <button type="button" class="px-2.5 py-1 border-l border-ink-200" :class="draft.kind === 'open' ? 'bg-brand text-white' : 'bg-white text-ink-600 hover:bg-ink-50'" @click="draft.kind = 'open'">Open</button>
+                      </div>
                     </div>
                   </div>
-                  <div>
-                    <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Pre-money valuation</label>
-                    <NumberInput v-model="draft.pre_money" prefix="$" placeholder="0" class="w-full" />
-                  </div>
-                  <div>
-                    <label class="block text-[11.5px] font-medium text-ink-700 mb-1">New money</label>
-                    <NumberInput v-model="draft.new_money" prefix="$" placeholder="0" class="w-full" />
-                  </div>
-                  <div>
-                    <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Share price</label>
-                    <NumberInput v-model="draft.share_price" prefix="$" :digits="5" placeholder="—" class="w-full" />
-                  </div>
-                  <div>
-                    <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Option pool issued</label>
-                    <NumberInput v-model="draft.option_pool_issued" placeholder="0" class="w-full" />
-                  </div>
-                  <div>
-                    <label class="block text-[11.5px] font-medium text-ink-700 mb-1">
-                      Notes converted <span class="text-ink-400 font-normal">(override)</span>
-                    </label>
-                    <NumberInput v-model="draft.notes_converted_override" :placeholder="(r.notes_converted ?? 0) > 0 ? fmtShares(r.notes_converted) : 'auto'" class="w-full" />
-                    <p v-if="draft.notes_converted_override != null" class="mt-1 text-[10px] text-ink-400">
-                      Manual · <button type="button" class="text-brand-edge hover:underline" @click="draft.notes_converted_override = null">revert to auto</button>
-                    </p>
-                  </div>
-                  <div>
-                    <label class="block text-[11.5px] font-medium text-ink-700 mb-1">
-                      Total FDS <span class="text-ink-400 font-normal">(pin)</span>
-                    </label>
-                    <NumberInput v-model="draft.total_shares_fds_override" :placeholder="fmtShares(r.total_shares_fds)" class="w-full" />
-                    <p v-if="draft.total_shares_fds_override != null" class="mt-1 text-[10px] text-ink-400">
-                      Pinned cumulative · <button type="button" class="text-brand-edge hover:underline" @click="draft.total_shares_fds_override = null">derive instead</button>
-                    </p>
-                  </div>
-                  <div>
-                    <label class="block text-[11.5px] font-medium text-ink-700 mb-1">
-                      Preferred issued <span class="text-ink-400 font-normal">(override)</span>
-                    </label>
-                    <NumberInput v-model="draft.preferred_issued_override" :placeholder="fmtShares(r.preferred_issued)" class="w-full" />
-                    <p v-if="draft.preferred_issued_override != null" class="mt-1 text-[10px] text-ink-400">
-                      Manual · <button type="button" class="text-brand-edge hover:underline" @click="draft.preferred_issued_override = null">derive from new money</button>
-                    </p>
-                  </div>
-                </div>
 
-                <!-- Live preview for the open round -->
-                <div v-if="isEditingOpen" class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-[12px] rounded-lg bg-brand-soft/40 px-4 py-3">
-                  <div>
-                    <div class="text-[10px] uppercase tracking-[0.06em] text-ink-500 font-medium">Post-money</div>
-                    <div class="num font-semibold text-ink-900">{{ previewPostMoney != null ? fmtUSD(previewPostMoney) : '—' }}</div>
+                  <!-- Equation: pre + new = post / price = preferred + pool + notes = total FDS.
+                       Amber labels = user input; ink labels with * = derived (override by typing). -->
+                  <div class="flex flex-wrap items-end gap-x-1.5 gap-y-2">
+                    <div class="flex flex-col gap-1">
+                      <span class="text-[10px] uppercase tracking-wider text-ink-500">Pre-money <span class="text-amber-500" title="Derived from the prior round's post-money — override by typing">*</span></span>
+                      <NumberInput v-model="draft.pre_money" prefix="$" :placeholder="prevPostMoney != null ? fmtUSD(prevPostMoney) : '0'" class="w-32" />
+                    </div>
+                    <span class="self-end pb-1.5 text-ink-400">+</span>
+                    <div class="flex flex-col gap-1">
+                      <span class="text-[10px] uppercase tracking-wider text-amber-600">New money</span>
+                      <NumberInput v-model="draft.new_money" prefix="$" placeholder="0" class="w-32" />
+                    </div>
+                    <span class="self-end pb-1.5 text-ink-400">=</span>
+                    <div class="flex flex-col gap-1">
+                      <span class="text-[10px] uppercase tracking-wider text-ink-500">Post-money</span>
+                      <div class="w-32 px-2 py-1 text-sm text-ink-600 italic border border-dashed border-ink-200 rounded-md bg-ink-50/50 num">{{ previewPostMoney != null ? fmtUSD(previewPostMoney) : '—' }}</div>
+                    </div>
+                    <span class="self-end pb-1.5 text-ink-400">/</span>
+                    <div class="flex flex-col gap-1">
+                      <span class="text-[10px] uppercase tracking-wider text-amber-600">Price / sh</span>
+                      <NumberInput v-model="draft.share_price" prefix="$" :digits="5" placeholder="—" class="w-28" />
+                    </div>
+                    <span class="self-end pb-1.5 text-ink-400">=</span>
+                    <div class="flex flex-col gap-1">
+                      <span class="text-[10px] uppercase tracking-wider text-ink-500">Preferred FDS</span>
+                      <NumberInput v-model="draft.preferred_issued_override" :placeholder="previewNewShares != null ? fmtShares(previewNewShares) : fmtShares(r.preferred_issued)" class="w-28" />
+                    </div>
+                    <span class="self-end pb-1.5 text-ink-400">+</span>
+                    <div class="flex flex-col gap-1">
+                      <span class="text-[10px] uppercase tracking-wider text-amber-600">Pool issued</span>
+                      <NumberInput v-model="draft.option_pool_issued" placeholder="0" class="w-28" />
+                    </div>
+                    <span class="self-end pb-1.5 text-ink-400">+</span>
+                    <div class="flex flex-col gap-1">
+                      <span class="text-[10px] uppercase tracking-wider text-amber-600">Notes conv.</span>
+                      <NumberInput v-model="draft.notes_converted_override" :placeholder="(r.notes_converted ?? 0) > 0 ? fmtShares(r.notes_converted) : 'auto'" class="w-28" />
+                    </div>
+                    <span class="self-end pb-1.5 text-ink-400">=</span>
+                    <div class="flex flex-col gap-1">
+                      <span class="text-[10px] uppercase tracking-wider text-ink-500">Total FDS <span class="text-amber-500" title="Derived cumulatively — pin by typing">*</span></span>
+                      <NumberInput v-model="draft.total_shares_fds_override" :placeholder="fmtShares(r.total_shares_fds)" class="w-32" />
+                    </div>
                   </div>
-                  <div>
-                    <div class="text-[10px] uppercase tracking-[0.06em] text-ink-500 font-medium">New shares</div>
-                    <div class="num font-semibold text-ink-900">{{ previewNewShares != null ? fmtShares(previewNewShares) : '—' }}</div>
+
+                  <!-- Revert hints for any overridden derived field -->
+                  <div v-if="draft.pre_money != null || draft.preferred_issued_override != null || draft.notes_converted_override != null || draft.total_shares_fds_override != null" class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-ink-400">
+                    <span v-if="draft.pre_money != null">Pre-money set · <button type="button" class="text-brand-edge hover:underline" @click="draft.pre_money = null">derive from prior round</button></span>
+                    <span v-if="draft.preferred_issued_override != null">Preferred FDS manual · <button type="button" class="text-brand-edge hover:underline" @click="draft.preferred_issued_override = null">derive from new money</button></span>
+                    <span v-if="draft.notes_converted_override != null">Notes conv. manual · <button type="button" class="text-brand-edge hover:underline" @click="draft.notes_converted_override = null">revert to auto</button></span>
+                    <span v-if="draft.total_shares_fds_override != null">Total FDS pinned · <button type="button" class="text-brand-edge hover:underline" @click="draft.total_shares_fds_override = null">derive instead</button></span>
                   </div>
-                  <div>
-                    <div class="text-[10px] uppercase tracking-[0.06em] text-ink-500 font-medium">Total FDS post</div>
-                    <div class="num font-semibold text-ink-900">{{ fmtShares(previewPostFds) }}</div>
-                  </div>
-                  <div>
-                    <div class="text-[10px] uppercase tracking-[0.06em] text-ink-500 font-medium">New owns ≈</div>
-                    <div class="num font-semibold text-ink-900">{{ previewOwnership != null ? (previewOwnership * 100).toFixed(2) + '%' : '—' }}</div>
+
+                  <!-- Open-round ownership preview -->
+                  <div v-if="isEditingOpen" class="flex flex-wrap items-center gap-2 text-[11.5px] text-ink-600">
+                    <span class="inline-flex items-center gap-1 rounded-full bg-brand-soft/60 px-2.5 py-1"><span class="font-medium text-ink-800 num">{{ fmtShares(previewPostFds) }}</span> total FDS post</span>
+                    <span class="inline-flex items-center gap-1 rounded-full bg-brand-soft/60 px-2.5 py-1">new owns ≈ <span class="font-medium text-ink-800 num">{{ previewOwnership != null ? (previewOwnership * 100).toFixed(2) + '%' : '—' }}</span></span>
                   </div>
                 </div>
 
@@ -446,35 +485,45 @@ const previewOwnership = computed(() =>
           <!-- Add-round form -->
           <tr v-if="adding" class="bg-brand-soft/20 border-b border-ink-200">
             <td :colspan="colCount" class="px-5 py-4">
-              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
-                <div>
-                  <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Round name</label>
-                  <input v-model="newDraft.name" type="text" class="w-full px-2 py-1.5 text-sm border border-ink-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand/30" placeholder="Series B" @keydown.enter="commitAdd">
-                </div>
-                <div>
-                  <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Close date</label>
-                  <DateInput v-model="newDraft.close_date" class="w-full" />
-                </div>
-                <div class="flex items-end">
-                  <label class="inline-flex items-center gap-2 text-[12px] text-ink-700">
+              <div class="max-w-5xl space-y-3.5">
+                <div class="flex flex-wrap items-end gap-3">
+                  <label class="flex flex-col gap-1">
+                    <span class="text-[10px] uppercase tracking-wider text-ink-500">Round name</span>
+                    <input v-model="newDraft.name" type="text" class="w-44 px-2 py-1 text-sm border border-ink-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand/30" placeholder="Series B" @keydown.enter="commitAdd">
+                  </label>
+                  <label class="flex flex-col gap-1">
+                    <span class="text-[10px] uppercase tracking-wider text-ink-500">Close date</span>
+                    <DateInput v-model="newDraft.close_date" class="w-36" />
+                  </label>
+                  <label class="inline-flex items-center gap-2 text-[12px] text-ink-700 pb-1.5">
                     <input v-model="newDraft.add_open" type="checkbox" class="rounded border-ink-300"> This is the open round
                   </label>
                 </div>
-                <div>
-                  <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Pre-money valuation</label>
-                  <NumberInput v-model="newDraft.pre_money" prefix="$" placeholder="0" class="w-full" />
-                </div>
-                <div>
-                  <label class="block text-[11.5px] font-medium text-ink-700 mb-1">New money</label>
-                  <NumberInput v-model="newDraft.new_money" prefix="$" placeholder="0" class="w-full" />
-                </div>
-                <div>
-                  <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Share price</label>
-                  <NumberInput v-model="newDraft.share_price" prefix="$" :digits="5" placeholder="—" class="w-full" />
-                </div>
-                <div>
-                  <label class="block text-[11.5px] font-medium text-ink-700 mb-1">Option pool issued</label>
-                  <NumberInput v-model="newDraft.option_pool_issued" placeholder="0" class="w-full" />
+                <div class="flex flex-wrap items-end gap-x-1.5 gap-y-2">
+                  <div class="flex flex-col gap-1">
+                    <span class="text-[10px] uppercase tracking-wider text-ink-500">Pre-money <span class="text-amber-500" title="Derived from the prior round's post-money — override by typing">*</span></span>
+                    <NumberInput v-model="newDraft.pre_money" prefix="$" :placeholder="newPrevPostMoney != null ? fmtUSD(newPrevPostMoney) : '0'" class="w-32" />
+                  </div>
+                  <span class="self-end pb-1.5 text-ink-400">+</span>
+                  <div class="flex flex-col gap-1">
+                    <span class="text-[10px] uppercase tracking-wider text-amber-600">New money</span>
+                    <NumberInput v-model="newDraft.new_money" prefix="$" placeholder="0" class="w-32" />
+                  </div>
+                  <span class="self-end pb-1.5 text-ink-400">=</span>
+                  <div class="flex flex-col gap-1">
+                    <span class="text-[10px] uppercase tracking-wider text-ink-500">Post-money</span>
+                    <div class="w-32 px-2 py-1 text-sm text-ink-600 italic border border-dashed border-ink-200 rounded-md bg-ink-50/50 num">{{ newDraftPostMoney != null ? fmtUSD(newDraftPostMoney) : '—' }}</div>
+                  </div>
+                  <span class="self-end pb-1.5 text-ink-400">/</span>
+                  <div class="flex flex-col gap-1">
+                    <span class="text-[10px] uppercase tracking-wider text-amber-600">Price / sh</span>
+                    <NumberInput v-model="newDraft.share_price" prefix="$" :digits="5" placeholder="—" class="w-28" />
+                  </div>
+                  <span class="self-end pb-1.5 text-ink-400">·</span>
+                  <div class="flex flex-col gap-1">
+                    <span class="text-[10px] uppercase tracking-wider text-amber-600">Pool issued</span>
+                    <NumberInput v-model="newDraft.option_pool_issued" placeholder="0" class="w-28" />
+                  </div>
                 </div>
               </div>
               <div class="mt-4 flex items-center gap-2">

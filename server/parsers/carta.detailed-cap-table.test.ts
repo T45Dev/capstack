@@ -47,6 +47,11 @@ describe('Detailed Cap Table header detection', () => {
       parsed.holdings.find(h => h.stakeholderName === name && h.shareClassCode === code)?.shares ?? 0
     expect(sharesOf('Alice Founder', 'CS')).toBe(4_000_000)
     expect(sharesOf('Acme Ventures', 'SA1')).toBe(1_000_000)
+
+    // Carta's stated fully-diluted total = Σ the "Fully Diluted Shares" column,
+    // the authoritative figure the Rounds-page reconciliation badge compares
+    // the computed Total FDS against.
+    expect(parsed.fullyDilutedTotal).toBe(5_000_000)
   })
 
   it('still parses the canonical "Name" + share-class header', async () => {

@@ -34,6 +34,11 @@ export default defineEventHandler(async (event) => {
   }
 
   const tx = db().transaction(() => {
+    // Carta's own fully-diluted total — stored for the Rounds-page
+    // reconciliation badge (computed Total FDS vs the source figure).
+    db().prepare('UPDATE companies SET imported_fds_total = ? WHERE id = ?')
+      .run(parsed.fullyDilutedTotal ?? null, id)
+
     if (replace) {
       // Grants get re-loaded each import; pool too. Stakeholders are
       // merged (not wiped) so manually-added people aren't lost when
