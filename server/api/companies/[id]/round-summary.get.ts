@@ -407,11 +407,13 @@ export default defineEventHandler((event) => {
     // converted" row carries that share count so the operator can see
     // it line up with the per-note shares on the CN page.
     //
-    // Formation can short-circuit the cumulative path by setting
+    // Any round can short-circuit the cumulative path by setting
     // total_shares_fds_override — the operator's stated snapshot total
     // becomes the absolute cumulative through that row, and subsequent
-    // rounds continue accumulating from it.
-    if (r.kind === 'formation' && r.total_shares_fds_override != null) {
+    // rounds continue accumulating from it. Used by both the formation
+    // snapshot and the timeline-migrated historical rounds, which pin
+    // each row's cumulative FDS to the trusted Round-history figure.
+    if (r.total_shares_fds_override != null) {
       cumulativeFDS = Math.floor(Number(r.total_shares_fds_override))
     } else {
       cumulativeFDS += common + preferredIssued + poolIssued + notesConverted
