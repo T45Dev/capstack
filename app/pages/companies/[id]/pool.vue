@@ -11,7 +11,7 @@
 //                        cliff date).
 import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, ChevronRight, Lightbulb, TrendingUp, TrendingDown as ArrowDownIcon, X, UploadCloud, AlertTriangle, CheckCircle2 } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtUSD, fmtDate, fmtPricePerShare } from '~/utils/format'
-import { authorizedPool, poolEquation, grantIssued } from '~/utils/capTable'
+import { authorizedPool, poolEquation, grantOutstanding } from '~/utils/capTable'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -442,10 +442,6 @@ const totals = computed(() => {
   // Lifetime grant accounting: lifecycle counts from the Carta option-
   // plan sheet via per-grant detail.
   const ogrants = (grantsData.value?.grants || []).filter((g: any) => g.status === 'outstanding')
-  // Issued via the shared helper: `quantity` is Carta's NET outstanding, so
-  // reconstruct issued when the Issued column was absent (else Outstanding =
-  // issued − lifecycle double-subtracts). See grantIssued.
-  const totalIssued = ogrants.reduce((a: number, g: any) => a + grantIssued(g), 0)
   const totalExercised = ogrants.reduce((a: number, g: any) => a + (g.quantity_exercised || 0), 0)
   const totalForfeited = ogrants.reduce((a: number, g: any) => a + (g.quantity_forfeited || 0), 0)
   const totalExpired = ogrants.reduce((a: number, g: any) => a + (g.quantity_expired || 0), 0)
@@ -454,11 +450,12 @@ const totals = computed(() => {
   // Carta still tracks them separately for audit; the breakdown stat
   // below shows the split.
   const totalForfeitedOrExpired = totalForfeited + totalExpired
-  // Outstanding = Issued − Exercised − Forfeited − Expired. Derived
-  // from per-event counts so it correctly decreases on every lifecycle
-  // event (rather than relying on Carta's Quantity Outstanding column
-  // being up-to-date).
-  const outstandingShares = totalIssued - totalExercised - totalForfeitedOrExpired
+  // Outstanding = Carta's authoritative "Quantity Outstanding" (stored per
+  // grant as `quantity`) via grantOutstanding. Deriving it from issued −
+  // lifecycle drifted from Carta because the Forfeited / Expired / Canceled
+  // columns don't cleanly reconcile; Issued is the figure we now derive
+  // (Outstanding + Exercised + Forfeited/Expired, inside poolEquation).
+  const outstandingShares = ogrants.reduce((a: number, g: any) => a + grantOutstanding(g), 0)
   const proposedShares = events.value.filter(e => e.source === 'grant_proposed').reduce((a, e) => a + e.shares, 0)
   const ideaGrants = events.value.filter(e => isIdea(e.source) && (e.type === 'grant' || e.type === 'reserve')).reduce((a, e) => a + e.shares, 0)
   const ideaTopups = events.value.filter(e => isIdea(e.source) && e.type === 'pool_topup').reduce((a, e) => a + e.shares, 0)

@@ -168,7 +168,19 @@ export function grantIssued(g: GrantLifecycle): number {
   return (g.quantity || 0) + (g.quantity_exercised || 0) + (g.quantity_forfeited || 0) + (g.quantity_expired || 0)
 }
 
-/** Currently-held options = issued − exercised − forfeited − expired. */
+/**
+ * Currently-held (unexercised) options. Carta's "Quantity Outstanding" column
+ * is the authoritative current figure, and we store it as `quantity` when the
+ * export carries it — so TRUST it. Carta exports often split cancellations
+ * across separate Forfeited / Expired / Canceled columns that don't cleanly
+ * reconcile to Outstanding, so deriving `issued − exercised − forfeited −
+ * expired` can drift from Carta's own number. We only fall back to that
+ * derivation when `quantity` looks like the issued figure (i.e. no Outstanding
+ * column was present) so a sheet that lacks it still works.
+ */
 export function grantOutstanding(g: GrantLifecycle): number {
-  return grantIssued(g) - (g.quantity_exercised || 0) - (g.quantity_forfeited || 0) - (g.quantity_expired || 0)
+  const issued = grantIssued(g)
+  // quantity differs from issued ⇒ it's the real (net) Outstanding from Carta.
+  if (g.quantity != null && g.quantity !== issued) return g.quantity
+  return issued - (g.quantity_exercised || 0) - (g.quantity_forfeited || 0) - (g.quantity_expired || 0)
 }
