@@ -394,10 +394,12 @@ const newDraftPostMoney = computed(() => {
                       <span class="text-[10px] uppercase tracking-wider text-ink-500">Round name</span>
                       <input v-model="draft.name" type="text" class="w-44 px-2 py-1 text-sm border border-ink-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand/30" placeholder="Series B">
                     </label>
-                    <label class="flex flex-col gap-1">
+                    <div class="flex flex-col gap-1">
                       <span class="text-[10px] uppercase tracking-wider text-ink-500">Close date</span>
-                      <DateInput v-model="draft.close_date" class="w-36" />
-                    </label>
+                      <div class="w-36 px-2 py-1 border border-ink-300 rounded-md bg-white focus-within:ring-2 focus-within:ring-brand/30">
+                        <DateInput v-model="draft.close_date" variant="bare" no-hint />
+                      </div>
+                    </div>
                     <div class="flex flex-col gap-1">
                       <span class="text-[10px] uppercase tracking-wider text-ink-500">Status</span>
                       <div class="inline-flex rounded-md border border-ink-200 overflow-hidden text-[12px]">
@@ -408,47 +410,48 @@ const newDraftPostMoney = computed(() => {
                     </div>
                   </div>
 
-                  <!-- Equation: pre + new = post / price = preferred + pool + notes = total FDS.
-                       Amber labels = user input; ink labels with * = derived (override by typing). -->
-                  <div class="flex flex-wrap items-end gap-x-1.5 gap-y-2">
+                  <!-- Equation: pre + new = (post-money / price) = preferred + pool + notes = total FDS.
+                       Price/sh sits UNDER post-money as a fraction to show the division; the operators
+                       line up with the top input row. Amber labels = user input; ink labels with * are
+                       derived (override by typing). -->
+                  <div class="flex flex-wrap items-start gap-x-2 gap-y-3">
                     <div class="flex flex-col gap-1">
                       <span class="text-[10px] uppercase tracking-wider text-ink-500">Pre-money <span class="text-amber-500" title="Derived from the prior round's post-money — override by typing">*</span></span>
-                      <NumberInput v-model="draft.pre_money" prefix="$" :placeholder="prevPostMoney != null ? fmtUSD(prevPostMoney) : '0'" class="w-32" />
+                      <NumberInput v-model="draft.pre_money" prefix="$" :placeholder="prevPostMoney != null ? fmtUSD(prevPostMoney) : '0'" class="w-28" />
                     </div>
-                    <span class="self-end pb-1.5 text-ink-400">+</span>
+                    <div class="flex flex-col gap-1"><span class="text-[10px] uppercase tracking-wider">&nbsp;</span><span class="flex items-center h-[30px] text-ink-400">+</span></div>
                     <div class="flex flex-col gap-1">
                       <span class="text-[10px] uppercase tracking-wider text-amber-600">New money</span>
-                      <NumberInput v-model="draft.new_money" prefix="$" placeholder="0" class="w-32" />
+                      <NumberInput v-model="draft.new_money" prefix="$" placeholder="0" class="w-28" />
                     </div>
-                    <span class="self-end pb-1.5 text-ink-400">=</span>
+                    <div class="flex flex-col gap-1"><span class="text-[10px] uppercase tracking-wider">&nbsp;</span><span class="flex items-center h-[30px] text-ink-400">=</span></div>
+                    <!-- post-money over price/sh -->
                     <div class="flex flex-col gap-1">
                       <span class="text-[10px] uppercase tracking-wider text-ink-500">Post-money</span>
-                      <div class="w-32 px-2 py-1 text-sm text-ink-600 italic border border-dashed border-ink-200 rounded-md bg-ink-50/50 num">{{ previewPostMoney != null ? fmtUSD(previewPostMoney) : '—' }}</div>
-                    </div>
-                    <span class="self-end pb-1.5 text-ink-400">/</span>
-                    <div class="flex flex-col gap-1">
+                      <div class="w-28 px-2 py-1 text-sm text-ink-600 italic border border-dashed border-ink-200 rounded-md bg-ink-50/50 num">{{ previewPostMoney != null ? fmtUSD(previewPostMoney) : '—' }}</div>
+                      <div class="w-28 border-t border-ink-400 mt-1.5 mb-0.5"></div>
                       <span class="text-[10px] uppercase tracking-wider text-amber-600">Price / sh</span>
                       <NumberInput v-model="draft.share_price" prefix="$" :digits="5" placeholder="—" class="w-28" />
                     </div>
-                    <span class="self-end pb-1.5 text-ink-400">=</span>
+                    <div class="flex flex-col gap-1"><span class="text-[10px] uppercase tracking-wider">&nbsp;</span><span class="flex items-center h-[30px] text-ink-400">=</span></div>
                     <div class="flex flex-col gap-1">
                       <span class="text-[10px] uppercase tracking-wider text-ink-500">Preferred FDS</span>
                       <NumberInput v-model="draft.preferred_issued_override" :placeholder="previewNewShares != null ? fmtShares(previewNewShares) : fmtShares(r.preferred_issued)" class="w-28" />
                     </div>
-                    <span class="self-end pb-1.5 text-ink-400">+</span>
+                    <div class="flex flex-col gap-1"><span class="text-[10px] uppercase tracking-wider">&nbsp;</span><span class="flex items-center h-[30px] text-ink-400">+</span></div>
                     <div class="flex flex-col gap-1">
                       <span class="text-[10px] uppercase tracking-wider text-amber-600">Pool issued</span>
-                      <NumberInput v-model="draft.option_pool_issued" placeholder="0" class="w-28" />
+                      <NumberInput v-model="draft.option_pool_issued" placeholder="0" class="w-24" />
                     </div>
-                    <span class="self-end pb-1.5 text-ink-400">+</span>
+                    <div class="flex flex-col gap-1"><span class="text-[10px] uppercase tracking-wider">&nbsp;</span><span class="flex items-center h-[30px] text-ink-400">+</span></div>
                     <div class="flex flex-col gap-1">
                       <span class="text-[10px] uppercase tracking-wider text-amber-600">Notes conv.</span>
-                      <NumberInput v-model="draft.notes_converted_override" :placeholder="(r.notes_converted ?? 0) > 0 ? fmtShares(r.notes_converted) : 'auto'" class="w-28" />
+                      <NumberInput v-model="draft.notes_converted_override" :placeholder="(r.notes_converted ?? 0) > 0 ? fmtShares(r.notes_converted) : 'auto'" class="w-24" />
                     </div>
-                    <span class="self-end pb-1.5 text-ink-400">=</span>
+                    <div class="flex flex-col gap-1"><span class="text-[10px] uppercase tracking-wider">&nbsp;</span><span class="flex items-center h-[30px] text-ink-400">=</span></div>
                     <div class="flex flex-col gap-1">
                       <span class="text-[10px] uppercase tracking-wider text-ink-500">Total FDS <span class="text-amber-500" title="Derived cumulatively — pin by typing">*</span></span>
-                      <NumberInput v-model="draft.total_shares_fds_override" :placeholder="fmtShares(r.total_shares_fds)" class="w-32" />
+                      <NumberInput v-model="draft.total_shares_fds_override" :placeholder="fmtShares(r.total_shares_fds)" class="w-28" />
                     </div>
                   </div>
 
@@ -491,38 +494,38 @@ const newDraftPostMoney = computed(() => {
                     <span class="text-[10px] uppercase tracking-wider text-ink-500">Round name</span>
                     <input v-model="newDraft.name" type="text" class="w-44 px-2 py-1 text-sm border border-ink-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand/30" placeholder="Series B" @keydown.enter="commitAdd">
                   </label>
-                  <label class="flex flex-col gap-1">
+                  <div class="flex flex-col gap-1">
                     <span class="text-[10px] uppercase tracking-wider text-ink-500">Close date</span>
-                    <DateInput v-model="newDraft.close_date" class="w-36" />
-                  </label>
+                    <div class="w-36 px-2 py-1 border border-ink-300 rounded-md bg-white focus-within:ring-2 focus-within:ring-brand/30">
+                      <DateInput v-model="newDraft.close_date" variant="bare" no-hint />
+                    </div>
+                  </div>
                   <label class="inline-flex items-center gap-2 text-[12px] text-ink-700 pb-1.5">
                     <input v-model="newDraft.add_open" type="checkbox" class="rounded border-ink-300"> This is the open round
                   </label>
                 </div>
-                <div class="flex flex-wrap items-end gap-x-1.5 gap-y-2">
+                <div class="flex flex-wrap items-start gap-x-2 gap-y-3">
                   <div class="flex flex-col gap-1">
                     <span class="text-[10px] uppercase tracking-wider text-ink-500">Pre-money <span class="text-amber-500" title="Derived from the prior round's post-money — override by typing">*</span></span>
-                    <NumberInput v-model="newDraft.pre_money" prefix="$" :placeholder="newPrevPostMoney != null ? fmtUSD(newPrevPostMoney) : '0'" class="w-32" />
+                    <NumberInput v-model="newDraft.pre_money" prefix="$" :placeholder="newPrevPostMoney != null ? fmtUSD(newPrevPostMoney) : '0'" class="w-28" />
                   </div>
-                  <span class="self-end pb-1.5 text-ink-400">+</span>
+                  <div class="flex flex-col gap-1"><span class="text-[10px] uppercase tracking-wider">&nbsp;</span><span class="flex items-center h-[30px] text-ink-400">+</span></div>
                   <div class="flex flex-col gap-1">
                     <span class="text-[10px] uppercase tracking-wider text-amber-600">New money</span>
-                    <NumberInput v-model="newDraft.new_money" prefix="$" placeholder="0" class="w-32" />
+                    <NumberInput v-model="newDraft.new_money" prefix="$" placeholder="0" class="w-28" />
                   </div>
-                  <span class="self-end pb-1.5 text-ink-400">=</span>
+                  <div class="flex flex-col gap-1"><span class="text-[10px] uppercase tracking-wider">&nbsp;</span><span class="flex items-center h-[30px] text-ink-400">=</span></div>
                   <div class="flex flex-col gap-1">
                     <span class="text-[10px] uppercase tracking-wider text-ink-500">Post-money</span>
-                    <div class="w-32 px-2 py-1 text-sm text-ink-600 italic border border-dashed border-ink-200 rounded-md bg-ink-50/50 num">{{ newDraftPostMoney != null ? fmtUSD(newDraftPostMoney) : '—' }}</div>
-                  </div>
-                  <span class="self-end pb-1.5 text-ink-400">/</span>
-                  <div class="flex flex-col gap-1">
+                    <div class="w-28 px-2 py-1 text-sm text-ink-600 italic border border-dashed border-ink-200 rounded-md bg-ink-50/50 num">{{ newDraftPostMoney != null ? fmtUSD(newDraftPostMoney) : '—' }}</div>
+                    <div class="w-28 border-t border-ink-400 mt-1.5 mb-0.5"></div>
                     <span class="text-[10px] uppercase tracking-wider text-amber-600">Price / sh</span>
                     <NumberInput v-model="newDraft.share_price" prefix="$" :digits="5" placeholder="—" class="w-28" />
                   </div>
-                  <span class="self-end pb-1.5 text-ink-400">·</span>
+                  <div class="flex flex-col gap-1"><span class="text-[10px] uppercase tracking-wider">&nbsp;</span><span class="flex items-center h-[30px] text-ink-400">·</span></div>
                   <div class="flex flex-col gap-1">
                     <span class="text-[10px] uppercase tracking-wider text-amber-600">Pool issued</span>
-                    <NumberInput v-model="newDraft.option_pool_issued" placeholder="0" class="w-28" />
+                    <NumberInput v-model="newDraft.option_pool_issued" placeholder="0" class="w-24" />
                   </div>
                 </div>
               </div>
