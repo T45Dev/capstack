@@ -11,7 +11,7 @@
 //                        cliff date).
 import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, ChevronRight, Lightbulb, TrendingUp, TrendingDown as ArrowDownIcon, X, UploadCloud, AlertTriangle, CheckCircle2 } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtUSD, fmtDate, fmtPricePerShare } from '~/utils/format'
-import { authorizedPool, poolEquation } from '~/utils/capTable'
+import { authorizedPool, poolEquation, grantIssued } from '~/utils/capTable'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -442,7 +442,10 @@ const totals = computed(() => {
   // Lifetime grant accounting: lifecycle counts from the Carta option-
   // plan sheet via per-grant detail.
   const ogrants = (grantsData.value?.grants || []).filter((g: any) => g.status === 'outstanding')
-  const totalIssued = ogrants.reduce((a: number, g: any) => a + (g.quantity_issued || g.quantity), 0)
+  // Issued via the shared helper: `quantity` is Carta's NET outstanding, so
+  // reconstruct issued when the Issued column was absent (else Outstanding =
+  // issued − lifecycle double-subtracts). See grantIssued.
+  const totalIssued = ogrants.reduce((a: number, g: any) => a + grantIssued(g), 0)
   const totalExercised = ogrants.reduce((a: number, g: any) => a + (g.quantity_exercised || 0), 0)
   const totalForfeited = ogrants.reduce((a: number, g: any) => a + (g.quantity_forfeited || 0), 0)
   const totalExpired = ogrants.reduce((a: number, g: any) => a + (g.quantity_expired || 0), 0)

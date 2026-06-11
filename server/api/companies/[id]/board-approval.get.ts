@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs'
 import { db } from '~~/server/utils/db'
 import { computeRound, type ConvertibleNote } from '~~/server/utils/calc'
+import { grantIssued } from '~~/shared/capTableModel'
 
 // Generates a board-approval xlsx that follows the S3VC Option Grants
 // Workbook template (tab 3, "Board Option Grant Approval"). Returned as a
@@ -502,7 +503,7 @@ export default defineEventHandler(async (event) => {
   for (const g of allGrants) {
     if (g.status !== 'outstanding') continue
     const a = agg[catOf(g.recipient_type)]
-    const issued = g.quantity_issued ?? g.quantity
+    const issued = grantIssued(g)
     const exercised = g.quantity_exercised || 0
     const forfExp = (g.quantity_forfeited || 0) + (g.quantity_expired || 0)
     a.issued += issued

@@ -2,7 +2,7 @@
 import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle, UploadCloud, AlertTriangle, CheckCircle2, X, Award } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtDate, fmtPricePerShare, normalizeDate } from '~/utils/format'
 import { calcSum, calcPct, calcValueUSD } from '~/utils/calc'
-import { authorizedPool, poolEquation } from '~/utils/capTable'
+import { authorizedPool, poolEquation, grantIssued } from '~/utils/capTable'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -201,7 +201,7 @@ const proposed = computed(() => data.value!.grants.filter(g => g.status === 'pro
 // Outstanding column is present / up-to-date. Forfeited and Expired
 // are lumped together for display (same effect on the pool — shares
 // return to Available).
-const totalIssued = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_issued || g.quantity), 0))
+const totalIssued = computed(() => outstanding.value.reduce((a, g) => a + grantIssued(g), 0))
 const totalExercised = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_exercised || 0), 0))
 const totalForfeitedOrExpired = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_forfeited || 0) + (g.quantity_expired || 0), 0))
 // Keep the split available for the lifecycle breakdown / audit views.
