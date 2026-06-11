@@ -494,7 +494,8 @@ export default defineEventHandler(async (event) => {
   //   issued (Prior) = quantity_issued ?? quantity
   //   forfExp        = forfeited + expired (both return to the pool)
   //   outstanding    = issued − exercised − forfExp
-  //   Total          = outstanding + exercised + new − forfExp
+  //   Total          = outstanding + exercised + new (forfeited returned to the
+  //                    pool, so it's informational only — not part of allocated)
   const agg: Record<Cat, { issued: number; exercised: number; forfExp: number; outstanding: number; newG: number }> = {
     'Employees':      { issued: 0, exercised: 0, forfExp: 0, outstanding: 0, newG: 0 },
     'BoD / Advisors': { issued: 0, exercised: 0, forfExp: 0, outstanding: 0, newG: 0 },
@@ -519,30 +520,25 @@ export default defineEventHandler(async (event) => {
     const a = agg[label]
     const prior = a.issued
     const forf = -a.forfExp
-    const total = a.outstanding + a.exercised + a.newG - a.forfExp
+    // Total = Outstanding + Exercised + New (the header). Forfeited shares
+    // returned to the pool, so they're NOT allocated — they fall into
+    // Remaining. Subtracting them here understated Allocated and overstated
+    // "Options Remaining" by the forfeited amount.
+    const total = a.outstanding + a.exercised + a.newG
 
     ws.getCell(r, 1).value = label
     ws.getCell(r, 2).value = prior
     ws.getCell(r, 3).value = a.newG
     ws.getCell(r, 4).value = forf
-    ws.getCell(r, 5).value = a.outstanding
+    // Outstanding = Prior(issued) + Forfeited(stored negative) − Exercised.
+    setFormula(r, 5, `${cellAddr(2, r)}+${cellAddr(4, r)}-${cellAddr(6, r)}`, a.outstanding)
     ws.getCell(r, 6).value = a.exercised
-    // Total = Outstanding + Exercised + New + Forfeited (Forfeited is stored negative)
-    setFormula(r, 7, `${cellAddr(5, r)}+${cellAddr(6, r)}+${cellAddr(3, r)}+${cellAddr(4, r)}`, total)
+    // Total = Outstanding + Exercised + New.
+    setFormula(r, 7, `${cellAddr(5, r)}+${cellAddr(6, r)}+${cellAddr(3, r)}`, total)
     for (let c = 2; c <= 7; c++) ws.getCell(r, c).numFmt = '#,##0;(#,##0)'
     ws.getCell(r, 8).numFmt = '0.000%'
     setPct(r, 8, cellAddr(7, r), postFDS > 0 ? total / postFDS : 0)
     applyBorders(r, 1, 8)
-
-    // Explanatory note when a category is a net source to the pool
-    // (forfeitures exceed new draws), mirroring the board's annotation.
-    if (label === 'Ex-Employees' && (a.forfExp > 0 || a.exercised > 0) && total < a.newG) {
-      ws.mergeCells(r, 9, r, LAST_COL)
-      const note = ws.getCell(r, 9)
-      note.value = `Ex-Employees reflects (${a.forfExp.toLocaleString()}) of forfeited/expired options returning to the pool, net of ${a.exercised.toLocaleString()} historical exercises and ${a.newG.toLocaleString()} new grant(s). A negative total means the category is a net source of shares to the pool rather than a draw.`
-      note.font = { size: 9, italic: true, name: 'Calibri', color: { argb: 'FF475569' } }
-      note.alignment = { wrapText: true, vertical: 'top' }
-    }
 
     catPrior += prior; catNew += a.newG; catForf += forf
     catOut += a.outstanding; catEx += a.exercised; catTotal += total
