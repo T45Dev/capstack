@@ -11,6 +11,12 @@ export default defineEventHandler(async (event) => {
   }>(event)
   if (!body?.name?.trim()) throw createError({ statusCode: 400, message: 'name is required' })
 
+  // Prevent duplicate companies (case-insensitive, trimmed). The slug is
+  // de-duped below, but two workspaces sharing a display name is confusing —
+  // reject it up front.
+  const dupe = db().prepare('SELECT 1 FROM companies WHERE LOWER(name) = LOWER(?)').get(body.name.trim())
+  if (dupe) throw createError({ statusCode: 409, message: `A company named "${body.name.trim()}" already exists.` })
+
   const id = newId('co')
   let slug = slugify(body.name)
   if (!slug) slug = id

@@ -4,6 +4,27 @@ import { Plus, Trash2, Save, Settings as SettingsIcon } from 'lucide-vue-next'
 const route = useRoute()
 const id = computed(() => route.params.id as string)
 
+// ---- Company (rename) --------------------------------------------------
+const { data: company, refresh: refreshCompany } = await useFetch<{ id: string; name: string } | null>(
+  () => `/api/companies/${id.value}`, { watch: [id], default: () => null })
+const nameDraft = ref('')
+watch(company, c => { if (c) nameDraft.value = c.name }, { immediate: true })
+const savingName = ref(false)
+const nameError = ref<string | null>(null)
+const nameDirty = computed(() => !!company.value && !!nameDraft.value.trim() && nameDraft.value.trim() !== company.value.name)
+async function saveName() {
+  if (!nameDirty.value || savingName.value) return
+  savingName.value = true; nameError.value = null
+  try {
+    await $fetch(`/api/companies/${id.value}`, { method: 'PATCH', body: { name: nameDraft.value.trim() } })
+    await refreshCompany()
+    // Refresh the rest of the app (top-bar breadcrumb, company lists) too.
+    await refreshNuxtData()
+  } catch (e: any) {
+    nameError.value = e?.data?.message || e?.statusMessage || 'Could not rename — that name may already be in use.'
+  } finally { savingName.value = false }
+}
+
 // ---- Tabs --------------------------------------------------------------
 // Scaffolded as an array so more settings sections can be added later.
 const tabs = [
@@ -135,6 +156,17 @@ function resetIdeaMapping(f: CanonicalField) {
     <PageHeader :breadcrumb="[{ label: 'Cap-table model' }, { label: 'Settings' }]" description="Per-company configuration.">
       <template #title><SettingsIcon :size="20" /> Settings</template>
     </PageHeader>
+
+    <!-- Company name (rename) -->
+    <UiCard title="Company" subtitle="The workspace name shown across Pariva." class="max-w-4xl mb-6">
+      <div class="flex items-end gap-2 flex-wrap">
+        <UiInput v-model="nameDraft" label="Company name" class="flex-1 min-w-[220px]" @keydown.enter="saveName" />
+        <UiButton variant="primary" :disabled="!nameDirty || savingName" @click="saveName">
+          <Save :size="14" /> {{ savingName ? 'Saving…' : 'Save' }}
+        </UiButton>
+      </div>
+      <p v-if="nameError" class="mt-2 text-[12px] text-red-600">{{ nameError }}</p>
+    </UiCard>
 
     <!-- Tab bar -->
     <div class="flex items-center gap-1 border-b border-ink-200 mb-6">

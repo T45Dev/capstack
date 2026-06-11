@@ -341,6 +341,7 @@ export default defineEventHandler((event) => {
 
   let cumPoolIssued = 0
   let cumAttributed = 0
+  let prevPostMoney: number | null = null   // prior round's post-money → next round's derived pre-money
 
   for (let i = 0; i < rounds.length; i++) {
     const r = rounds[i]
@@ -409,11 +410,15 @@ export default defineEventHandler((event) => {
     // conversion-era share bucketing above.
     const notesFinancing = notesFinancingByRoundCode.get(r.code.toUpperCase()) || 0
 
-    const preMoney = (r.pre_money != null && r.pre_money !== 0) ? r.pre_money : null
+    // Pre-money derives from the prior round's post-money when not explicitly
+    // set; a stored pre_money overrides. Informational only — FDS uses shares,
+    // not valuation — so deriving it can't move any cap-table math.
+    const preMoney: number | null = (r.pre_money != null && r.pre_money !== 0) ? r.pre_money : prevPostMoney
     // Post-money = pre-money + new money only. Notes financing is reported
     // separately below post-money; it doesn't roll into the post-money
     // valuation per the operator's accounting convention.
-    const postMoney = (preMoney || 0) + newMoney
+    const postMoney: number = (preMoney || 0) + newMoney
+    prevPostMoney = postMoney
 
     // Notes converted: derive from CN attributions, except on Formation
     // where the operator can supply a snapshot override (no CNs convert

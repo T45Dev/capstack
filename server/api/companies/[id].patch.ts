@@ -18,8 +18,18 @@ export default defineEventHandler(async (event) => {
   const existing = db().prepare('SELECT * FROM companies WHERE id = ?').get(id) as any
   if (!existing) throw createError({ statusCode: 404, message: 'Company not found' })
 
+  // Renaming: reject a name already used by another company (case-insensitive).
+  if (body.name !== undefined) {
+    const trimmed = (body.name || '').trim()
+    if (!trimmed) throw createError({ statusCode: 400, message: 'name cannot be empty' })
+    if (trimmed.toLowerCase() !== String(existing.name).toLowerCase()) {
+      const dupe = db().prepare('SELECT 1 FROM companies WHERE LOWER(name) = LOWER(?) AND id != ?').get(trimmed, id)
+      if (dupe) throw createError({ statusCode: 409, message: `A company named "${trimmed}" already exists.` })
+    }
+  }
+
   const next = {
-    name: body.name ?? existing.name,
+    name: body.name !== undefined ? (body.name || '').trim() : existing.name,
     ticker: body.ticker !== undefined ? body.ticker : existing.ticker,
     formation_date: body.formation_date !== undefined ? body.formation_date : existing.formation_date,
     starting_round: body.starting_round !== undefined ? (body.starting_round || null) : existing.starting_round,
