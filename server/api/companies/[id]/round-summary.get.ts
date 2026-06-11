@@ -500,8 +500,22 @@ export default defineEventHandler((event) => {
   }
   const unattributedCnDollars = totalsByReason.excluded + totalsByReason.folded
 
+  // FDS reconciliation — our computed current cap-table FDS (the latest
+  // CLOSED/formation round's cumulative; the open round is excluded because
+  // its shares are projected, not realized) vs Carta's own stated fully-diluted
+  // total from the last import. The Rounds page badges whether they tie.
+  const closedCols = cols.filter(c => c.kind !== 'open')
+  const lastRealized = closedCols[closedCols.length - 1] ?? cols[cols.length - 1]
+  const computedFds = lastRealized?.total_shares_fds ?? 0
+  const importedFds = company.imported_fds_total != null ? Number(company.imported_fds_total) : null
+
   return {
     rounds: cols,
+    fds_reconciliation: {
+      imported_fds: importedFds,
+      computed_fds: computedFds,
+      delta: importedFds != null ? computedFds - importedFds : null,
+    },
     cn_reconciliation: {
       attributed_dollars: attributedCnDollars,
       unattributed_dollars: unattributedCnDollars,

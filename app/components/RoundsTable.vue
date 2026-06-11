@@ -10,7 +10,7 @@
 // useSortableTable (the config/timeline pattern — rows stay in server order,
 // so sorting is off). table-fixed + a <colgroup> let the <col> widths drive
 // the layout.
-import { Plus, Trash2, Save, Undo2, Check, ChevronRight, ChevronDown } from 'lucide-vue-next'
+import { Plus, Trash2, Save, Undo2, Check, ChevronRight, ChevronDown, CheckCircle2, AlertTriangle } from 'lucide-vue-next'
 import { fmtShares, fmtUSD } from '~/utils/format'
 import { newSharesIssued, openRoundPostFds } from '~/utils/capTable'
 
@@ -39,10 +39,21 @@ interface RoundCol {
   share_class_code: string | null
 }
 
-const { data: roundSummary, refresh: refreshSummary } = await useFetch<{ rounds: RoundCol[] }>(
+interface FdsReconciliation { imported_fds: number | null; computed_fds: number; delta: number | null }
+const { data: roundSummary, refresh: refreshSummary } = await useFetch<{ rounds: RoundCol[]; fds_reconciliation?: FdsReconciliation }>(
   () => `/api/companies/${props.companyId}/round-summary`,
-  { watch: [() => props.companyId], default: () => ({ rounds: [] }) },
+  { watch: [() => props.companyId], default: () => ({ rounds: [], fds_reconciliation: undefined }) },
 )
+// Reconciliation badge: compare our computed current-cap-table FDS against
+// Carta's own fully-diluted total from the last import. A small gap is just
+// share-level rounding; a larger one flags a modeling mismatch to chase down.
+const recon = computed(() => roundSummary.value?.fds_reconciliation)
+const reconStatus = computed<'ok' | 'off' | null>(() => {
+  const r = recon.value
+  if (!r || r.imported_fds == null || r.delta == null || !r.computed_fds) return null
+  const tolerance = Math.max(50, Math.round(r.imported_fds * 0.0005))
+  return Math.abs(r.delta) <= tolerance ? 'ok' : 'off'
+})
 const { data: agg, refresh: refreshAgg } = await useFetch<{ total_shares_fds: number | null }>(
   () => `/api/companies/${props.companyId}/aggregate-round`,
   { watch: [() => props.companyId], default: () => ({ total_shares_fds: null }) },
@@ -283,6 +294,19 @@ const previewOwnership = computed(() =>
         <button type="button" class="rounded border border-amber-400 bg-white px-2.5 py-1 text-[11.5px] font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50" :disabled="busyMigrate" @click="rebuildFromTimeline">Rebuild from my FDS timeline</button>
         <button type="button" class="rounded px-2.5 py-1 text-[11.5px] font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50" :disabled="busyMigrate" @click="clearImported">Remove imported rounds</button>
       </div>
+    </div>
+    <div v-if="reconStatus" class="mx-4 mt-4 flex items-start gap-2 rounded-lg border px-4 py-2.5 text-[12.5px]" :class="reconStatus === 'ok' ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-amber-300 bg-amber-50 text-amber-900'">
+      <component :is="reconStatus === 'ok' ? CheckCircle2 : AlertTriangle" :size="15" class="mt-0.5 shrink-0" />
+      <p v-if="reconStatus === 'ok'">
+        Computed Total FDS <span class="font-medium">{{ fmtShares(recon!.computed_fds) }}</span> ties to your Carta import
+        <span class="text-emerald-700">({{ recon!.delta === 0 ? 'exact' : (Math.abs(recon!.delta!) + ' shares — rounding') }}).</span>
+      </p>
+      <p v-else>
+        Computed Total FDS <span class="font-medium">{{ fmtShares(recon!.computed_fds) }}</span> differs from your Carta import
+        (<span class="font-medium">{{ fmtShares(recon!.imported_fds!) }}</span>) by
+        <span class="font-medium">{{ (recon!.delta! > 0 ? '+' : '') + fmtShares(recon!.delta!) }}</span> shares —
+        usually exercised/forfeited options or note conversions modeled differently. Worth reconciling before you rely on the export.
+      </p>
     </div>
     <div class="overflow-x-auto">
       <table class="text-[13px] num data-table w-full" :style="{ tableLayout: 'fixed', minWidth: totalWidth + 'px' }">
