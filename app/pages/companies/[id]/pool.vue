@@ -132,6 +132,7 @@ interface TimelineEvent {
   shares: number               // unsigned magnitude
   direction: -1 | 0 | 1        // +1 adds to pool, -1 subtracts, 0 informational
   source: 'pool' | 'grant_outstanding' | 'grant_proposed' | 'idea'
+  role?: string | null         // recipient_type bucket (idea grants only)
   ideaId?: string              // pool_events.id when source === 'idea'
   grantId?: string             // grants.id when source === grant_*
   vestMonths?: number
@@ -263,6 +264,7 @@ const events = computed<TimelineEvent[]>(() => {
       id: `idea:${ie.id}`,
       date: ie.event_date,
       name: ie.name,
+      role: ie.recipient_type || null,
       type: t,
       kind: ie.kind,
       shares: ie.shares,
@@ -321,7 +323,8 @@ const ideasCols = useSortableTable({
   key: 'capstack:pool:ideas',
   columns: [
     { key: 'date', label: 'Date', width: 110, sortable: false, align: 'left' },
-    { key: 'name', label: 'Idea', width: 220, sortable: false, align: 'left' },
+    { key: 'name', label: 'Idea', width: 200, sortable: false, align: 'left' },
+    { key: 'role', label: 'Role', width: 130, sortable: false, align: 'left' },
     { key: 'type', label: 'Type', width: 120, sortable: false, align: 'left' },
     { key: 'shares', label: 'Shares', width: 120, sortable: false, align: 'right' },
   ],
@@ -1109,6 +1112,10 @@ const chart = computed(() => {
                 <td class="px-2.5 py-1.5 text-ink-600">{{ fmtDate(e.date) }}</td>
                 <td class="px-2.5 py-1.5">
                   <span class="text-ink-900 font-medium">{{ e.name }}</span>
+                </td>
+                <td class="px-2.5 py-1.5 text-ink-700">
+                  <span v-if="e.role">{{ e.role }}</span>
+                  <span v-else class="text-ink-400">—</span>
                 </td>
                 <td class="px-2.5 py-1.5 text-ink-700">
                   <span class="inline-flex items-center gap-1">
