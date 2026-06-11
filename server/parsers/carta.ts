@@ -942,6 +942,14 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
           warnings.push(`"${planSheet.name}": name column matched by position (column A). Header was "${asString(planSheet.getRow(planHeaderRow).getCell(1).value)}".`)
         }
       }
+      // Security/cert ID — used as a fallback label for grant rows that have a
+      // real quantity but a blank Stakeholder Name (Carta sometimes leaves the
+      // name off, e.g. unallocated/administrative grants). We must still import
+      // those shares or the option-pool totals come up short.
+      const cSecurityId = findHeader(
+        /^formatted ?security ?id$/, /^security ?id$/,
+        /^certificate ?id$/, /^cert(ificate)? ?(id|no\.?|number)$/, /^grant ?id$/,
+      )
       const cQtyIssued = findHeader(
         /^quantity ?issued$/, /^shares? ?issued$/, /^granted$/,
         // Wider bank for variant Carta templates that don't include the
@@ -1085,8 +1093,7 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
       for (let r = planHeaderRow + 1; r <= planSheet.rowCount; r++) {
         try {
           const row = planSheet.getRow(r)
-          const name = cName > 0 ? asString(row.getCell(cName).value) : ''
-          if (!name) { skippedNoName++; continue }
+          const rawName = cName > 0 ? asString(row.getCell(cName).value) : ''
           const qtyIssued = cQtyIssued > 0 ? asNumber(row.getCell(cQtyIssued).value) : 0
           const qtyOutstanding = cQtyOutstanding > 0 ? asNumber(row.getCell(cQtyOutstanding).value) : 0
           const qtyGeneric = cQtyGeneric > 0 ? asNumber(row.getCell(cQtyGeneric).value) : 0
@@ -1105,6 +1112,17 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
                          : qtyIssued > 0 ? qtyIssued
                          : qtyGeneric
           if (quantity <= 0 && qtyExercised <= 0 && qtyCancelled <= 0 && qtyExpiredVal <= 0) { skippedNoQty++; continue }
+          // A blank Stakeholder Name used to drop the whole row — but the
+          // shares are real and belong in the pool totals. Import under a
+          // fallback label (the security/cert ID when present) and warn so
+          // the operator can set the name in Carta.
+          let name = rawName
+          if (!name) {
+            const sid = cSecurityId > 0 ? asString(row.getCell(cSecurityId).value) : ''
+            name = sid ? `Unnamed grant (${sid})` : `Unnamed grant (row ${r})`
+            skippedNoName++
+            warnings.push(`"${planSheet.name}" row ${r}: no Stakeholder Name — imported ${Math.floor(quantity).toLocaleString()} shares as "${name}". Set the holder in Carta to label it.`)
+          }
 
           const scheduleText = cVestSchedule > 0 ? asString(row.getCell(cVestSchedule).value) : ''
           const { months, cliff } = parseVestingSchedule(scheduleText)
@@ -1174,7 +1192,7 @@ export async function parseCartaXlsx(buf: Buffer, overrides: CartaParseOverrides
       // turn into grants is the difference between "it works" and "the
       // operator stares at zero grants with no idea why."
       warnings.push(
-        `"${planSheet.name}" row outcome: parsed=${parsed}, skipped_no_name=${skippedNoName}, skipped_no_qty=${skippedNoQty}, total_rows_after_header=${planSheet.rowCount - planHeaderRow}.`,
+        `"${planSheet.name}" row outcome: parsed=${parsed}, unnamed_imported=${skippedNoName}, skipped_no_qty=${skippedNoQty}, total_rows_after_header=${planSheet.rowCount - planHeaderRow}.`,
       )
 
       if (parsed > 0) {
