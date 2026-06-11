@@ -525,7 +525,8 @@ export default defineEventHandler(async (event) => {
     ws.getCell(r, 2).value = prior
     ws.getCell(r, 3).value = a.newG
     ws.getCell(r, 4).value = forf
-    ws.getCell(r, 5).value = a.outstanding
+    // Outstanding = Prior(issued) + Forfeited(stored negative) − Exercised.
+    setFormula(r, 5, `${cellAddr(2, r)}+${cellAddr(4, r)}-${cellAddr(6, r)}`, a.outstanding)
     ws.getCell(r, 6).value = a.exercised
     // Total = Outstanding + Exercised + New + Forfeited (Forfeited is stored negative)
     setFormula(r, 7, `${cellAddr(5, r)}+${cellAddr(6, r)}+${cellAddr(3, r)}+${cellAddr(4, r)}`, total)
