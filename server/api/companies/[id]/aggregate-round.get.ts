@@ -26,20 +26,31 @@ export default defineEventHandler(async (event) => {
     FROM grants WHERE company_id = ?
   `).get(id) as { outstanding: number; exercised: number; forfeited: number; expired: number }
 
-  // The Rounds table is the single source of truth for the pre-open base.
-  // Everything before the open round = the closed/formation rounds. We read the
-  // COMPUTED cumulative from round-summary (which nets out exercised options and
-  // honors any per-round pinned Total FDS) rather than re-deriving here: FDS =
-  // the latest closed round's cumulative total_shares_fds, pool total = sum of
-  // their option_pool_issued, share price = the latest one's price. Falls back
-  // to the typed aggregate_round row when no rounds have been entered yet.
+  // The Previous-Round aggregate = the cap-table state BEFORE the round being
+  // modeled. The "current round" mirrors the dilution / grants / fairness
+  // pages: the open round if one is flagged, else the latest non-formation
+  // round. Those pages compute post = base + the current round's OWN
+  // contribution (new shares + pool + notes), so this base must EXCLUDE the
+  // current round — returning the current round's own cumulative double-counts
+  // it (the "Series B counted twice → 64.2M" bug). We read the COMPUTED
+  // cumulative from round-summary (which nets exercised options and honors any
+  // pinned Total FDS) for the round immediately before the current one. Falls
+  // back to the typed aggregate_round row when no rounds exist yet.
   const summary = await event.$fetch<{ rounds: Array<{ kind: string; share_price: number | null; option_pool_issued: number; total_shares_fds: number }> }>(`/api/companies/${id}/round-summary`).catch(() => null)
-  const closedRounds = (summary?.rounds || []).filter(r => r.kind !== 'open')
-  const derived = closedRounds.length > 0
-  const latest = closedRounds.length ? closedRounds[closedRounds.length - 1] : null
-  const tlFds = latest?.total_shares_fds ?? null
-  const tlPps = latest?.share_price ?? null
-  const tlPool = derived ? closedRounds.reduce((a, r) => a + (r.option_pool_issued || 0), 0) : null
+  const allRounds = summary?.rounds || []
+  let currentIdx = allRounds.findIndex(r => r.kind === 'open')
+  if (currentIdx < 0) {
+    for (let i = allRounds.length - 1; i >= 0; i--) {
+      if (allRounds[i]!.kind !== 'formation') { currentIdx = i; break }
+    }
+  }
+  // Everything strictly before the current round.
+  const priorRounds = currentIdx > 0 ? allRounds.slice(0, currentIdx) : []
+  const derived = allRounds.length > 0
+  const prior = priorRounds.length ? priorRounds[priorRounds.length - 1] : null
+  const tlFds = derived ? (prior?.total_shares_fds ?? 0) : null
+  const tlPps = prior?.share_price ?? null
+  const tlPool = derived ? priorRounds.reduce((a, r) => a + (r.option_pool_issued || 0), 0) : null
 
   const total_shares_fds = derived ? tlFds : (row?.total_shares_fds ?? null)
   const option_pool_total = derived ? tlPool : (row?.option_pool_total ?? null)
