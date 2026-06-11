@@ -37,7 +37,7 @@ export default defineEventHandler(async (event) => {
   }))
 
   // Canonical pre/post FDS for the OPEN round — the same source of truth the
-  // Financings cards and the Overall Dilution page use (decision #10): pre =
+  // Rounds page and the Overall Dilution page use (decision #10): pre =
   // the Previous-Round aggregate's Total FDS, post = that base + the open
   // round's own new shares + pool + notes converted (openRoundPostFds). The
   // per-round cumulative total_shares_fds above accumulates from 0, so using it
@@ -229,8 +229,10 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // Hire-basis timeline (settings) — when present, drives the at-hire FDS/PPS.
-  const hireTimeline = (db().prepare(`SELECT as_of_date, label, fds, pps FROM cap_table_milestones WHERE company_id = ? AND fds > 0 ORDER BY as_of_date ASC`).all(id) as any[])
+  // Hire-basis timeline — the Rounds table's historical rounds drive the
+  // at-hire FDS/PPS. Each closed/formation round with a pinned Total FDS
+  // is a dated point on the timeline.
+  const hireTimeline = (db().prepare(`SELECT close_date AS as_of_date, name AS label, total_shares_fds_override AS fds, share_price AS pps FROM rounds WHERE company_id = ? AND kind != 'open' AND total_shares_fds_override > 0 ORDER BY (close_date IS NULL), close_date ASC`).all(id) as any[])
     .map(m => ({ date: m.as_of_date, fds: m.fds || 0, pps: m.pps || 0, label: m.label || null }))
 
   const result = buildFairness(rounds, holders, { selectedRoundCode: selectedRound, includeFuture, ideasShares, hireTimeline })

@@ -1,6 +1,6 @@
 import { db } from '~~/server/utils/db'
 
-// Per-round Financings table — feeds the top card on the Financings page.
+// Per-round Rounds table — feeds the top card on the Rounds page.
 // One entry per row in the `rounds` table, plus the Open Round when
 // assumptions.round_name doesn't match any existing round (so the operator
 // can model a future round before adding it manually).

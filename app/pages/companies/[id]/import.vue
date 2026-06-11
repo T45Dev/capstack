@@ -84,7 +84,7 @@ async function upload() {
 }
 
 function done() {
-  // Financings + rounds + CNs are all manually entered on the cap-table
+  // Rounds + CNs are all manually entered on the cap-table
   // page, so post-import always goes there (the setup wizard has nothing
   // left to do).
   navigateTo(`/companies/${id.value}/cap-table`)

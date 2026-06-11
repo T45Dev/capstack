@@ -126,8 +126,8 @@ thead .sticky-col {
   background: #1d4ed8;
 }
 
-/* ── Financings matrix tokens ─────────────────────────────────────────────
-   Reusable bits the Financings-redesign components compose. Defined here so
+/* ── Rounds table tokens ─────────────────────────────────────────────
+   Reusable bits the Rounds-page components compose. Defined here so
    every consumer (header cells, typed cells, derived cells, the row hover)
    shares the same border / focus / motion. */
 

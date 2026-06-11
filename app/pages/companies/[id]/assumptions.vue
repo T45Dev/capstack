@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Deprecated. Round math (pre-money, new money, share price, etc.) now lives
-// inline on the Financings table — each round is a column, each field a row,
+// inline on the Rounds table — each round is a column, each field a row,
 // auto-saved on blur. This page exists only to redirect old bookmarks; nav
 // no longer surfaces it.
 const route = useRoute()
@@ -13,6 +13,6 @@ onMounted(() => {
 
 <template>
   <div class="max-w-xl mx-auto py-16 text-center text-ink-600 text-sm">
-    Redirecting to <NuxtLink :to="`/companies/${id}/cap-table`" class="text-brand-600 hover:text-brand-700 font-medium">Financings</NuxtLink>…
+    Redirecting to <NuxtLink :to="`/companies/${id}/cap-table`" class="text-brand-600 hover:text-brand-700 font-medium">Rounds</NuxtLink>…
   </div>
 </template>

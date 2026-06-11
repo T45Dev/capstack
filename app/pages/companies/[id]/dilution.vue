@@ -4,19 +4,17 @@
 // are sortable and resizable; widths + sort direction persist in
 // localStorage via useSortableTable.
 //
-// Denominators (TWO, so dilution is visible) — these MIRROR the
-// Financings page cards exactly (the operator's source of truth):
-//   - pre%  = shares ÷ PRE FDS  = the Previous-Round aggregate's Total
-//             FDS (everything before the open round; PreviousRoundCard).
-//   - post% = shares ÷ POST FDS = that base + the open round's OWN new
-//             shares + option pool + notes converted (OpenRoundCard's
-//             "Total FDS post").
+// Denominators (TWO, so dilution is visible) — single-list basis: both
+// read straight off the chronological rounds list (round-summary), whose
+// per-round cumulative FDS the timeline→rounds migration pins to the
+// operator's Round-history figures.
+//   - pre%  = shares ÷ PRE FDS  = the PRIOR round's cumulative Total FDS
+//             (the row immediately before the current round).
+//   - post% = shares ÷ POST FDS = the CURRENT round's own cumulative
+//             Total FDS.
 // A holder whose share count doesn't change is STILL diluted: same
 // numerator, bigger denominator → pre% > post%. Dilution comes from the
-// denominator growing, not from the holder gaining/losing shares.
-// NB: do NOT use round-summary's cumulative total_shares_fds as the
-// denominator — it accumulates the rounds table from 0, so adding it to
-// the aggregate base double-counts all prior history.
+// denominator growing from one round's cumulative FDS to the next.
 //
 // Toggle: "Include proposed + ideas in post" rolls not-yet-issued
 // grants (status='proposed' from the Grants page) and pool Ideas
@@ -26,8 +24,7 @@
 // ideas draw from pool capacity already inside postFDS).
 import { ArrowUp, ArrowDown, Upload, GitCompare } from 'lucide-vue-next'
 import { fmtUSD, fmtPct, fmtShares } from '~/utils/format'
-import { calcPct, calcValueUSD, calcSum } from '~/utils/calc'
-import { openRoundPostFds } from '~/utils/capTable'
+import { calcPct, calcValueUSD } from '~/utils/calc'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -63,18 +60,11 @@ const { data: ideas } = await useFetch<any[]>(
   { watch: [id], default: () => [] },
 )
 
-// Previous-Round aggregate — holds the fully-diluted total for the
-// state before the current round. Drives the dilution PRE denominator.
-const { data: aggregate } = await useFetch<{ total_shares_fds: number | null }>(
-  () => `/api/companies/${id.value}/aggregate-round`,
-  { watch: [id], default: () => ({ total_shares_fds: null } as any) },
-)
-
 // Non-formation rounds in timeline order (the API sorts open rounds last).
 const timelineRounds = computed(() => (roundSummary.value?.rounds || []).filter(r => r.kind !== 'formation'))
 
 // Current round being modeled — the open round if one's flagged, else
-// the latest round. Mirrors the Financings page's Open Round card, so a
+// the latest round. Mirrors the Rounds page's Open Round card, so a
 // round that's been marked "closed" still models pre vs post.
 const currentRound = computed(() => {
   const rs = timelineRounds.value
@@ -118,29 +108,25 @@ const proposedByStakeholder = computed(() => {
   return map
 })
 
-// Idea grants/reserves total. pool_events doesn't carry a stakeholder
-// link so each idea is emitted as its own row (listed by name) below.
-// PRE FDS = the Previous-Round aggregate's Total FDS (everything before
-// the open round). Matches PreviousRoundCard.
-const preFDS = computed(() => aggregate.value?.total_shares_fds || 0)
-// POST FDS = aggregate base + the open round's OWN incremental shares:
-// new preferred (new_money / share_price) + option pool issued + notes
-// converted. This replicates OpenRoundCard.totalSharesFdsPost so the two
-// pages agree. (round-summary's total_shares_fds is cumulative-from-0 and
-// would double-count the base, which is the bug we're fixing.) Proposed/
-// idea grants do NOT grow this — they augment the POST numerator only.
-const postFDS = computed(() => {
-  const base = aggregate.value?.total_shares_fds || 0
+// Full chronological rounds list (open rounds sorted last by the API),
+// each carrying its cumulative Total FDS. The migration pins those to the
+// operator's Round-history figures, so they're the single source.
+const allRounds = computed(() => roundSummary.value?.rounds || [])
+const currentIdx = computed(() => {
   const r = currentRound.value
-  if (!r) return base
-  return openRoundPostFds({
-    base,
-    newMoney: r.new_money,
-    sharePrice: r.share_price,
-    optionPoolIssued: r.option_pool_issued,
-    notesConverted: r.notes_converted,
-  })
+  return r ? allRounds.value.findIndex(x => x.code === r.code) : -1
 })
+// PRE FDS = the PRIOR round's cumulative Total FDS (the row immediately
+// before the current round in the list). Zero when the current round is
+// the first one. POST FDS = the current round's OWN cumulative Total FDS.
+// Proposed/idea grants do NOT grow these — they augment the POST numerator
+// only.
+const preFDS = computed(() => {
+  const i = currentIdx.value
+  if (i <= 0) return 0
+  return allRounds.value[i - 1]?.total_shares_fds || 0
+})
+const postFDS = computed(() => currentRound.value?.total_shares_fds || 0)
 
 interface DilRow {
   stakeholderId: string
@@ -347,16 +333,8 @@ function fmtDeltaUSD(n: number): string {
 
 // Calc-tooltip strings — the raw arithmetic with this row's actual numbers.
 const fPostFDS = computed<string | null>(() => {
-  const r = currentRound.value
-  if (!r) return null
-  const base = aggregate.value?.total_shares_fds || 0
-  const issued = (r.new_money && r.share_price) ? Math.floor(r.new_money / r.share_price) : 0
-  return calcSum([
-    ['Prior FDS', base],
-    ['New preferred', issued],
-    ['Option pool', r.option_pool_issued || 0],
-    ['Notes converted', r.notes_converted || 0],
-  ])
+  if (!currentRound.value) return null
+  return `${fmtShares(preFDS.value)} (prior round) → ${fmtShares(postFDS.value)} (${currentRoundName.value})`
 })
 const fPreRow = (r: DilRow) => calcPct(r.isFuture ? 0 : r.postShares, preFDS.value)
 const fPostRow = (r: DilRow) => calcPct(r.postShares, postFDS.value)
@@ -410,9 +388,9 @@ async function onImported() {
           <span class="uppercase tracking-wider">Pre FDS</span>
           <template v-if="preFDS > 0">
             <span class="ml-1 text-ink-700">{{ fmtShares(preFDS) }}</span>
-            <span class="ml-0.5 text-ink-400">(Previous Round)</span>
+            <span class="ml-0.5 text-ink-400">(prior round)</span>
           </template>
-          <span v-else class="ml-1 text-amber-700">0 — set Total FDS on the Previous Round card</span>
+          <span v-else class="ml-1 text-ink-400">0 (first round)</span>
         </span>
         <span class="text-ink-300">·</span>
         <span>
@@ -427,14 +405,14 @@ async function onImported() {
         </span>
       </div>
       <div v-else class="text-[11px] text-amber-700">
-        No round to model yet — add one on the Financings page to compare pre vs post.
+        No round to model yet — add one on the Rounds page to compare pre vs post.
       </div>
     </div>
 
     <!-- Table: sortable + resizable columns, 3 grouped column groups. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card flex flex-col min-h-0 flex-1 overflow-hidden">
       <div v-if="!sortedRows.length" class="px-4 py-12 text-center text-sm text-ink-500">
-        No data yet — add a round on the Financings page and import or enter holders to model dilution.
+        No data yet — add a round on the Rounds page and import or enter holders to model dilution.
       </div>
       <div v-else class="overflow-auto min-h-0 flex-1">
         <table class="text-[13px] num border-separate data-table" style="border-spacing: 0;">

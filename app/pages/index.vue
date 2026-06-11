@@ -45,7 +45,7 @@ const jsonLd = {
       applicationSubCategory: 'Cap Table Management',
       operatingSystem: 'Web',
       url: origin,
-      description: 'Import a Carta export, build a chronological record of financings, attribute convertible notes to rounds, model dilution and the option pool, and export a board-ready Excel.',
+      description: 'Import a Carta export, build a chronological record of funding rounds, attribute convertible notes to rounds, model dilution and the option pool, and export a board-ready Excel.',
       featureList: [
         'Carta xlsx import', 'Funding round & dilution modeling',
         'Convertible note attribution', 'Option-pool impact',
@@ -74,7 +74,7 @@ useHead({
 
 const features = [
   { icon: Upload, title: 'One-click Carta import', body: 'Drop your Carta pro-forma export. Stakeholders, holdings, grants, the option pool, and the full convertible-note ledger come in clean.' },
-  { icon: FileSpreadsheet, title: 'Rounds you actually own', body: 'Build a chronological record of financings the way you think about them — not the way a share-class ledger forces you to.' },
+  { icon: FileSpreadsheet, title: 'Rounds you actually own', body: 'Build a chronological record of funding rounds the way you think about them — not the way a share-class ledger forces you to.' },
   { icon: GitCompare, title: 'Dilution you can see', body: 'Pre- and post-money denominators side by side, so a holder whose share count never moves still shows the dilution they actually take.' },
   { icon: TrendingDown, title: 'Option-pool impact', body: 'Watch the authorized and available pool move as you size the next round — before you commit a single grant.' },
   { icon: FlaskConical, title: 'Exit scenarios', body: 'Run the waterfall across exit values and see what each stakeholder clears under your preference stack.' },
@@ -83,7 +83,7 @@ const features = [
 
 const steps = [
   { n: '01', title: 'Import', body: 'Upload your Carta export — or start from a blank workspace and type your rounds in.' },
-  { n: '02', title: 'Model', body: 'Add financings, attribute convertible notes to rounds, and size the open round and pool.' },
+  { n: '02', title: 'Model', body: 'Add funding rounds, attribute convertible notes to rounds, and size the open round and pool.' },
   { n: '03', title: 'Export', body: 'Ship a board-ready Excel for the grant approval — the numbers reconcile across every page.' },
 ]
 </script>
@@ -104,7 +104,7 @@ const steps = [
           </h1>
           <p class="mt-5 text-lg text-ink-600 leading-relaxed max-w-2xl">
             Pariva is the cap-table and scenario modeller for operators. Import your Carta export,
-            build a clean record of financings, attribute convertible notes, model dilution, and
+            build a clean record of funding rounds, attribute convertible notes, model dilution, and
             export the spreadsheet your board signs off on.
           </p>
           <div class="mt-8 flex flex-wrap items-center gap-3">
@@ -131,7 +131,7 @@ const steps = [
               <span class="w-2.5 h-2.5 rounded-full bg-ink-300" />
               <span class="w-2.5 h-2.5 rounded-full bg-ink-300" />
               <span class="w-2.5 h-2.5 rounded-full bg-ink-300" />
-              <span class="ml-2 text-[12px] text-ink-400 num">capstack · Financings</span>
+              <span class="ml-2 text-[12px] text-ink-400 num">capstack · Rounds</span>
             </div>
             <div class="p-5 space-y-3">
               <div v-for="(w, i) in [40, 58, 76, 92]" :key="i" class="flex items-center gap-3">

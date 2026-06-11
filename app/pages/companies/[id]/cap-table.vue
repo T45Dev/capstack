@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Upload } from 'lucide-vue-next'
-import type { TabKey } from '~/components/FinancingsPageHeader.vue'
+import type { TabKey } from '~/components/RoundsPageHeader.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -59,16 +59,16 @@ const openRoundName = computed<string | null>(() => {
   return open ? (open.name || open.code) : null
 })
 
-// Active sub-tab — only 'financings' and 'investors' now; the
+// Active sub-tab — only 'rounds' and 'investors' now; the
 // 'notes' tab was removed when CNs became user-managed off-page.
 const activeTab = computed<TabKey>({
   get: () => {
     const t = route.query.tab
     if (t === 'investors') return 'investors'
-    return 'financings'
+    return 'rounds'
   },
   set: (v) => {
-    void router.replace({ query: { ...route.query, tab: v === 'financings' ? undefined : v } })
+    void router.replace({ query: { ...route.query, tab: v === 'rounds' ? undefined : v } })
   },
 })
 
@@ -82,7 +82,7 @@ function exportCsv() { /* No-op on the simplified layout. Kept on the page heade
 
 <template>
   <div v-if="data">
-    <FinancingsPageHeader
+    <RoundsPageHeader
       :open-round-name="openRoundName"
       :saving-count="savingCount"
       :last-saved-ago="lastSavedAgo"
@@ -96,18 +96,15 @@ function exportCsv() { /* No-op on the simplified layout. Kept on the page heade
     <UiEmpty
       v-if="!data.stakeholders.length && !roundCols.length"
       title="No cap table yet"
-      description="Drop a Carta export to load option grants and stakeholders, or scroll down and start typing your Previous-Round aggregate."
+      description="Drop a Carta export to load option grants and stakeholders, or add your funding rounds in the table below."
     >
       <NuxtLink :to="`/companies/${id}/import`"><UiButton variant="primary"><Upload :size="14" /> Import Carta export</UiButton></NuxtLink>
     </UiEmpty>
 
-    <!-- Rounds tab: the single rounds table is the canonical editor — every
-         round is a row, click to edit. The Round-history timeline below is
-         kept as the Carta-import source and hosts the one-shot
-         "Build rounds from this history" migration. -->
-    <div v-show="activeTab === 'financings'" class="space-y-4">
+    <!-- Rounds tab: one table, the single source of truth — every round is a
+         row, click to edit. Funding rounds are entered here, never imported. -->
+    <div v-show="activeTab === 'rounds'" class="space-y-4">
       <RoundsTable :company-id="id" @refreshed="refreshRoundSummary" />
-      <FdsTimelineCard :company-id="id" @changed="refreshRoundSummary" />
     </div>
 
     <!-- Preferred investors tab unchanged. -->

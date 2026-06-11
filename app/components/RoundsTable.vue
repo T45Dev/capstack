@@ -34,6 +34,8 @@ interface RoundCol {
   preferred_issued_override: number | null
   total_shares_fds: number
   total_shares_fds_override: number | null
+  // Carta-seeded rounds carry a share_class_code; hand-entered ones don't.
+  share_class_code: string | null
 }
 
 const { data: roundSummary, refresh: refreshSummary } = await useFetch<{ rounds: RoundCol[] }>(
@@ -45,6 +47,37 @@ const { data: agg, refresh: refreshAgg } = await useFetch<{ total_shares_fds: nu
   { watch: [() => props.companyId], default: () => ({ total_shares_fds: null }) },
 )
 const rounds = computed<RoundCol[]>(() => roundSummary.value?.rounds || [])
+
+// Legacy import artifacts: funding rounds aren't imported, so any round with
+// a share_class_code came from an old Carta seed and should be cleared. The
+// banner offers to rebuild from the saved FDS timeline (one-time) or just
+// remove them.
+const importedRounds = computed(() => rounds.value.filter(r => r.share_class_code != null))
+const busyMigrate = ref(false)
+async function rebuildFromTimeline() {
+  if (busyMigrate.value) return
+  if (!confirm('Replace the imported rounds with your saved FDS timeline?\n\nThis removes the Carta-seeded rounds, recreates one round per timeline row (pinning each round’s Total FDS), and re-points convertible notes by date.')) return
+  busyMigrate.value = true
+  try {
+    const res = await $fetch<{ rounds_created: number; cn_repointed: number }>(
+      `/api/companies/${props.companyId}/rounds/rebuild-from-timeline`, { method: 'POST' })
+    await refreshAll()
+    alert(`Rebuilt ${res.rounds_created} round(s) and re-pointed ${res.cn_repointed} note(s).`)
+  } catch (e: any) {
+    alert(`Could not rebuild: ${e?.data?.message || e?.message || 'unknown error'}`)
+  } finally { busyMigrate.value = false }
+}
+async function clearImported() {
+  if (busyMigrate.value) return
+  if (!confirm(`Remove ${importedRounds.value.length} imported round(s)? Funding rounds are entered here by hand, not imported. This also clears their investor rows.`)) return
+  busyMigrate.value = true
+  try {
+    await $fetch(`/api/companies/${props.companyId}/rounds/clear-imported`, { method: 'POST' })
+    await refreshAll()
+  } catch (e: any) {
+    alert(`Could not remove: ${e?.data?.message || e?.message || 'unknown error'}`)
+  } finally { busyMigrate.value = false }
+}
 
 const table = useSortableTable({
   key: 'capstack:rounds-table',
@@ -241,6 +274,14 @@ const previewOwnership = computed(() =>
     subtitle="Every financing in chronological order — formation, closed history, and the open round. Click a row to edit; the open round drives the dilution model."
     :padded="false"
   >
+    <div v-if="importedRounds.length" class="mx-4 mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-[12.5px] text-amber-900">
+      <p class="font-medium">{{ importedRounds.length }} of these rounds came from a Carta import.</p>
+      <p class="mt-0.5 text-amber-800">Funding rounds aren’t imported — they’re entered here, the single source of truth. Rebuild them from your saved FDS timeline, or remove them and add rounds by hand.</p>
+      <div class="mt-2 flex items-center gap-2">
+        <button type="button" class="rounded border border-amber-400 bg-white px-2.5 py-1 text-[11.5px] font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50" :disabled="busyMigrate" @click="rebuildFromTimeline">Rebuild from my FDS timeline</button>
+        <button type="button" class="rounded px-2.5 py-1 text-[11.5px] font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50" :disabled="busyMigrate" @click="clearImported">Remove imported rounds</button>
+      </div>
+    </div>
     <div class="overflow-x-auto">
       <table class="text-[13px] num data-table w-full" :style="{ tableLayout: 'fixed', minWidth: totalWidth + 'px' }">
         <colgroup>
