@@ -740,9 +740,22 @@ async function toggleApproval(g: Grant) {
   await refresh()
 }
 
-function exportBoardApproval() {
+// Board-approval export. A modal first asks which scope to include; the
+// chosen scope is passed to the endpoint, which filters the proposed-grants
+// section (and the post-FDS math) accordingly.
+const showExportModal = ref(false)
+const exportScopes = [
+  { key: 'approved', label: 'Approved only', desc: 'Grants the board has marked Approved.' },
+  { key: 'proposed', label: 'Approved + proposed', desc: 'Every live proposal (excludes Rejected).' },
+  { key: 'ideas', label: 'Approved + proposed + ideas', desc: 'Also include anonymous pool ideas.' },
+] as const
+const approvedCount = computed(() => proposed.value.filter(g => g.approval_status === 'Approved').length)
+const ideasCount = computed(() => ideaRows.value.length)
+function exportBoardApproval() { showExportModal.value = true }
+function runExport(scope: string) {
+  showExportModal.value = false
   // Browser handles the download via the endpoint's Content-Disposition header.
-  window.location.href = `/api/companies/${id.value}/board-approval`
+  window.location.href = `/api/companies/${id.value}/board-approval?scope=${scope}`
 }
 
 // ---- Smart import of proposed grants ----
@@ -880,7 +893,7 @@ const fieldLabels: Record<string, string> = {
     <PageHeader :breadcrumb="[{ label: 'Cap-table model' }, { label: 'Option grants' }]" description="Outstanding grants from the cap table, plus any proposed grants you're modelling.">
       <template #title><Award :size="20" /> Option grants</template>
       <template #actions>
-        <UiButton :disabled="!proposed.length" @click="exportBoardApproval">
+        <UiButton :disabled="!proposed.length && !ideasCount" @click="exportBoardApproval">
           <FileDown :size="14" /> Export board approval (.xlsx)
         </UiButton>
         <UiButton @click="openImport"><UploadCloud :size="14" /> Import proposed</UiButton>
@@ -1340,6 +1353,36 @@ const fieldLabels: Record<string, string> = {
             <UploadCloud :size="14" /> {{ importCommitting ? 'Importing…' : 'Apply & import' }}
           </UiButton>
         </footer>
+      </div>
+    </div>
+
+    <!-- Board-approval export scope picker -->
+    <div v-if="showExportModal" class="fixed inset-0 z-50 bg-ink-900/40 backdrop-blur-sm grid place-items-center p-4" @click.self="showExportModal = false">
+      <div class="w-full max-w-md rounded-lg border border-ink-300 bg-white shadow-card-hover">
+        <header class="px-5 py-3 border-b border-ink-200 flex items-center justify-between gap-2">
+          <h3 class="text-sm font-semibold text-ink-900">Export board approval</h3>
+          <button type="button" class="text-ink-400 hover:text-ink-700" @click="showExportModal = false"><X :size="16" /></button>
+        </header>
+        <div class="p-4 space-y-2">
+          <p class="text-[12.5px] text-ink-600 mb-1">Which grants should the workbook include?</p>
+          <button
+            v-for="s in exportScopes"
+            :key="s.key"
+            type="button"
+            class="w-full text-left rounded-md border border-ink-200 px-3 py-2.5 hover:border-brand hover:bg-brand-soft/30 transition-colors"
+            @click="runExport(s.key)"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-[13px] font-medium text-ink-900">{{ s.label }}</span>
+              <span class="text-[11px] text-ink-400 num">
+                <template v-if="s.key === 'approved'">{{ approvedCount }} grant{{ approvedCount === 1 ? '' : 's' }}</template>
+                <template v-else-if="s.key === 'proposed'">{{ proposed.length }} grant{{ proposed.length === 1 ? '' : 's' }}</template>
+                <template v-else>{{ proposed.length }} + {{ ideasCount }} idea{{ ideasCount === 1 ? '' : 's' }}</template>
+              </span>
+            </div>
+            <div class="text-[11.5px] text-ink-500 mt-0.5">{{ s.desc }}</div>
+          </button>
+        </div>
       </div>
     </div>
   </div>

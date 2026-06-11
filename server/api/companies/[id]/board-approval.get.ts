@@ -18,17 +18,58 @@ export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
   if (!id) throw createError({ statusCode: 400, message: 'id required' })
 
+  // Export scope (?scope=approved|proposed|ideas):
+  //   approved → only proposed grants the board has marked Approved
+  //   proposed → all live proposals (Approved + Pending; Rejected excluded)
+  //   ideas    → the above PLUS anonymous pool ideas (future reserves)
+  const scope = (() => {
+    const s = String(getQuery(event).scope || 'proposed').toLowerCase()
+    return s === 'approved' || s === 'ideas' ? s : 'proposed'
+  })()
+
   // ---- Gather data ----
   const company = db().prepare('SELECT * FROM companies WHERE id = ?').get(id) as any
   if (!company) throw createError({ statusCode: 404, message: 'Company not found' })
 
   const assumptions = db().prepare('SELECT * FROM assumptions WHERE company_id = ?').get(id) as any
+  const proposedWhere = scope === 'approved'
+    ? "g.status = 'proposed' AND g.approval_status = 'Approved'"
+    : "g.status = 'proposed' AND (g.approval_status IS NULL OR g.approval_status != 'Rejected')"
   const proposedGrants = db().prepare(`
     SELECT g.*
     FROM grants g
-    WHERE g.company_id = ? AND g.status = 'proposed'
+    WHERE g.company_id = ? AND ${proposedWhere}
     ORDER BY g.quantity DESC
   `).all(id) as any[]
+
+  // Ideas: anonymous future reserves from the pool, surfaced as proposed-grant
+  // rows (no strike/stakeholder). Their shares roll into the proposed total and
+  // the post-FDS denominator just like real proposals.
+  if (scope === 'ideas') {
+    const ideas = db().prepare(`
+      SELECT id, name, kind, shares, vest_months, cliff_months, notes
+      FROM pool_events
+      WHERE company_id = ? AND type IN ('grant', 'reserve') AND shares > 0
+      ORDER BY shares DESC
+    `).all(id) as any[]
+    for (const ie of ideas) {
+      proposedGrants.push({
+        id: `idea:${ie.id}`,
+        recipient_name: ie.name || 'Idea',
+        recipient_type: 'idea',
+        award_type: ie.kind || null,
+        quantity: ie.shares || 0,
+        strike: null,
+        vest_months: ie.vest_months ?? null,
+        cliff_months: ie.cliff_months ?? null,
+        vesting_start: null,
+        vesting_schedule_id: null,
+        stakeholder_id: null,
+        status: 'proposed',
+        approval_status: null,
+      })
+    }
+  }
 
   const allGrants = db().prepare(`SELECT * FROM grants WHERE company_id = ?`).all(id) as any[]
   const shareClasses = db().prepare(`SELECT * FROM share_classes WHERE company_id = ?`).all(id) as any[]
@@ -613,7 +654,8 @@ export default defineEventHandler(async (event) => {
 
   // ---- Send ----
   const buffer = await wb.xlsx.writeBuffer() as Buffer
-  const filename = `${company.slug}-board-approval-${new Date().toISOString().slice(0, 10)}.xlsx`
+  const scopeTag = scope === 'approved' ? 'approved' : scope === 'ideas' ? 'with-ideas' : 'proposed'
+  const filename = `${company.slug}-board-approval-${scopeTag}-${new Date().toISOString().slice(0, 10)}.xlsx`
   setHeader(event, 'Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
   setHeader(event, 'Content-Disposition', `attachment; filename="${filename}"`)
   setHeader(event, 'Content-Length', String(buffer.byteLength))
