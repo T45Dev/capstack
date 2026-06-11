@@ -28,11 +28,6 @@ const { data: roundSummary, refresh: refreshRoundSummary } = await useFetch<{ ro
 })
 const roundCols = computed<RoundColumn[]>(() => roundSummary.value?.rounds || [])
 
-// Round-history timeline. When it has rows it IS the previous-round record,
-// so the typed Previous-Round card is hidden (its base is derived from here).
-const { data: milestones, refresh: refreshMilestones } = await useFetch<any[]>(() => `/api/companies/${id.value}/milestones`, { watch: [id], default: () => [] })
-const hasTimeline = computed(() => (milestones.value || []).length > 0)
-
 // Saving-indicator state. Both cards bubble their in-flight save count
 // up; the page header sums them into one "Saving…" / "Saved Xs ago" pill.
 const prevSaving = ref(0)
@@ -106,19 +101,13 @@ function exportCsv() { /* No-op on the simplified layout. Kept on the page heade
       <NuxtLink :to="`/companies/${id}/import`"><UiButton variant="primary"><Upload :size="14" /> Import Carta export</UiButton></NuxtLink>
     </UiEmpty>
 
-    <!-- Rounds tab: Round history (FDS timeline) + Open-Round modeled card,
-         side-by-side on wide screens, stacked on narrow. Once the Round
-         history has rows it takes the left column (replacing the typed
-         Previous-Round card). -->
-    <div v-show="activeTab === 'financings'" class="grid gap-4 items-start lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-      <FdsTimelineCard v-if="hasTimeline" :company-id="id" @changed="refreshMilestones" />
-      <PreviousRoundCard v-else :company-id="id" @update:saving-count="(n: number) => prevSaving = n" />
-      <OpenRoundCard :company-id="id" @update:saving-count="(n: number) => openSaving = n" @refreshed="() => { refreshRoundSummary(); refreshMilestones() }" />
-    </div>
-    <!-- No timeline yet: keep the Round history editor below so the operator
-         can start one (it moves up beside the Open round once it has rows). -->
-    <div v-if="!hasTimeline" v-show="activeTab === 'financings'" class="mt-4">
-      <FdsTimelineCard :company-id="id" @changed="refreshMilestones" />
+    <!-- Rounds tab: the single rounds table is the canonical editor — every
+         round is a row, click to edit. The Round-history timeline below is
+         kept as the Carta-import source and hosts the one-shot
+         "Build rounds from this history" migration. -->
+    <div v-show="activeTab === 'financings'" class="space-y-4">
+      <RoundsTable :company-id="id" @refreshed="refreshRoundSummary" />
+      <FdsTimelineCard :company-id="id" @changed="refreshRoundSummary" />
     </div>
 
     <!-- Preferred investors tab unchanged. -->
