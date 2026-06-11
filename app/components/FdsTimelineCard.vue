@@ -49,6 +49,34 @@ async function deleteMilestone(m: Milestone) {
   await $fetch(`/api/milestones/${m.id}`, { method: 'DELETE' })
   await refresh(); emit('changed')
 }
+
+// One-shot migration: turn this timeline into the real `rounds` table,
+// retiring the Carta-seeded share-class rounds and re-pointing convertible
+// notes to the matching round by date. Reversible via a Carta re-import.
+const migrating = ref(false)
+async function migrateToRounds() {
+  if (!milestones.value?.length || migrating.value) return
+  if (!confirm(
+    'Build the rounds table from this Round history?\n\n'
+    + 'This replaces the imported share-class rounds with one round per row '
+    + 'above, pins each round’s fully-diluted total to the figure here, and '
+    + 're-points convertible notes to the matching round by date.\n\n'
+    + 'The open round (if any) is left untouched, and you can undo this with a '
+    + 'Carta re-import. Review CN attribution and the Investor matrix afterward.',
+  )) return
+  migrating.value = true
+  try {
+    const res = await $fetch<{ rounds_created: number; cn_repointed: number }>(
+      `/api/companies/${props.companyId}/rounds/rebuild-from-timeline`, { method: 'POST' },
+    )
+    emit('changed')
+    alert(`Built ${res.rounds_created} rounds and re-pointed ${res.cn_repointed} convertible note(s). Review CN attribution and the Investor matrix.`)
+  } catch (e: any) {
+    alert(`Could not build rounds: ${e?.data?.message || e?.message || 'unknown error'}`)
+  } finally {
+    migrating.value = false
+  }
+}
 </script>
 
 <template>
@@ -104,8 +132,19 @@ async function deleteMilestone(m: Milestone) {
         </tbody>
       </table>
     </div>
-    <p class="px-4 py-2 text-[11px] text-ink-500 border-t border-ink-100">
-      A start date before the earliest row snaps to that earliest point. Enter a pool increase here <em>or</em> on a round, not both. Drag a column edge to resize.
-    </p>
+    <div class="px-4 py-2 border-t border-ink-100 flex items-center justify-between gap-3 flex-wrap">
+      <p class="text-[11px] text-ink-500">
+        A start date before the earliest row snaps to that earliest point. Enter a pool increase here <em>or</em> on a round, not both. Drag a column edge to resize.
+      </p>
+      <button
+        type="button"
+        class="shrink-0 rounded border border-brand-edge px-2.5 py-1 text-[11px] font-medium text-brand-deep hover:bg-brand-edge/10 disabled:opacity-40 disabled:cursor-not-allowed"
+        :disabled="migrating || !milestones.length"
+        title="Replace the imported share-class rounds with one round per row above, and re-point convertible notes by date."
+        @click="migrateToRounds"
+      >
+        {{ migrating ? 'Building…' : 'Build rounds from this history' }}
+      </button>
+    </div>
   </UiCard>
 </template>
