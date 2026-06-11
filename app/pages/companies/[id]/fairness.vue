@@ -557,22 +557,23 @@ const calDetailRows = computed(() =>
       </div>
 
       <template v-else>
-        <UiCard v-for="(lvl, idx) in recLevels" :key="lvl.level" :padded="false" class="mb-5">
-          <template #header>
-            <div class="flex items-end justify-between gap-4 w-full flex-wrap">
-              <!-- Heading + band, left-aligned over the first column. -->
-              <div class="flex items-baseline gap-2 flex-wrap">
-                <h2 class="text-sm font-semibold text-ink-900">{{ lvl.level }} <span class="text-ink-400 font-normal">· {{ lvl.count }}</span></h2>
-                <span class="text-[11px] text-ink-500 num">target {{ fmtPct(lvl.post.target, 3) }} · fair range {{ fmtPct(lvl.post.lo, 3) }}–{{ fmtPct(lvl.post.hi, 3) }}</span>
-              </div>
-              <!-- Total recommended — surfaced once, top-right beside the first grade. -->
-              <div v-if="idx === 0" class="text-right num shrink-0">
-                <div class="text-[10px] uppercase tracking-wider text-ink-500">Total recommended new options</div>
-                <div class="text-lg font-semibold leading-tight" :class="data.recommendedTotalAddl > 0 ? 'text-brand' : 'text-ink-500'">{{ data.recommendedTotalAddl > 0 ? '+' + fmtShares(data.recommendedTotalAddl) : '0' }}</div>
-                <div v-if="data.includeFuture && data.ideasShares" class="text-[10px] text-ink-400">Basis includes {{ fmtShares(data.ideasShares) }} pool ideas reserved</div>
-              </div>
-            </div>
-          </template>
+        <!-- Grand total across ALL grades — standalone, so it doesn't read as a
+             single grade's figure. -->
+        <div class="flex items-center justify-between rounded-lg border border-ink-300 bg-white px-4 py-3 mb-5 num">
+          <span class="text-sm font-medium text-ink-700">Total recommended new options <span class="font-normal text-ink-400">· all grades</span></span>
+          <div class="text-right">
+            <div class="text-xl font-semibold leading-tight" :class="data.recommendedTotalAddl > 0 ? 'text-brand' : 'text-ink-500'">{{ data.recommendedTotalAddl > 0 ? '+' + fmtShares(data.recommendedTotalAddl) : '0' }}</div>
+            <div v-if="data.includeFuture && data.ideasShares" class="text-[10px] text-ink-400">Basis includes {{ fmtShares(data.ideasShares) }} pool ideas reserved</div>
+          </div>
+        </div>
+
+        <UiCard v-for="lvl in recLevels" :key="lvl.level" :padded="false" class="mb-5">
+          <!-- Heading + band, left-aligned over the first column. Rendered as our
+               own row (not UiCard's #header, which forces slot content right). -->
+          <div class="px-4 py-3 border-b border-ink-200 flex items-baseline gap-2 flex-wrap">
+            <h2 class="text-sm font-semibold text-ink-900">{{ lvl.level }} <span class="text-ink-400 font-normal">· {{ lvl.count }}</span></h2>
+            <span class="text-[11px] text-ink-500 num">target {{ fmtPct(lvl.post.target, 3) }} · fair range {{ fmtPct(lvl.post.lo, 3) }}–{{ fmtPct(lvl.post.hi, 3) }}</span>
+          </div>
           <div class="overflow-x-auto">
           <table class="text-sm num data-table w-full" :style="{ tableLayout: 'fixed', minWidth: minW(recTable.cols) + 'px' }">
             <TableColgroup :cols="recTable.cols" />
@@ -607,12 +608,10 @@ const calDetailRows = computed(() =>
         <!-- Pool ideas: not compared against a band — shown as recommended
              placements (where the idea's size lands them). -->
         <UiCard v-if="ideaRecs.length" :padded="false" class="mb-5">
-          <template #header>
-            <div class="flex items-center justify-between gap-3 w-full flex-wrap">
-              <h2 class="text-sm font-semibold text-ink-900">Pool ideas <span class="text-ink-400 font-normal">· {{ ideaRecs.length }}</span></h2>
-              <span class="text-[11px] text-ink-500">recommended placement</span>
-            </div>
-          </template>
+          <div class="px-4 py-3 border-b border-ink-200 flex items-baseline gap-2 flex-wrap">
+            <h2 class="text-sm font-semibold text-ink-900">Pool ideas <span class="text-ink-400 font-normal">· {{ ideaRecs.length }}</span></h2>
+            <span class="text-[11px] text-ink-500">recommended placement</span>
+          </div>
           <table class="text-sm num data-table w-full">
             <thead>
               <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">

@@ -132,6 +132,7 @@ interface TimelineEvent {
   shares: number               // unsigned magnitude
   direction: -1 | 0 | 1        // +1 adds to pool, -1 subtracts, 0 informational
   source: 'pool' | 'grant_outstanding' | 'grant_proposed' | 'idea'
+  role?: string | null         // recipient_type bucket (idea grants only)
   ideaId?: string              // pool_events.id when source === 'idea'
   grantId?: string             // grants.id when source === grant_*
   vestMonths?: number
@@ -263,6 +264,7 @@ const events = computed<TimelineEvent[]>(() => {
       id: `idea:${ie.id}`,
       date: ie.event_date,
       name: ie.name,
+      role: ie.recipient_type || null,
       type: t,
       kind: ie.kind,
       shares: ie.shares,
@@ -321,7 +323,8 @@ const ideasCols = useSortableTable({
   key: 'capstack:pool:ideas',
   columns: [
     { key: 'date', label: 'Date', width: 110, sortable: false, align: 'left' },
-    { key: 'name', label: 'Idea', width: 220, sortable: false, align: 'left' },
+    { key: 'name', label: 'Idea', width: 200, sortable: false, align: 'left' },
+    { key: 'role', label: 'Role', width: 130, sortable: false, align: 'left' },
     { key: 'type', label: 'Type', width: 120, sortable: false, align: 'left' },
     { key: 'shares', label: 'Shares', width: 120, sortable: false, align: 'right' },
   ],
@@ -509,7 +512,10 @@ const form = reactive({
   notes: '',
   job_title: '',
   job_level: '',
+  recipient_type: 'Employees',
 })
+// The three board-export buckets (matches GrantInlineEditor / catOf).
+const IDEA_ROLES = ['Employees', 'BOD/Advisors', 'Ex-Employees']
 
 // Idea sub-types shown in the modal selector — order matches the spec §5.6
 // listing.
@@ -579,6 +585,7 @@ function openModal(idea?: any) {
     form.notes = idea.notes || ''
     form.job_title = idea.job_title || ''
     form.job_level = idea.job_level || ''
+    form.recipient_type = idea.recipient_type || 'Employees'
     inputMode.value = 'shares'
     syncFromShares()
   } else {
@@ -595,6 +602,7 @@ function openModal(idea?: any) {
     form.notes = ''
     form.job_title = ''
     form.job_level = ''
+    form.recipient_type = 'Employees'
     inputMode.value = 'shares'
   }
   showModal.value = true
@@ -617,6 +625,7 @@ async function saveIdea() {
       notes: form.notes || null,
       job_title: isGrant ? (form.job_title.trim() || null) : null,
       job_level: isGrant ? (form.job_level.trim() || null) : null,
+      recipient_type: isGrant ? (form.recipient_type || null) : null,
     }
     if (editingIdea.value) {
       await $fetch(`/api/pool-events/${editingIdea.value.id}`, { method: 'PATCH', body })
@@ -1105,6 +1114,10 @@ const chart = computed(() => {
                   <span class="text-ink-900 font-medium">{{ e.name }}</span>
                 </td>
                 <td class="px-2.5 py-1.5 text-ink-700">
+                  <span v-if="e.role">{{ e.role }}</span>
+                  <span v-else class="text-ink-400">—</span>
+                </td>
+                <td class="px-2.5 py-1.5 text-ink-700">
                   <span class="inline-flex items-center gap-1">
                     <TrendingUp v-if="e.direction > 0" :size="12" class="text-emerald-600" />
                     <ArrowDownIcon v-else-if="e.direction < 0" :size="12" class="text-red-500" />
@@ -1195,6 +1208,13 @@ const chart = computed(() => {
           </div>
 
           <template v-if="form.type === 'grant'">
+            <label class="block">
+              <span class="block text-xs font-medium text-ink-700 mb-1">Role</span>
+              <select v-model="form.recipient_type" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                <option v-if="form.recipient_type && !IDEA_ROLES.includes(form.recipient_type)" :value="form.recipient_type">{{ form.recipient_type }} (legacy)</option>
+                <option v-for="r in IDEA_ROLES" :key="r" :value="r">{{ r }}</option>
+              </select>
+            </label>
             <UiInput v-model="form.job_title" label="Job title" placeholder="e.g. Staff Engineer" />
             <UiInput v-model="form.job_level" label="Level" placeholder="e.g. 6" />
             <UiInput v-model="form.vest_months" type="number" label="Vest months" />

@@ -377,6 +377,9 @@ function migrate(d: Database.Database): void {
   // Grant Fairness recommendation slots them into the right level section.
   ensureColumn('pool_events', 'job_title', 'TEXT')
   ensureColumn('pool_events', 'job_level', 'TEXT')
+  // Role/category for an idea grant — one of the three board-export buckets
+  // (Employees / BOD/Advisors / Ex-Employees). Drives the category it sums into.
+  ensureColumn('pool_events', 'recipient_type', 'TEXT')
   // Stamped on the first successful Carta import. The import UI uses it
   // to decide between "Welcome" and "Re-import" framing; nothing else
   // gates on it now that the setup wizard is gone.
