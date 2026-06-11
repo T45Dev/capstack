@@ -141,3 +141,34 @@ export function poolEquation(c: PoolEquationCounts): PoolEquationFigures {
   const futureAvailable = available - proposed - ideasDeducted
   return { authorized, issued, outstanding, exercised, forfeitedOrExpired, available, proposed, ideas, futureAvailable }
 }
+
+export interface GrantLifecycle {
+  /** Carta exports store this as the NET outstanding (already minus the
+   *  lifecycle counts below), not the original grant size. */
+  quantity?: number | null
+  /** Original issued size when Carta's "Issued/Granted" column was present. */
+  quantity_issued?: number | null
+  quantity_exercised?: number | null
+  quantity_forfeited?: number | null
+  quantity_expired?: number | null
+}
+
+/**
+ * Original ISSUED size of a grant. Because `quantity` is the NET outstanding,
+ * deriving outstanding as `quantity − exercised − forfeited − expired` would
+ * double-subtract whenever the explicit Issued column is missing. So: use
+ * `quantity_issued` when we have it, else RECONSTRUCT issued by adding the
+ * lifecycle counts back onto the net quantity. Then `issued − lifecycle`
+ * yields the net quantity again — never double-counting. Single source of
+ * truth so the pool bar, the Grants page, and the board export can't drift.
+ */
+export function grantIssued(g: GrantLifecycle): number {
+  const qi = g.quantity_issued
+  if (qi != null && qi > 0) return qi
+  return (g.quantity || 0) + (g.quantity_exercised || 0) + (g.quantity_forfeited || 0) + (g.quantity_expired || 0)
+}
+
+/** Currently-held options = issued − exercised − forfeited − expired. */
+export function grantOutstanding(g: GrantLifecycle): number {
+  return grantIssued(g) - (g.quantity_exercised || 0) - (g.quantity_forfeited || 0) - (g.quantity_expired || 0)
+}

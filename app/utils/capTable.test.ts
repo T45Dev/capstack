@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest'
 // Import the canonical shared module directly (vitest resolves the relative
 // path without the Nuxt `~~` alias that the re-export in ./capTable uses).
-import { newSharesIssued, openRoundPostFds, authorizedPool, availablePool, poolEquation } from '../../shared/capTableModel'
+import { newSharesIssued, openRoundPostFds, authorizedPool, availablePool, poolEquation, grantIssued, grantOutstanding } from '../../shared/capTableModel'
 
 describe('newSharesIssued', () => {
   it('floors new money ÷ share price', () => {
@@ -109,5 +109,25 @@ describe('poolEquation', () => {
     expect(f.issued).toBe(0)
     expect(f.available).toBe(1000)
     expect(f.futureAvailable).toBe(1000)
+  })
+})
+
+describe('grantIssued / grantOutstanding', () => {
+  it('uses quantity_issued when present (no double-subtraction)', () => {
+    const g = { quantity: 70, quantity_issued: 100, quantity_exercised: 20, quantity_forfeited: 10, quantity_expired: 0 }
+    expect(grantIssued(g)).toBe(100)
+    expect(grantOutstanding(g)).toBe(70) // 100 − 20 − 10
+  })
+  it('reconstructs issued from net quantity + lifecycle when issued is missing', () => {
+    // `quantity` is Carta's NET outstanding; without the Issued column the old
+    // `quantity_issued || quantity` path would subtract lifecycle a 2nd time.
+    const g = { quantity: 70, quantity_issued: null, quantity_exercised: 20, quantity_forfeited: 10, quantity_expired: 0 }
+    expect(grantIssued(g)).toBe(100)      // 70 + 20 + 10
+    expect(grantOutstanding(g)).toBe(70)  // stays the net, not 70 − 30 = 40
+  })
+  it('plain grant with no lifecycle is unchanged', () => {
+    const g = { quantity: 50 }
+    expect(grantIssued(g)).toBe(50)
+    expect(grantOutstanding(g)).toBe(50)
   })
 })
