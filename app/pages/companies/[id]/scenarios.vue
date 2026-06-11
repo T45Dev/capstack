@@ -2,7 +2,7 @@
 // Spec §5.7 — Exit Scenarios.
 // Three exit-value scenarios (Low / Mid / High) modeled as if the to-close
 // round has closed. Page deliberately omits round math (it's covered on the
-// Financings table); the only display is the per-stakeholder payout grid.
+// Rounds table); the only display is the per-stakeholder payout grid.
 // Scenarios are identified by sequential numbers; the latest is editable
 // in the same sense that all prior ones are append-only (no edit endpoint
 // today — the lock is implicit). Older scenarios get a lock badge.
@@ -27,7 +27,7 @@ interface Scenario {
 
 const { data: scenarios, refresh } = await useFetch<Scenario[]>(() => `/api/companies/${id.value}/scenarios`, { watch: [id], default: () => [] })
 // Default a new scenario's pre/new money from the open round on the
-// Financings table (was the now-deprecated Assumptions page).
+// Rounds table (was the now-deprecated Assumptions page).
 const { data: roundSummary } = await useFetch<{ rounds: Array<{ kind: string; pre_money: number | null; new_money: number }> }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
 const openRound = computed(() => roundSummary.value?.rounds.find(r => r.kind === 'open') || null)
 

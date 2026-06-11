@@ -64,7 +64,7 @@ const { data: ideas } = await useFetch<any[]>(
 const timelineRounds = computed(() => (roundSummary.value?.rounds || []).filter(r => r.kind !== 'formation'))
 
 // Current round being modeled — the open round if one's flagged, else
-// the latest round. Mirrors the Financings page's Open Round card, so a
+// the latest round. Mirrors the Rounds page's Open Round card, so a
 // round that's been marked "closed" still models pre vs post.
 const currentRound = computed(() => {
   const rs = timelineRounds.value
@@ -405,14 +405,14 @@ async function onImported() {
         </span>
       </div>
       <div v-else class="text-[11px] text-amber-700">
-        No round to model yet — add one on the Financings page to compare pre vs post.
+        No round to model yet — add one on the Rounds page to compare pre vs post.
       </div>
     </div>
 
     <!-- Table: sortable + resizable columns, 3 grouped column groups. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card flex flex-col min-h-0 flex-1 overflow-hidden">
       <div v-if="!sortedRows.length" class="px-4 py-12 text-center text-sm text-ink-500">
-        No data yet — add a round on the Financings page and import or enter holders to model dilution.
+        No data yet — add a round on the Rounds page and import or enter holders to model dilution.
       </div>
       <div v-else class="overflow-auto min-h-0 flex-1">
         <table class="text-[13px] num border-separate data-table" style="border-spacing: 0;">

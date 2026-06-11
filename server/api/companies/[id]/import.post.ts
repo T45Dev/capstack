@@ -3,7 +3,7 @@ import { newId } from '~~/server/utils/ids'
 import { parseCartaXlsx } from '~~/server/parsers/carta'
 
 // The Carta import is narrow: only the bits of the file that aren't
-// captured by the operator on the Financings page. That's stakeholders
+// captured by the operator on the Rounds page. That's stakeholders
 // (so future grants/CNs can attach by name), option grants, and the
 // option-pool authorized total. Share classes, holdings, convertible
 // notes, and round structure are user-managed.
@@ -37,24 +37,20 @@ export default defineEventHandler(async (event) => {
     if (replace) {
       // Grants get re-loaded each import; pool too. Stakeholders are
       // merged (not wiped) so manually-added people aren't lost when
-      // the operator re-imports for fresh grants. Closed (Carta-derived)
-      // rounds + their per-investor allocations + ledger-derived
-      // holdings get wiped + reseeded too, so the operator can
-      // re-import to pick up corrected numbers without dragging stale
-      // pre-import data forward. The open round (kind='open') is
-      // preserved so an in-progress modeling session isn't blown away.
+      // the operator re-imports for fresh grants. Ledger-derived share
+      // classes, holdings, and convertibles get wiped + reseeded so the
+      // operator can re-import corrected numbers without dragging stale
+      // data forward. Funding rounds (and their round_investors) are NEVER
+      // imported or touched — they're entered by hand on the Rounds page,
+      // the single source of truth.
       db().prepare('DELETE FROM grants WHERE company_id = ?').run(id)
       db().prepare('DELETE FROM option_pools WHERE company_id = ?').run(id)
-      db().prepare(`DELETE FROM round_investors WHERE company_id = ? AND round_id IN (
-        SELECT id FROM rounds WHERE company_id = ? AND kind != 'open'
-      )`).run(id, id)
-      db().prepare("DELETE FROM rounds WHERE company_id = ? AND kind != 'open'").run(id)
       db().prepare(`DELETE FROM holdings WHERE company_id = ? AND share_class_id IN (
         SELECT id FROM share_classes WHERE company_id = ? AND code != 'PREV-PREF'
       )`).run(id, id)
       db().prepare("DELETE FROM share_classes WHERE company_id = ? AND code != 'PREV-PREF'").run(id)
       db().prepare("DELETE FROM convertibles WHERE company_id = ?").run(id)
-      // Assumptions, pool_events: never touched.
+      // Rounds, round_investors, assumptions, pool_events: never touched.
     }
 
     // Stakeholders — merged in (we add new names, leave existing ones
@@ -148,79 +144,23 @@ export default defineEventHandler(async (event) => {
       }
     }
 
-    // Rounds — one row per parsed ledger. Formation (CS) and each
-    // closed preferred series. Open rounds are user-created on the
-    // Rounds page and aren't touched here. Each round captures the
-    // sharePrice + newMoney + cashShares aggregates the parser
-    // computed; per-investor breakdowns go to round_investors below.
-    const roundIdByCode = new Map<string, string>()
-    if (parsed.rounds.length) {
-      const insR = db().prepare(`
-        INSERT INTO rounds (
-          id, company_id, code, name, kind, close_date, share_class_code,
-          share_price, new_money, debt_canceled, seniority,
-          option_pool_issued, preferred_issued, common
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0)
-      `)
-      const sorted = [...parsed.rounds].sort((a, b) =>
-        (a.closeDate || '') < (b.closeDate || '') ? -1
-        : (a.closeDate || '') > (b.closeDate || '') ? 1 : 0)
-      for (let i = 0; i < sorted.length; i++) {
-        const round = sorted[i]
-        if (!round) continue
-        const rdId = newId('rd')
+    // Funding rounds are NEVER imported — they're entered by hand on the
+    // Rounds page, the single source of truth. We still ensure every
+    // ledger investor exists as a stakeholder so the preferred-holdings
+    // synthesis below (and the Shareholders page) can attribute their
+    // shares; we just don't create any `rounds` or `round_investors`
+    // records from the import.
+    for (const round of parsed.rounds) {
+      if (!round.investors?.length) continue
+      for (const inv of round.investors) {
+        if (inv.cashContributed <= 0 || !inv.stakeholderName) continue
+        if (nameToId.has(inv.stakeholderName)) continue
+        const shId = newId('sh')
         try {
-          insR.run(
-            rdId, id, round.code, round.name || round.code, round.kind, round.closeDate,
-            round.code, round.sharePrice ?? null, round.newMoney || 0,
-            round.debtCanceled || 0, i,
-          )
-          roundIdByCode.set(round.code, rdId)
-          // Backfill preferred_issued = cashShares (cash-bought new-money
-          // shares; note-converted shares come from CN attribution).
-          if (round.cashShares > 0) {
-            db().prepare('UPDATE rounds SET preferred_issued = ? WHERE id = ?')
-              .run(Math.floor(round.cashShares), rdId)
-          }
+          insSH.run(shId, id, inv.stakeholderName, null)
+          nameToId.set(inv.stakeholderName, shId)
         } catch (err: any) {
-          parsed.warnings.push(`Couldn't write round "${round.code}": ${err?.message || err}`)
-        }
-      }
-    }
-
-    // Round investors — per-stakeholder cash contributions per round,
-    // pulled from each ledger sheet's individual rows. Drives the
-    // Preferred Investor matrix on the Rounds page. Ledger sheets are
-    // the canonical source for investor names, so when one shows up
-    // that wasn't already added via the Detailed Cap Table, auto-create
-    // it here (Carta isn't always consistent across sheets, and
-    // dropping the row would lose the allocation).
-    if (parsed.rounds.length) {
-      const insRI = db().prepare(`
-        INSERT INTO round_investors (id, company_id, round_id, stakeholder_id, amount)
-        VALUES (?, ?, ?, ?, ?)
-      `)
-      for (const round of parsed.rounds) {
-        const rdId = roundIdByCode.get(round.code)
-        if (!rdId || !round.investors?.length) continue
-        for (const inv of round.investors) {
-          if (inv.cashContributed <= 0) continue
-          let shId = nameToId.get(inv.stakeholderName)
-          if (!shId) {
-            shId = newId('sh')
-            try {
-              insSH.run(shId, id, inv.stakeholderName, null)
-              nameToId.set(inv.stakeholderName, shId)
-            } catch (err: any) {
-              parsed.warnings.push(`Couldn't auto-create stakeholder "${inv.stakeholderName}" from ledger: ${err?.message || err}`)
-              continue
-            }
-          }
-          try {
-            insRI.run(newId('ri'), id, rdId, shId, inv.cashContributed)
-          } catch (err: any) {
-            parsed.warnings.push(`Couldn't write round investor ${inv.stakeholderName}/${round.code}: ${err?.message || err}`)
-          }
+          parsed.warnings.push(`Couldn't auto-create stakeholder "${inv.stakeholderName}" from ledger: ${err?.message || err}`)
         }
       }
     }

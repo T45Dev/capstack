@@ -3,7 +3,7 @@
 // when inside a company; just the top bar on the Companies index.
 //
 // The page-level header (breadcrumb, H1, status pill, action buttons) is
-// owned by each page — see FinancingsPageHeader for the Financings page.
+// owned by each page — see RoundsPageHeader for the Rounds page.
 import {
   FileSpreadsheet, Users, Award, GitCompare, TrendingDown,
   FlaskConical, Upload, PanelLeftClose, PanelLeftOpen, Settings, Scale,

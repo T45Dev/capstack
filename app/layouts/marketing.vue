@@ -53,7 +53,7 @@ const year = new Date().getFullYear()
       <div class="max-w-6xl mx-auto px-5 py-10 flex flex-col sm:flex-row gap-6 sm:items-center justify-between">
         <div class="flex items-center gap-3">
           <img src="/pariva-logo.svg" alt="Pariva" width="85" height="20" class="h-5 w-auto" />
-          <span class="text-[12px] text-ink-400">Cap tables, financings & board-ready exports.</span>
+          <span class="text-[12px] text-ink-400">Cap tables, funding rounds & board-ready exports.</span>
         </div>
         <div class="flex items-center gap-5 text-[13px] text-ink-500">
           <NuxtLink to="/#features" class="hover:text-ink-900">Features</NuxtLink>

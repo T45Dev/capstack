@@ -26,17 +26,22 @@ export default defineEventHandler(async (event) => {
     FROM grants WHERE company_id = ?
   `).get(id) as { outstanding: number; exercised: number; forfeited: number; expired: number }
 
-  // Round-history timeline (Financings). When present, it's the source of
-  // truth for the pre-open base: FDS = latest milestone's FDS, pool total =
-  // sum of milestone pool increases, share price = latest milestone PPS. Falls
-  // back to the typed aggregate when no timeline exists (so nothing changes
-  // for companies that haven't entered one).
-  const ms = db().prepare(`SELECT as_of_date, fds, pps, option_pool FROM cap_table_milestones WHERE company_id = ? ORDER BY as_of_date ASC, created_at ASC`).all(id) as any[]
-  const derived = ms.length > 0
-  const latest = ms.length ? ms[ms.length - 1] : null
-  const tlFds = latest?.fds ?? null
-  const tlPps = latest?.pps ?? null
-  const tlPool = derived ? ms.reduce((a, m) => a + (m.option_pool || 0), 0) : null
+  // The Rounds table is the single source of truth for the pre-open base.
+  // Everything before the open round = the closed/formation rounds: FDS =
+  // the latest such round's pinned Total FDS (total_shares_fds_override),
+  // pool total = sum of their option_pool_issued, share price = the latest
+  // one's price. Falls back to the typed aggregate_round row when no rounds
+  // have been entered yet.
+  const histRounds = db().prepare(`
+    SELECT share_price, option_pool_issued, total_shares_fds_override
+    FROM rounds WHERE company_id = ? AND kind != 'open'
+    ORDER BY (close_date IS NULL), close_date ASC, seniority ASC
+  `).all(id) as Array<{ share_price: number | null; option_pool_issued: number | null; total_shares_fds_override: number | null }>
+  const derived = histRounds.length > 0
+  const latest = histRounds.length ? histRounds[histRounds.length - 1] : null
+  const tlFds = latest?.total_shares_fds_override ?? null
+  const tlPps = latest?.share_price ?? null
+  const tlPool = derived ? histRounds.reduce((a, r) => a + (r.option_pool_issued || 0), 0) : null
 
   const total_shares_fds = derived ? tlFds : (row?.total_shares_fds ?? null)
   const option_pool_total = derived ? tlPool : (row?.option_pool_total ?? null)

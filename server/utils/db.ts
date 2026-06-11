@@ -278,7 +278,7 @@ function migrate(d: Database.Database): void {
     -- "Previous Round" aggregate. One row per company; holds typed
     -- summary numbers covering everything before the open round.
     -- Replaces the per-round Formation+closed rows on the simplified
-    -- Financings page. The open round still lives in rounds.
+    -- Rounds page. The open round still lives in rounds.
     CREATE TABLE IF NOT EXISTS aggregate_round (
       company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
       pre_money REAL,
@@ -290,7 +290,7 @@ function migrate(d: Database.Database): void {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    -- Archive of per-round rows from before the Financings page
+    -- Archive of per-round rows from before the Rounds page
     -- collapsed to Previous-aggregate + Open Round. Same shape as
     -- rounds; populated by a one-time migration below so the typed
     -- data isn't lost.
@@ -523,7 +523,7 @@ function migrate(d: Database.Database): void {
       AND id IN (SELECT DISTINCT company_id FROM rounds)
   `)
 
-  // One-time: when the Financings page collapsed to Previous-aggregate +
+  // One-time: when the Rounds page collapsed to Previous-aggregate +
   // Open Round, all per-round rows from the old design got moved to
   // rounds_archive. Only fires when there's anything in rounds AND
   // archive is empty (the signal that this code's running for the first

@@ -10,7 +10,7 @@ export default {
       colors: {
         // Cool, restrained palette tuned for long sessions on a finance tool.
         // Slight blue-shift vs the prior slate-derived scale; matches the
-        // Financings redesign tokens.
+        // Rounds page tokens.
         ink: {
           50:  '#f8fafc',
           100: '#eef0f3',
@@ -26,7 +26,7 @@ export default {
         },
         // brand is the primary accent (blue). DEFAULT enables bare `bg-brand`,
         // `text-brand`, etc. `soft` / `edge` / `deep` are named tints used by
-        // the Financings matrix and status pills.
+        // the Rounds table and status pills.
         brand: {
           DEFAULT: '#1d4ed8',
           soft: '#eef2ff',

@@ -1,12 +1,12 @@
 <script setup lang="ts">
-// Per-page header for the Financings page.
+// Per-page header for the Rounds page.
 //
 // Layout: breadcrumb / title row (H1 + status pill + auto-saved + saving)
 // / description / actions / sub-tabs.
 // Pre-baseline picker lives in AppTopBar (serves every per-company page).
 import { Plus, Upload, Download, Camera, FileSpreadsheet } from 'lucide-vue-next'
 
-export type TabKey = 'financings' | 'investors'
+export type TabKey = 'rounds' | 'investors'
 
 interface Props {
   openRoundName: string | null
@@ -26,7 +26,7 @@ const emit = defineEmits<{
 }>()
 
 const tabs: Array<{ key: TabKey; label: string }> = [
-  { key: 'financings', label: 'Rounds' },
+  { key: 'rounds', label: 'Rounds' },
   { key: 'investors',  label: 'Preferred investors' },
 ]
 </script>
@@ -62,15 +62,15 @@ const tabs: Array<{ key: TabKey; label: string }> = [
           <span v-else-if="lastSavedAgo" class="text-[12px] text-ink-500">· Auto-saved {{ lastSavedAgo }}</span>
         </div>
         <p class="text-[13px] text-ink-500 mt-1 max-w-2xl">
-          Previous-round aggregate and the open round you're modeling.
-          All financings, share classes, and convertibles are manually entered.
+          The single record of every funding round — formation, closed history, and the open round you're modeling.
+          Funding rounds, share classes, and convertibles are entered here, never imported.
         </p>
       </div>
 
       <div class="flex items-center gap-2">
         <button
           class="h-8 px-2.5 inline-flex items-center gap-1.5 text-[12px] text-ink-700 border border-ink-200 rounded-md hover:bg-ink-50"
-          title="Export the financings matrix as CSV"
+          title="Export the rounds table as CSV"
           @click="emit('export')"
         >
           <Download :size="13" /> Export

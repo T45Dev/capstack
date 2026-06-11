@@ -33,8 +33,13 @@ export default defineEventHandler(async (event) => {
   }
 
   const run = db().transaction(() => {
-    // Retire the seeded (non-open) rounds. The open round survives.
-    db().prepare(`DELETE FROM rounds WHERE company_id = ? AND kind != 'open'`).run(id)
+    // Retire the Carta-seeded rounds (they carry a share_class_code; rounds
+    // entered by hand on the Rounds page don't) and their investor rows.
+    // Hand-entered rounds and the open round are left alone.
+    db().prepare(`DELETE FROM round_investors WHERE company_id = ? AND round_id IN (
+      SELECT id FROM rounds WHERE company_id = ? AND share_class_code IS NOT NULL
+    )`).run(id, id)
+    db().prepare(`DELETE FROM rounds WHERE company_id = ? AND share_class_code IS NOT NULL`).run(id)
 
     // Codes already in use (e.g. the surviving open round) so we don't collide.
     const used = new Set(

@@ -20,9 +20,6 @@ const { data: company } = await useFetch(() => `/api/companies/${id.value}`, { w
 const { data: capTable } = await useFetch(() => `/api/companies/${id.value}/cap-table`, { watch: [id], default: () => null as any })
 const { data: grantsData, refresh: refreshGrants } = await useFetch(() => `/api/companies/${id.value}/grants`, { watch: [id], default: () => ({ grants: [], pools: [] } as any) })
 const { data: ideas, refresh: refreshIdeas } = await useFetch<any[]>(() => `/api/companies/${id.value}/pool-events`, { watch: [id], default: () => [] })
-// Cap-table FDS timeline (Settings) — pool increases here carry the round's
-// close date into the timeline below.
-const { data: milestones } = await useFetch<Array<{ id: string; as_of_date: string | null; label: string | null; option_pool: number | null }>>(() => `/api/companies/${id.value}/milestones`, { watch: [id], default: () => [] })
 // Round-summary supplies per-round option_pool_issued + close_date, which
 // is what drives the chronological pool top-up events on the timeline.
 const { data: roundSummary } = await useFetch<{ rounds: Array<{ round_id: string; code: string; name: string | null; kind: 'formation' | 'closed' | 'open'; close_date: string | null; option_pool_issued: number; total_shares_fds: number }> }>(() => `/api/companies/${id.value}/round-summary`, { watch: [id], default: () => ({ rounds: [] }) })
@@ -72,9 +69,9 @@ const fdsIncludingPool = computed(() => {
 })
 
 // Denominator for the idea's %-of-FDS conversion. Use the modeled fully
-// diluted total from the financings model — the last round's cumulative
+// diluted total from the Rounds table — the last round's cumulative
 // total_shares_fds (open round sorts last) — so an idea's % matches the FDS
-// shown on Financings / Dilution / Fairness. fdsIncludingPool only counts
+// shown on Rounds / Dilution / Fairness. fdsIncludingPool only counts
 // cap-table actuals (held + outstanding + authorized pool) and excludes the
 // modeled financing shares (new preferred + notes converted), which made the
 // idea's share count read low. Falls back to the actuals when no rounds exist.
@@ -148,43 +145,17 @@ interface TimelineEvent {
 const events = computed<TimelineEvent[]>(() => {
   const out: TimelineEvent[] = []
 
-  // Pool top-up sources. Single rule to avoid double-counting:
-  //   • With a Round-history timeline, PREVIOUS-round pool comes ONLY from the
-  //     timeline; the current round adds its OWN option_pool_issued (the open
-  //     round isn't in the timeline).
-  //   • Without a timeline (legacy), fall back to every round's
-  //     option_pool_issued, then the option_pools lump.
-  const ms = milestones.value || []
-  const hasTimeline = ms.some(m => (m.option_pool || 0) > 0)
-  if (hasTimeline) {
-    for (const m of ms) {
-      if (!m.option_pool || m.option_pool <= 0) continue
-      out.push({
-        id: `pool-ms:${m.id}`,
-        date: m.as_of_date || fallbackDate.value,
-        name: `${m.label || 'Milestone'} pool top-up`,
-        type: 'pool_topup', kind: null, shares: m.option_pool, direction: 1, source: 'pool',
-      })
-    }
-    const openR = (roundSummary.value?.rounds || []).find(r => r.kind === 'open')
-    if (openR?.option_pool_issued && openR.option_pool_issued > 0) {
-      out.push({
-        id: `pool:${openR.round_id}`,
-        date: openR.close_date || fallbackDate.value,
-        name: `${openR.name || openR.code} pool top-up`,
-        type: 'pool_topup', kind: null, shares: openR.option_pool_issued, direction: 1, source: 'pool',
-      })
-    }
-  } else {
-    for (const r of (roundSummary.value?.rounds || [])) {
-      if (!r.option_pool_issued || r.option_pool_issued <= 0) continue
-      out.push({
-        id: `pool:${r.round_id}`,
-        date: r.close_date || fallbackDate.value,
-        name: `${r.name || r.code} pool top-up`,
-        type: 'pool_topup', kind: null, shares: r.option_pool_issued, direction: 1, source: 'pool',
-      })
-    }
+  // Pool top-up sources — every round's own option_pool_issued, dated at
+  // its close date. The Rounds table is the single source of truth, so
+  // each round (formation, closed, open) contributes its pool increase.
+  for (const r of (roundSummary.value?.rounds || [])) {
+    if (!r.option_pool_issued || r.option_pool_issued <= 0) continue
+    out.push({
+      id: `pool:${r.round_id}`,
+      date: r.close_date || fallbackDate.value,
+      name: `${r.name || r.code} pool top-up`,
+      type: 'pool_topup', kind: null, shares: r.option_pool_issued, direction: 1, source: 'pool',
+    })
   }
   // Fallback: nothing typed yet → the option_pools lump (Carta import).
   if (!out.some(e => e.type === 'pool_topup')) {
@@ -456,10 +427,11 @@ const totals = computed(() => {
   // Impact headline, the Grants page, and Grant Fairness can't diverge. The
   // pool_topup timeline events above are built from the same inputs, so the
   // chart's running balance and this headline stay in lockstep.
-  const ms = milestones.value || []
+  // The Rounds table is the single source: authorized pool = the sum of every
+  // round's option_pool_issued (no separate timeline anymore).
   const poolAuthorizedOriginal = authorizedPool({
-    hasTimeline: ms.some(m => (m.option_pool || 0) > 0),
-    timelinePoolTotal: ms.reduce((a, m) => a + (m.option_pool || 0), 0),
+    hasTimeline: false,
+    timelinePoolTotal: 0,
     openRoundPoolIssued: (roundSummary.value?.rounds || []).find(r => r.kind === 'open')?.option_pool_issued || 0,
     allRoundsPoolIssued: (roundSummary.value?.rounds || []).reduce((a, r) => a + (r.option_pool_issued || 0), 0),
     poolsLump: (grantsData.value?.pools || []).reduce((a: number, p: any) => a + (p.authorized || 0), 0),

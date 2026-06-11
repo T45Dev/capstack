@@ -156,7 +156,7 @@ export default defineEventHandler((event) => {
     // CN cap formula uses the QF-initial preFDS (parent's preFDS when
     // this round is a tranche of an earlier-started Qualified
     // Financing). Mirrors the round-summary logic so the CN ledger's
-    // Resulting column agrees with the Financings table's Notes
+    // Resulting column agrees with the Rounds table's Notes
     // converted column.
     const preFDS = qfInitialPreFDS(r, ownPreFDS)
     const roundPPS = r.share_price && r.share_price > 0 ? r.share_price : 0

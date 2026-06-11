@@ -56,7 +56,7 @@ const { data, refresh } = await useFetch<{ grants: Grant[]; pools: Pool[] }>(() 
 const { data: vestingSchedules } = await useFetch<VestingSchedule[]>(() => `/api/companies/${id.value}/vesting-schedules`, { watch: [id], default: () => [] })
 
 // Round-summary drives Authorized — sum of rounds.option_pool_issued
-// (operator-managed on the Financings page) is the source of truth.
+// (operator-managed on the Rounds page) is the source of truth.
 // option_pools (Carta import lump) is a fallback when no per-round
 // values are typed in. Pool Impact page uses the same logic; both
 // pages MUST agree on Authorized or the headline stats diverge.
@@ -77,7 +77,7 @@ const { data: compute } = await useFetch(() => `/api/companies/${id.value}/compu
   default: () => null as any,
 })
 // Previous-Round aggregate — fully-diluted total for the state BEFORE the
-// open round. This is the single source of truth the Financings cards and
+// open round. This is the single source of truth the Rounds page and
 // the Overall Dilution page denominate against; the grants %s must use the
 // same base or they read inflated (compute's preRoundFDS is cap-table-only
 // and omits the open round's new shares + converted notes).
@@ -160,7 +160,7 @@ function positionFor(g: { stakeholder_id?: string | null; recipient_name: string
 }
 
 // Current round being modeled — the open round if flagged, else the latest
-// non-formation round. Mirrors dilution.vue / the Financings Open Round card.
+// non-formation round. Mirrors dilution.vue / the Rounds page open round.
 const currentRound = computed(() => {
   const rs = (roundSummary.value?.rounds || []).filter((r: any) => r.kind !== 'formation')
   if (!rs.length) return null
