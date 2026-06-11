@@ -360,6 +360,7 @@ const outstandingCols = computed<GrCol[]>(() => {
 const proposedCols = computed<GrCol[]>(() => {
   const cols: GrCol[] = [
     { key: 'recipient_name',  label: 'Recipient', width: 200, sortable: true, align: 'left' },
+    { key: 'recipient_type',  label: 'Role',      width: 130, sortable: true, align: 'left' },
     { key: 'existing_options',label: 'Out. opt.', width: 90,  sortable: true, align: 'right' },
     { key: 'existing_common', label: 'Common',    width: 85,  sortable: true, align: 'right' },
     { key: 'existing_pref',   label: 'Preferred', width: 85,  sortable: true, align: 'right' },
@@ -483,6 +484,7 @@ const ideaRows = computed(() => {
         isIdea: true,
         status: 'proposed',
         recipient_name: ie.name || 'Idea',
+        recipient_type: ie.recipient_type || 'Employees',
         award_type: ie.kind || null,
         quantity: newShares,
         strike: null, issue_date: null, vesting_start: null, vesting_schedule_name: null, notes: ie.notes || null,
@@ -1101,6 +1103,10 @@ const fieldLabels: Record<string, string> = {
                 <template v-for="c in proposedVisibleCols" :key="c.key">
                   <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium border-b border-ink-200 bg-white group-hover:bg-brand-50/40" :title="g.recipient_name">
                     <NameCell :name="g.recipient_name" :award="g.award_type || null" :source="g.isIdea ? 'idea' : 'proposed'" />
+                  </td>
+                  <td v-else-if="c.key === 'recipient_type'" class="px-2.5 py-1.5 text-ink-700 border-b border-ink-200 truncate group-hover:bg-brand-50/40" :title="g.recipient_type || ''">
+                    <span v-if="g.recipient_type">{{ g.recipient_type }}</span>
+                    <span v-else class="text-ink-400">—</span>
                   </td>
                   <td v-else-if="c.key === 'existing_options'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">
                     <span v-if="g.existing_options">{{ fmtShares(g.existing_options) }}</span>

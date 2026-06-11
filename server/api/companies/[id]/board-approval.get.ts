@@ -47,7 +47,7 @@ export default defineEventHandler(async (event) => {
   // the post-FDS denominator just like real proposals.
   if (scope === 'ideas') {
     const ideas = db().prepare(`
-      SELECT id, name, kind, shares, vest_months, cliff_months, notes
+      SELECT id, name, kind, shares, vest_months, cliff_months, notes, recipient_type
       FROM pool_events
       WHERE company_id = ? AND type IN ('grant', 'reserve') AND shares > 0
       ORDER BY shares DESC
@@ -56,7 +56,7 @@ export default defineEventHandler(async (event) => {
       proposedGrants.push({
         id: `idea:${ie.id}`,
         recipient_name: ie.name || 'Idea',
-        recipient_type: 'idea',
+        recipient_type: ie.recipient_type || 'Employees',
         award_type: ie.kind || null,
         quantity: ie.shares || 0,
         strike: null,

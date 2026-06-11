@@ -69,11 +69,15 @@ const emit = defineEmits<{
 
 const today = new Date().toISOString().slice(0, 10)
 
+// The three board-export buckets. Role drives the category each grant is
+// summed into on the board-approval workbook (see catOf in board-approval).
+const ROLES = ['Employees', 'BOD/Advisors', 'Ex-Employees']
+
 function seed(): GrantDraft {
   const g = props.grant || {}
   return {
     recipient_name: g.recipient_name ?? '',
-    recipient_type: g.recipient_type ?? 'Employee',
+    recipient_type: g.recipient_type ?? 'Employees',
     award_type: g.award_type ?? '',
     round: g.round ?? '',
     quantity: g.quantity ?? 0,
@@ -154,11 +158,8 @@ function onSave() {
       <label class="block">
         <span class="block text-xs font-medium text-ink-700 mb-1">Role</span>
         <select v-model="form.recipient_type" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-          <option>Employee</option>
-          <option>Board Member</option>
-          <option>Consultant</option>
-          <option>SAB</option>
-          <option>Advisor</option>
+          <option v-if="form.recipient_type && !ROLES.includes(form.recipient_type)" :value="form.recipient_type">{{ form.recipient_type }} (legacy)</option>
+          <option v-for="r in ROLES" :key="r" :value="r">{{ r }}</option>
         </select>
       </label>
       <label class="block">

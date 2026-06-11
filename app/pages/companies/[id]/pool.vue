@@ -509,7 +509,10 @@ const form = reactive({
   notes: '',
   job_title: '',
   job_level: '',
+  recipient_type: 'Employees',
 })
+// The three board-export buckets (matches GrantInlineEditor / catOf).
+const IDEA_ROLES = ['Employees', 'BOD/Advisors', 'Ex-Employees']
 
 // Idea sub-types shown in the modal selector — order matches the spec §5.6
 // listing.
@@ -579,6 +582,7 @@ function openModal(idea?: any) {
     form.notes = idea.notes || ''
     form.job_title = idea.job_title || ''
     form.job_level = idea.job_level || ''
+    form.recipient_type = idea.recipient_type || 'Employees'
     inputMode.value = 'shares'
     syncFromShares()
   } else {
@@ -595,6 +599,7 @@ function openModal(idea?: any) {
     form.notes = ''
     form.job_title = ''
     form.job_level = ''
+    form.recipient_type = 'Employees'
     inputMode.value = 'shares'
   }
   showModal.value = true
@@ -617,6 +622,7 @@ async function saveIdea() {
       notes: form.notes || null,
       job_title: isGrant ? (form.job_title.trim() || null) : null,
       job_level: isGrant ? (form.job_level.trim() || null) : null,
+      recipient_type: isGrant ? (form.recipient_type || null) : null,
     }
     if (editingIdea.value) {
       await $fetch(`/api/pool-events/${editingIdea.value.id}`, { method: 'PATCH', body })
@@ -1195,6 +1201,13 @@ const chart = computed(() => {
           </div>
 
           <template v-if="form.type === 'grant'">
+            <label class="block">
+              <span class="block text-xs font-medium text-ink-700 mb-1">Role</span>
+              <select v-model="form.recipient_type" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                <option v-if="form.recipient_type && !IDEA_ROLES.includes(form.recipient_type)" :value="form.recipient_type">{{ form.recipient_type }} (legacy)</option>
+                <option v-for="r in IDEA_ROLES" :key="r" :value="r">{{ r }}</option>
+              </select>
+            </label>
             <UiInput v-model="form.job_title" label="Job title" placeholder="e.g. Staff Engineer" />
             <UiInput v-model="form.job_level" label="Level" placeholder="e.g. 6" />
             <UiInput v-model="form.vest_months" type="number" label="Vest months" />
