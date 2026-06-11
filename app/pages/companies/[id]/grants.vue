@@ -2,7 +2,7 @@
 import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle, UploadCloud, AlertTriangle, CheckCircle2, X, Award } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtDate, fmtPricePerShare, normalizeDate } from '~/utils/format'
 import { calcSum, calcPct, calcValueUSD } from '~/utils/calc'
-import { authorizedPool, poolEquation, grantIssued } from '~/utils/capTable'
+import { authorizedPool, poolEquation, grantIssued, grantOutstanding } from '~/utils/capTable'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -207,8 +207,11 @@ const totalForfeitedOrExpired = computed(() => outstanding.value.reduce((a, g) =
 // Keep the split available for the lifecycle breakdown / audit views.
 const totalForfeited = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_forfeited || 0), 0))
 const totalExpired = computed(() => outstanding.value.reduce((a, g) => a + (g.quantity_expired || 0), 0))
+// Outstanding = Carta's authoritative Quantity Outstanding (grantOutstanding),
+// not issued − lifecycle (which drifts when the Forfeited/Expired/Canceled
+// columns don't reconcile to Carta's own Outstanding).
 const totalOutstanding = computed(() =>
-  totalIssued.value - totalExercised.value - totalForfeitedOrExpired.value,
+  outstanding.value.reduce((a, g) => a + grantOutstanding(g), 0),
 )
 const totalProposed = computed(() => proposed.value.reduce((a, g) => a + g.quantity, 0))
 // Authorized pool comes from the shared source of truth (authorizedPool):

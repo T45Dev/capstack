@@ -113,17 +113,22 @@ describe('poolEquation', () => {
 })
 
 describe('grantIssued / grantOutstanding', () => {
-  it('uses quantity_issued when present (no double-subtraction)', () => {
+  it('uses quantity_issued when present, and trusts Carta Quantity Outstanding', () => {
     const g = { quantity: 70, quantity_issued: 100, quantity_exercised: 20, quantity_forfeited: 10, quantity_expired: 0 }
     expect(grantIssued(g)).toBe(100)
-    expect(grantOutstanding(g)).toBe(70) // 100 − 20 − 10
+    expect(grantOutstanding(g)).toBe(70) // = Carta's stored Outstanding (quantity)
   })
   it('reconstructs issued from net quantity + lifecycle when issued is missing', () => {
-    // `quantity` is Carta's NET outstanding; without the Issued column the old
-    // `quantity_issued || quantity` path would subtract lifecycle a 2nd time.
     const g = { quantity: 70, quantity_issued: null, quantity_exercised: 20, quantity_forfeited: 10, quantity_expired: 0 }
     expect(grantIssued(g)).toBe(100)      // 70 + 20 + 10
-    expect(grantOutstanding(g)).toBe(70)  // stays the net, not 70 − 30 = 40
+    expect(grantOutstanding(g)).toBe(70)  // trusts the net, never re-subtracts
+  })
+  it('trusts Carta Outstanding even when forfeited/expired do not reconcile', () => {
+    // The real bug: Carta's Forfeited/Expired columns over-state vs its own
+    // Quantity Outstanding. Deriving issued − lifecycle gives 100−20−20=60,
+    // but Carta says 70 outstanding — we must report 70.
+    const g = { quantity: 70, quantity_issued: 100, quantity_exercised: 20, quantity_forfeited: 20, quantity_expired: 0 }
+    expect(grantOutstanding(g)).toBe(70)
   })
   it('plain grant with no lifecycle is unchanged', () => {
     const g = { quantity: 50 }
