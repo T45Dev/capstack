@@ -367,7 +367,6 @@ const proposedCols = computed<GrCol[]>(() => {
     { key: 'existing_options',label: 'Out. opt.', width: 90,  sortable: true, align: 'right' },
     { key: 'existing_common', label: 'Common',    width: 85,  sortable: true, align: 'right' },
     { key: 'existing_pref',   label: 'Preferred', width: 85,  sortable: true, align: 'right' },
-    { key: 'existing_cn',     label: 'CN',        width: 80,  sortable: true, align: 'right' },
     { key: 'existing_total',  label: 'Existing',  width: 100, sortable: true, align: 'right', groupEnd: true },
   ]
   const selected = propUnits.selected.value
@@ -491,7 +490,7 @@ const ideaRows = computed(() => {
         award_type: ie.kind || null,
         quantity: newShares,
         strike: null, issue_date: null, vesting_start: null, vesting_schedule_name: null, notes: ie.notes || null,
-        existing_options: 0, existing_common: 0, existing_pref: 0, existing_cn: 0, existing_total: 0,
+        existing_options: 0, existing_common: 0, existing_pref: 0, existing_total: 0,
         prop_pre_shares: 0, prop_new_shares: newShares, prop_post_shares: newShares,
         prop_pre_pct: 0,
         prop_new_pct:  postDenom > 0 ? newShares / postDenom : 0,
@@ -511,13 +510,15 @@ const sortedProposed = computed(() => {
     const existing_options = pos?.options || 0
     const existing_common  = pos?.common || 0
     const existing_pref    = pos?.preferred || 0
-    const existing_cn      = pos?.cn || 0
-    const existing_total   = existing_options + existing_common + existing_pref + existing_cn
+    // CN intentionally excluded: convertible notes convert to common shares,
+    // so a converted note is already counted in common/preferred — adding a
+    // separate CN figure double-counts it.
+    const existing_total   = existing_options + existing_common + existing_pref
     const newShares  = g.quantity
     const postShares = existing_total + newShares
     return {
       ...g,
-      existing_options, existing_common, existing_pref, existing_cn, existing_total,
+      existing_options, existing_common, existing_pref, existing_total,
       prop_pre_shares:  existing_total,
       prop_new_shares:  newShares,
       prop_post_shares: postShares,
@@ -556,7 +557,6 @@ function existingParts(g: any): Array<[string, number]> {
   if (g.existing_options) parts.push(['Options', g.existing_options])
   if (g.existing_common)  parts.push(['Common', g.existing_common])
   if (g.existing_pref)    parts.push(['Preferred', g.existing_pref])
-  if (g.existing_cn)      parts.push(['CN', g.existing_cn])
   return parts
 }
 function fExistingTotal(g: any): string | null {
@@ -1121,10 +1121,6 @@ const fieldLabels: Record<string, string> = {
                   </td>
                   <td v-else-if="c.key === 'existing_pref'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">
                     <span v-if="g.existing_pref">{{ fmtShares(g.existing_pref) }}</span>
-                    <span v-else class="text-ink-400">—</span>
-                  </td>
-                  <td v-else-if="c.key === 'existing_cn'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">
-                    <span v-if="g.existing_cn">{{ fmtShares(g.existing_cn) }}</span>
                     <span v-else class="text-ink-400">—</span>
                   </td>
                   <td v-else-if="c.key === 'existing_total'" class="px-2.5 py-1.5 text-right font-medium text-ink-900 border-b border-ink-200 border-r border-ink-200 group-hover:bg-brand-50/40">
