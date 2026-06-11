@@ -27,21 +27,19 @@ export default defineEventHandler(async (event) => {
   `).get(id) as { outstanding: number; exercised: number; forfeited: number; expired: number }
 
   // The Rounds table is the single source of truth for the pre-open base.
-  // Everything before the open round = the closed/formation rounds: FDS =
-  // the latest such round's pinned Total FDS (total_shares_fds_override),
-  // pool total = sum of their option_pool_issued, share price = the latest
-  // one's price. Falls back to the typed aggregate_round row when no rounds
-  // have been entered yet.
-  const histRounds = db().prepare(`
-    SELECT share_price, option_pool_issued, total_shares_fds_override
-    FROM rounds WHERE company_id = ? AND kind != 'open'
-    ORDER BY (close_date IS NULL), close_date ASC, seniority ASC
-  `).all(id) as Array<{ share_price: number | null; option_pool_issued: number | null; total_shares_fds_override: number | null }>
-  const derived = histRounds.length > 0
-  const latest = histRounds.length ? histRounds[histRounds.length - 1] : null
-  const tlFds = latest?.total_shares_fds_override ?? null
+  // Everything before the open round = the closed/formation rounds. We read the
+  // COMPUTED cumulative from round-summary (which nets out exercised options and
+  // honors any per-round pinned Total FDS) rather than re-deriving here: FDS =
+  // the latest closed round's cumulative total_shares_fds, pool total = sum of
+  // their option_pool_issued, share price = the latest one's price. Falls back
+  // to the typed aggregate_round row when no rounds have been entered yet.
+  const summary = await event.$fetch<{ rounds: Array<{ kind: string; share_price: number | null; option_pool_issued: number; total_shares_fds: number }> }>(`/api/companies/${id}/round-summary`).catch(() => null)
+  const closedRounds = (summary?.rounds || []).filter(r => r.kind !== 'open')
+  const derived = closedRounds.length > 0
+  const latest = closedRounds.length ? closedRounds[closedRounds.length - 1] : null
+  const tlFds = latest?.total_shares_fds ?? null
   const tlPps = latest?.share_price ?? null
-  const tlPool = derived ? histRounds.reduce((a, r) => a + (r.option_pool_issued || 0), 0) : null
+  const tlPool = derived ? closedRounds.reduce((a, r) => a + (r.option_pool_issued || 0), 0) : null
 
   const total_shares_fds = derived ? tlFds : (row?.total_shares_fds ?? null)
   const option_pool_total = derived ? tlPool : (row?.option_pool_total ?? null)

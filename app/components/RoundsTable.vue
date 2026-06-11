@@ -28,6 +28,7 @@ interface RoundCol {
   pre_money: number | null
   post_money: number | null
   option_pool_issued: number
+  options_exercised: number
   notes_converted: number
   notes_converted_override: number | null
   preferred_issued: number
@@ -89,6 +90,7 @@ const table = useSortableTable({
     { key: 'new_money',   label: 'New money',    width: 130 },
     { key: 'post_money',  label: 'Post-money',   width: 130 },
     { key: 'pool',        label: 'Pool issued',  width: 115 },
+    { key: 'exercised',   label: 'Exercised',    width: 110 },
     { key: 'notes_conv',  label: 'Notes conv.',  width: 115 },
     { key: 'fds',         label: 'Total FDS',    width: 135 },
   ],
@@ -327,6 +329,7 @@ const previewOwnership = computed(() =>
               <td class="px-3 py-2 text-right text-ink-700">{{ r.new_money ? fmtUSD(r.new_money) : '—' }}</td>
               <td class="px-3 py-2 text-right text-ink-700">{{ r.post_money != null ? fmtUSD(r.post_money) : '—' }}</td>
               <td class="px-3 py-2 text-right text-ink-700">{{ r.option_pool_issued ? fmtShares(r.option_pool_issued) : '—' }}</td>
+              <td class="px-3 py-2 text-right text-ink-500" title="Options exercised in this round's era — converted to common, netted out of Total FDS">{{ r.options_exercised ? '−' + fmtShares(r.options_exercised) : '—' }}</td>
               <td class="px-3 py-2 text-right text-ink-700">
                 {{ r.notes_converted ? fmtShares(r.notes_converted) : '—' }}
                 <span v-if="r.notes_converted_override != null" class="text-amber-600" title="Manual override">*</span>

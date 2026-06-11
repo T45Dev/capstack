@@ -33,6 +33,7 @@ interface RoundColumn {
   option_pool_issued: number
   option_pool_attributed: number   // options granted in this round's era (by grant issue date)
   available_options: number        // running pool issued − cumulative attributed
+  options_exercised: number        // options exercised in this round's era (by last_exercised_date) → out of the pool, into common; netted from Total FDS
   // Cumulative totals through and including this round:
   total_shares_fds: number
   total_shares_fds_override: number | null  // Formation-snapshot override; null = derive cumulatively
@@ -264,20 +265,40 @@ export default defineEventHandler((event) => {
   ).all(id) as Array<{ d: string | null; q: number }>
   const byClose = [...rounds].sort((a, b) =>
     (a.close_date || '') < (b.close_date || '') ? -1 : (a.close_date || '') > (b.close_date || '') ? 1 : a.seniority - b.seniority)
-  const attributedByRoundId = new Map<string, number>()
-  for (const g of grantRows) {
+  // The round-era a dated event belongs to = the latest round closed on/before
+  // that date. Events before the first financing roll into the first non-
+  // formation round (the founders' formation carries no option activity).
+  function eraFor(when: string | null) {
     let target = byClose[0]
     for (const r of byClose) {
-      if (r.close_date && g.d && r.close_date <= g.d) target = r
-      else if (r.close_date && g.d && r.close_date > g.d) break
+      if (r.close_date && when && r.close_date <= when) target = r
+      else if (r.close_date && when && r.close_date > when) break
     }
-    // Founders' formation carries no option grants — grants issued before the
-    // first financing roll into that first round, where the pool plan starts.
     if (target && target.kind === 'formation') {
       const idx = byClose.indexOf(target)
       target = byClose[idx + 1] || target
     }
+    return target
+  }
+  const attributedByRoundId = new Map<string, number>()
+  for (const g of grantRows) {
+    const target = eraFor(g.d)
     if (target) attributedByRoundId.set(target.id, (attributedByRoundId.get(target.id) || 0) + (g.q || 0))
+  }
+
+  // Exercised options have CONVERTED TO COMMON (they're already in the common /
+  // holdings counts), but option_pool_issued counts the full authorized reserve
+  // — so exercised shares would otherwise land in FDS twice. Net them out in
+  // the era they were exercised (last_exercised_date, falling back to the
+  // grant's issue date). This makes Total FDS use an outstanding+available pool
+  // basis, matching Carta. (Pinned rounds keep their override untouched.)
+  const exRows = db().prepare(
+    `SELECT quantity_exercised AS ex, last_exercised_date AS ed, issue_date AS d FROM grants WHERE company_id = ? AND quantity_exercised > 0`,
+  ).all(id) as Array<{ ex: number; ed: string | null; d: string | null }>
+  const exercisedByRoundId = new Map<string, number>()
+  for (const x of exRows) {
+    const target = eraFor(x.ed || x.d)
+    if (target) exercisedByRoundId.set(target.id, (exercisedByRoundId.get(target.id) || 0) + (x.ex || 0))
   }
 
   // Notes financing is issue-era: each note's PRINCIPAL counts in the round it
@@ -413,10 +434,12 @@ export default defineEventHandler((event) => {
     // rounds continue accumulating from it. Used by both the formation
     // snapshot and the timeline-migrated historical rounds, which pin
     // each row's cumulative FDS to the trusted Round-history figure.
+    const optionsExercised = exercisedByRoundId.get(r.id) || 0
     if (r.total_shares_fds_override != null) {
       cumulativeFDS = Math.floor(Number(r.total_shares_fds_override))
     } else {
-      cumulativeFDS += common + preferredIssued + poolIssued + notesConverted
+      // Pool contributes NET of exercised — those shares already sit in common.
+      cumulativeFDS += common + preferredIssued + poolIssued + notesConverted - optionsExercised
     }
     cumulativeFinancing += newMoney + notesFinancing
 
@@ -446,6 +469,7 @@ export default defineEventHandler((event) => {
       option_pool_issued: poolIssued,
       option_pool_attributed: optionPoolAttributed,
       available_options: availableOptions,
+      options_exercised: optionsExercised,
       total_shares_fds: cumulativeFDS,
       total_shares_fds_override: r.total_shares_fds_override != null ? Number(r.total_shares_fds_override) : null,
       cumulated_financing: cumulativeFinancing,
