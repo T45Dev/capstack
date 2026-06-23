@@ -184,19 +184,21 @@ function onSave() {
 
 <template>
   <div class="bg-brand-50/40 border-y border-brand-200 px-4 py-4 space-y-4">
-    <!-- ── Recipient · who's getting the grant and how it's classified ── -->
+    <!-- ── Recipient · who's getting the grant and how it's classified ──
+         Fields are sized to their content (fixed widths that wrap) rather than
+         stretched across the full table width. -->
     <div>
       <div class="text-[10px] font-semibold uppercase tracking-wider text-ink-400 mb-1.5">Recipient</div>
-      <div class="grid grid-cols-12 gap-3">
-        <UiInput v-model="form.recipient_name" label="Name" placeholder="Marwan Berrada" class="col-span-12 sm:col-span-6 lg:col-span-4" />
-        <label class="col-span-6 sm:col-span-3 lg:col-span-3 block">
+      <div class="flex flex-wrap items-start gap-x-4 gap-y-3">
+        <UiInput v-model="form.recipient_name" label="Name" placeholder="Marwan Berrada" class="w-full sm:w-72" />
+        <label class="block w-full sm:w-44">
           <span class="block text-xs font-medium text-ink-700 mb-1">Role</span>
           <select v-model="form.recipient_type" :class="SELECT_CLASS">
             <option v-if="form.recipient_type && !ROLES.includes(form.recipient_type)" :value="form.recipient_type">{{ form.recipient_type }} (legacy)</option>
             <option v-for="rr in ROLES" :key="rr" :value="rr">{{ rr }}</option>
           </select>
         </label>
-        <label class="col-span-6 sm:col-span-3 lg:col-span-2 block">
+        <label class="block w-full sm:w-28">
           <span class="block text-xs font-medium text-ink-700 mb-1">Type</span>
           <select v-model="form.award_type" :class="SELECT_CLASS">
             <option value="">—</option>
@@ -205,7 +207,7 @@ function onSave() {
             <option value="RSU">RSU</option>
           </select>
         </label>
-        <label class="col-span-12 sm:col-span-6 lg:col-span-3 block">
+        <label class="block w-full sm:w-44">
           <span class="block text-xs font-medium text-ink-700 mb-1">Status</span>
           <select v-model="form.status" :class="SELECT_CLASS">
             <option value="proposed">Proposed (draft)</option>
@@ -218,8 +220,8 @@ function onSave() {
     <!-- ── Grant · size, price, batch ── -->
     <div>
       <div class="text-[10px] font-semibold uppercase tracking-wider text-ink-400 mb-1.5">Grant</div>
-      <div class="grid grid-cols-12 gap-3 items-start">
-        <div class="col-span-12 sm:col-span-7 lg:col-span-5">
+      <div class="flex flex-wrap items-start gap-x-4 gap-y-3">
+        <div class="w-full sm:w-80">
           <span class="block text-xs font-medium text-ink-700 mb-1">Grant size <span class="text-ink-400 font-normal normal-case">({{ sizeUnitLabel }})</span></span>
           <div class="flex items-stretch gap-2">
             <UiInput
@@ -229,7 +231,7 @@ function onSave() {
               :suffix="inputMode === 'pct' ? '%' : ''"
               :step="inputMode === 'shares' ? '100' : inputMode === 'pct' ? '0.01' : '1000'"
               :digits="inputMode === 'pct' ? 2 : 0"
-              class="flex-1 min-w-0"
+              class="w-36"
             />
             <UiSegmented
               :model-value="inputMode"
@@ -253,36 +255,36 @@ function onSave() {
             >{{ c.label }}</button>
           </div>
         </div>
-        <UiInput v-model="form.strike" type="number" label="Strike (PPS)" prefix="$" step="0.00001" :digits="5" class="col-span-6 sm:col-span-5 lg:col-span-3" />
-        <UiInput v-model="form.round" label="Batch" placeholder="Q3 2025 hires" class="col-span-6 sm:col-span-12 lg:col-span-4" />
+        <UiInput v-model="form.strike" type="number" label="Strike (PPS)" prefix="$" step="0.00001" :digits="5" class="w-full sm:w-32" />
+        <UiInput v-model="form.round" label="Batch" placeholder="Q3 2025 hires" class="w-full sm:w-48" />
       </div>
     </div>
 
     <!-- ── Vesting · dates and schedule ── -->
     <div>
       <div class="text-[10px] font-semibold uppercase tracking-wider text-ink-400 mb-1.5">Vesting</div>
-      <div class="grid grid-cols-12 gap-3 items-start">
-        <UiInput v-model="form.issue_date" type="date" label="Issue date" class="col-span-6 sm:col-span-3 lg:col-span-2" />
-        <UiInput v-model="form.vesting_start" type="date" label="Vesting date" class="col-span-6 sm:col-span-3 lg:col-span-2" />
-        <label class="col-span-12 sm:col-span-4 lg:col-span-4 block">
+      <div class="flex flex-wrap items-start gap-x-4 gap-y-3">
+        <UiInput v-model="form.issue_date" type="date" label="Issue date" class="w-full sm:w-40" />
+        <UiInput v-model="form.vesting_start" type="date" label="Vesting date" class="w-full sm:w-40" />
+        <label class="block w-full sm:w-52">
           <span class="block text-xs font-medium text-ink-700 mb-1">Schedule</span>
           <select :value="form.vesting_schedule_id || ''" :class="SELECT_CLASS" @change="onSchedule">
             <option value="">Custom</option>
             <option v-for="s in schedules" :key="s.id" :value="s.id">{{ s.name }}</option>
           </select>
         </label>
-        <div class="col-span-12 sm:col-span-2 lg:col-span-2">
+        <div class="w-full sm:w-auto">
           <span class="block text-xs font-medium text-ink-700 mb-1">Vest / cliff <span class="text-ink-400 font-normal">(mo.)</span></span>
-          <div class="grid grid-cols-2 gap-2">
-            <UiInput v-model="form.vest_months" type="number" placeholder="48" />
-            <UiInput v-model="form.cliff_months" type="number" placeholder="12" />
+          <div class="flex gap-2">
+            <UiInput v-model="form.vest_months" type="number" placeholder="48" class="w-20" />
+            <UiInput v-model="form.cliff_months" type="number" placeholder="12" class="w-20" />
           </div>
         </div>
       </div>
     </div>
 
     <!-- ── Notes ── -->
-    <label class="block">
+    <label class="block w-full sm:max-w-2xl">
       <span class="block text-xs font-medium text-ink-700 mb-1">Notes</span>
       <input v-model="form.notes" type="text" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" placeholder="Optional memo" />
     </label>
