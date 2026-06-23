@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle, UploadCloud, AlertTriangle, CheckCircle2, X, Award } from 'lucide-vue-next'
+import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle, UploadCloud, AlertTriangle, CheckCircle2, X, Award, Lightbulb, BarChart3 } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtDate, fmtPricePerShare, normalizeDate } from '~/utils/format'
 import { calcSum, calcPct, calcValueUSD } from '~/utils/calc'
 import { authorizedPool, poolEquation, grantIssued, grantOutstanding } from '~/utils/capTable'
@@ -64,7 +64,7 @@ const { data: roundSummary } = await useFetch<{ rounds: any[] }>(() => `/api/com
 // Pool "ideas" (anonymous future grants/reserves from the Pool Impact page).
 // Surfaced as read-only rows in the Proposed table, flagged "Idea", so the
 // operator sees modeled-but-not-yet-granted equity alongside real proposals.
-const { data: poolEvents } = await useFetch<any[]>(() => `/api/companies/${id.value}/pool-events`, { watch: [id], default: () => [] })
+const { data: poolEvents, refresh: refreshPoolEvents } = await useFetch<any[]>(() => `/api/companies/${id.value}/pool-events`, { watch: [id], default: () => [] })
 // Pull cap-table so the toggle's % / $ views have an FDS denominator and a PPS,
 // AND so we can surface each proposed grantee's existing position (common,
 // preferred, outstanding options).
@@ -384,7 +384,7 @@ const proposedCols = computed<GrCol[]>(() => {
   cols.push({ key: 'vesting_start', label: 'Vesting date', width: 120, sortable: true, align: 'left' })
   cols.push({ key: 'vesting_schedule_name', label: 'Schedule', width: 130, sortable: true, align: 'left' })
   cols.push({ key: 'notes',         label: 'Note',         width: 200, sortable: false, align: 'left' })
-  cols.push({ key: 'actions', label: '', width: 84, sortable: false, align: 'right' })
+  cols.push({ key: 'actions', label: '', width: 112, sortable: false, align: 'right' })
   return cols
 })
 
@@ -719,6 +719,15 @@ async function demote(g: Grant) {
   await refresh()
 }
 
+async function demoteToIdea(g: Grant) {
+  // Send a proposed grant down to a pool "idea" — it leaves the live proposal
+  // list and reappears as a read-only Idea row (managed on Pool Impact).
+  if (isIdeaRow(g)) return
+  if (!confirm(`Demote ${g.recipient_name}'s proposed grant to a pool idea? It moves to the Option Pool Impact timeline.`)) return
+  await $fetch(`/api/grants/${g.id}/demote-to-idea`, { method: 'POST' })
+  await Promise.all([refresh(), refreshPoolEvents()])
+}
+
 async function destroy(g: Grant) {
   if (isIdeaRow(g)) return
   if (!confirm(`Permanently delete grant for ${g.recipient_name}? (history will not be retained)`)) return
@@ -761,6 +770,13 @@ function runExport(scope: string) {
   showExportModal.value = false
   // Browser handles the download via the endpoint's Content-Disposition header.
   window.location.href = `/api/companies/${id.value}/board-approval?scope=${scope}`
+}
+
+// CEO report — a self-contained, print-ready visual briefing (HTML). Opens in
+// a new tab so the CEO sees it rendered immediately; the report carries its own
+// "Print / Save as PDF" button.
+function openCeoReport() {
+  window.open(`/api/companies/${id.value}/ceo-report`, '_blank', 'noopener')
 }
 
 // ---- Smart import of proposed grants ----
@@ -898,6 +914,7 @@ const fieldLabels: Record<string, string> = {
     <PageHeader :breadcrumb="[{ label: 'Cap-table model' }, { label: 'Option grants' }]" description="Outstanding grants from the cap table, plus any proposed grants you're modelling.">
       <template #title><Award :size="20" /> Option grants</template>
       <template #actions>
+        <UiButton @click="openCeoReport"><BarChart3 :size="14" /> CEO report</UiButton>
         <UiButton :disabled="!proposed.length && !ideasCount" @click="exportBoardApproval">
           <FileDown :size="14" /> Export board approval (.xlsx)
         </UiButton>
@@ -1181,6 +1198,7 @@ const fieldLabels: Record<string, string> = {
                     <template v-if="!g.isIdea">
                       <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded" @click="startEdit(g)" title="Edit"><Edit3 :size="13" /></button>
                       <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded" @click="promote(g)" title="Promote to outstanding"><ArrowUpCircle :size="13" /></button>
+                      <button class="text-ink-500 hover:text-amber-600 px-1 py-0.5 rounded" @click="demoteToIdea(g)" title="Demote to pool idea"><Lightbulb :size="13" /></button>
                       <button class="text-ink-500 hover:text-red-600 px-1 py-0.5 rounded" @click="destroy(g)" title="Delete"><Trash2 :size="13" /></button>
                     </template>
                     <NuxtLink v-else :to="`/companies/${id}/pool`" class="text-[10px] text-amber-700 hover:underline" title="Pool idea — manage on Option Pool Impact">on Pool ↗</NuxtLink>
