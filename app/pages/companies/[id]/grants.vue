@@ -476,26 +476,43 @@ const sortedOutstanding = computed(() => {
 // position, so pre = 0 and post = the idea's own shares.
 const ideaRows = computed(() => {
   const postDenom = postFDS.value
+  const prePPS    = ppsAnchor.value
   const ppsPost   = postPPS.value
   return (poolEvents.value || [])
     .filter(ie => ie.type === 'grant' || ie.type === 'reserve')
     .map(ie => {
       const newShares = ie.shares || 0
+      // Clever bit: if the idea's NAME matches an existing optionholder /
+      // shareholder, roll up their current position so the idea reads as a
+      // top-up on top of what they already hold — not an anonymous new line.
+      // An idea with no name match stays anonymous (pre = 0), as before.
+      const pos = positionFor({ recipient_name: ie.name || '' })
+      const existing_options = pos?.options || 0
+      const existing_common  = pos?.common || 0
+      const existing_pref    = pos?.preferred || 0
+      const existing_total   = existing_options + existing_common + existing_pref
+      const postShares       = existing_total + newShares
       return {
         id: `idea:${ie.id}`,
         isIdea: true,
+        // True when the idea is attributed to a known existing holder.
+        matchedHolder: existing_total > 0,
         status: 'proposed',
         recipient_name: ie.name || 'Idea',
         recipient_type: ie.recipient_type || 'Employees',
         award_type: ie.kind || null,
         quantity: newShares,
         strike: null, issue_date: null, vesting_start: null, vesting_schedule_name: null, notes: ie.notes || null,
-        existing_options: 0, existing_common: 0, existing_pref: 0, existing_total: 0,
-        prop_pre_shares: 0, prop_new_shares: newShares, prop_post_shares: newShares,
-        prop_pre_pct: 0,
-        prop_new_pct:  postDenom > 0 ? newShares / postDenom : 0,
-        prop_post_pct: postDenom > 0 ? newShares / postDenom : 0,
-        prop_pre_value: 0, prop_new_value: newShares * ppsPost, prop_post_value: newShares * ppsPost,
+        existing_options, existing_common, existing_pref, existing_total,
+        prop_pre_shares:  existing_total,
+        prop_new_shares:  newShares,
+        prop_post_shares: postShares,
+        prop_pre_pct:  postDenom > 0 ? existing_total / postDenom : 0,
+        prop_new_pct:  postDenom > 0 ? newShares      / postDenom : 0,
+        prop_post_pct: postDenom > 0 ? postShares     / postDenom : 0,
+        prop_pre_value:  existing_total * prePPS,
+        prop_new_value:  newShares      * ppsPost,
+        prop_post_value: postShares     * ppsPost,
       }
     })
 })
