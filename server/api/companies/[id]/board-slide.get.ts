@@ -202,23 +202,14 @@ export default defineEventHandler(async (event) => {
     founders: '#7c3aed', seed: '#0d9488', series: '#4f46e5',
   }
 
-  function donut(segments: Array<{ label: string; value: number; color: string }>, centerTop: string, centerBottom: string): string {
+  // Slim stacked "fuel gauge" of the authorized pool — Outstanding | Exercised |
+  // Available. A light visual that decomposes the pool without restating the top
+  // KPIs the way the old donut+legend did.
+  function minibar(segments: Array<{ value: number; color: string; label: string }>): string {
     const total = segments.reduce((a, s) => a + Math.max(0, s.value), 0)
-    const r = 56, cx = 72, cy = 72, sw = 22, circ = 2 * Math.PI * r
-    if (total <= 0) return '<div class="empty">No pool authorized yet.</div>'
-    let acc = 0
-    const arcs = segments.filter(s => s.value > 0).map(s => {
-      const frac = s.value / total
-      const len = frac * circ
-      const off = -acc * circ
-      acc += frac
-      return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${sw}" stroke-dasharray="${len.toFixed(2)} ${(circ - len).toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}" transform="rotate(-90 ${cx} ${cy})"/>`
-    }).join('')
-    return `<svg viewBox="0 0 144 144" width="144" height="144" role="img" aria-label="Option pool allocation">
-      ${arcs}
-      <text x="${cx}" y="${cy - 2}" text-anchor="middle" class="donut-top">${esc(centerTop)}</text>
-      <text x="${cx}" y="${cy + 14}" text-anchor="middle" class="donut-bot">${esc(centerBottom)}</text>
-    </svg>`
+    if (total <= 0) return ''
+    return `<div class="minibar">${segments.filter(s => s.value > 0).map(s =>
+      `<span style="width:${((s.value / total) * 100).toFixed(2)}%;background:${s.color}" title="${esc(s.label)}"></span>`).join('')}</div>`
   }
 
   function hbars(items: Array<{ label: string; value: number; valueLabel: string; sub?: string; color: string }>): string {
@@ -236,16 +227,15 @@ export default defineEventHandler(async (event) => {
     return `<div class="kpi"><div class="kpi-value">${esc(value)}</div><div class="kpi-label">${esc(label)}</div>${sub ? `<div class="kpi-sub">${esc(sub)}</div>` : ''}</div>`
   }
 
-  // Donut: Outstanding + Exercised (= allocated) + Proposed claim + free remainder.
-  // If proposals exceed what's free, the overflow shows as an over-allocated arc.
   const overBy = afterProposed < 0 ? Math.abs(afterProposed) : 0
-  const donutSegments = [
+  // Pool composition gauge: the authorized pool split into Outstanding,
+  // Exercised, and Available (these three sum to Authorized). Proposed is a claim
+  // ON Available — not a separate slice — so it lives in the breakdown + callout,
+  // not the bar. Forfeited/Expired returned to the pool, so it isn't a slice either.
+  const compSegments = [
     { label: 'Outstanding', value: allocatedOutstanding, color: C.outstanding },
     { label: 'Exercised', value: allocatedExercised, color: C.exercised },
-    { label: 'Proposed', value: totalProposed, color: C.proposed },
-    ...(afterProposed >= 0
-      ? [{ label: 'Available', value: afterProposed, color: C.available }]
-      : [{ label: 'Over-allocated', value: overBy, color: C.over }]),
+    { label: 'Available', value: unallocated, color: C.available },
   ]
 
   const stageBars = (['Founders', 'Seed', 'Series'] as Stage[]).map(s => ({
@@ -327,16 +317,22 @@ export default defineEventHandler(async (event) => {
   .body{display:grid;grid-template-columns:1.05fr 1fr;gap:26px}
   .panel h2{margin:0 0 2px;font-size:13.5px;font-weight:800;letter-spacing:-.01em}
   .panel .desc{margin:0 0 11px;font-size:11px;color:var(--muted)}
-  .split{display:grid;grid-template-columns:148px 1fr;gap:20px;align-items:center}
-  /* Donut + legend */
-  .donut-top{font-size:17px;font-weight:800;fill:var(--ink)}
-  .donut-bot{font-size:8.5px;letter-spacing:.07em;fill:var(--muted);text-transform:uppercase}
-  .legend{display:flex;flex-direction:column;gap:7px}
+  /* Pool composition gauge + breakdown */
+  .minibar{display:flex;height:15px;border-radius:7px;overflow:hidden;border:1px solid var(--line);margin-bottom:13px}
+  .minibar>span{height:100%}
+  .legend{display:flex;flex-direction:column;gap:6px}
   .legend-row{display:flex;align-items:center;gap:9px;font-size:12px}
   .dot{width:10px;height:10px;border-radius:3px;flex:none}
   .legend-label{color:var(--ink-2)}
   .legend-value{margin-left:auto;font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink)}
-  .legend-row.total{border-top:1px dashed var(--line);padding-top:5px;margin-top:0}
+  .legend-row.head .legend-label,.legend-row .legend-label b{color:var(--ink)}
+  .legend-row.sub{font-size:11.5px;padding-left:19px}
+  .legend-row.sub .legend-label{color:var(--muted)}
+  .legend-row.sub .legend-value{font-weight:600;color:var(--ink-2)}
+  .legend-row.minor{margin-top:6px;padding-top:7px;border-top:1px dashed var(--line);font-size:11.5px}
+  .legend-row.minor .legend-label{color:var(--muted)}
+  .legend-row.minor .legend-value{font-weight:600;color:var(--ink-2)}
+  .legend-row .ret{color:var(--faint);font-weight:400}
   /* Horizontal bars */
   .bars{display:flex;flex-direction:column;gap:11px}
   .bar-row{display:grid;grid-template-columns:1fr 160px;grid-template-areas:"label value" "track track";column-gap:12px;row-gap:3px;align-items:center}
@@ -362,7 +358,7 @@ export default defineEventHandler(async (event) => {
   .callout.neutral{background:#f8fafc;color:var(--ink-2);border:1px solid var(--line)}
   .callout b{font-weight:800}
   .foot{display:flex;justify-content:space-between;color:var(--faint);font-size:10px;border-top:1px solid var(--line);padding-top:9px;margin-top:2px}
-  @media (max-width:880px){ .kpis{grid-template-columns:repeat(2,1fr)} .body{grid-template-columns:1fr} .split{grid-template-columns:1fr;justify-items:center} }
+  @media (max-width:880px){ .kpis{grid-template-columns:repeat(2,1fr)} .body{grid-template-columns:1fr} }
   @page{ size:landscape; margin:10mm 6mm }
   @media print{
     body{background:#fff}
@@ -396,17 +392,16 @@ export default defineEventHandler(async (event) => {
 
     <section class="body">
       <div class="panel">
-        <h2>Pool allocation</h2>
-        <p class="desc">How the ${fmtShares(poolAuthorized)}-option pool (${fmtPct(pctOfFds(poolAuthorized))} of FDS) breaks down today, including draft proposals.</p>
-        <div class="split">
-          <div style="display:flex;justify-content:center">${donut(donutSegments, fmtShares(poolAuthorized), 'options')}</div>
-          <div class="legend">
-            <div class="legend-row"><span class="dot" style="background:${C.outstanding}"></span><span class="legend-label">Allocated — outstanding</span><span class="legend-value">${fmtShares(allocatedOutstanding)} · ${fmtPct(pctOfPool(allocatedOutstanding))}</span></div>
-            <div class="legend-row"><span class="dot" style="background:${C.exercised}"></span><span class="legend-label">Allocated — exercised</span><span class="legend-value">${fmtShares(allocatedExercised)} · ${fmtPct(pctOfPool(allocatedExercised))}</span></div>
-            <div class="legend-row"><span class="dot" style="background:${C.proposed}"></span><span class="legend-label">Proposed (pending)</span><span class="legend-value">${fmtShares(totalProposed)} · ${fmtPct(pctOfPool(totalProposed))}</span></div>
-            <div class="legend-row"><span class="dot" style="background:${afterProposed >= 0 ? C.available : C.over}"></span><span class="legend-label">${afterProposed >= 0 ? 'Available after proposed' : 'Over-allocated'}</span><span class="legend-value">${afterProposed >= 0 ? `${fmtShares(afterProposed)} · ${fmtPct(pctOfPool(afterProposed))}` : `(${fmtShares(overBy)})`}</span></div>
-            <div class="legend-row total"><span class="dot" style="background:#1e1b4b"></span><span class="legend-label"><b>Unallocated (available)</b></span><span class="legend-value">${fmtShares(unallocated)} · ${fmtPct(pctOfPool(unallocated))}</span></div>
-          </div>
+        <h2>Pool composition</h2>
+        <p class="desc">How the ${fmtShares(poolAuthorized)}-option pool breaks down. Allocated = outstanding + exercised; % is of the pool.</p>
+        ${minibar(compSegments)}
+        <div class="legend">
+          <div class="legend-row head"><span class="dot" style="background:${C.outstanding}"></span><span class="legend-label"><b>Allocated</b></span><span class="legend-value">${fmtShares(allocated)} · ${fmtPct(pctOfPool(allocated))}</span></div>
+          <div class="legend-row sub"><span class="legend-label">Outstanding (held)</span><span class="legend-value">${fmtShares(allocatedOutstanding)} · ${fmtPct(pctOfPool(allocatedOutstanding))}</span></div>
+          <div class="legend-row sub"><span class="legend-label">Exercised</span><span class="legend-value">${fmtShares(allocatedExercised)} · ${fmtPct(pctOfPool(allocatedExercised))}</span></div>
+          <div class="legend-row"><span class="dot" style="background:${C.available}"></span><span class="legend-label"><b>Available (unallocated)</b></span><span class="legend-value">${fmtShares(unallocated)} · ${fmtPct(pctOfPool(unallocated))}</span></div>
+          <div class="legend-row sub"><span class="legend-label">${afterProposed >= 0 ? 'After proposed' : 'Over-allocated by'}</span><span class="legend-value">${afterProposed >= 0 ? `${fmtShares(afterProposed)} · ${fmtPct(pctOfPool(afterProposed))}` : `(${fmtShares(overBy)})`}</span></div>
+          <div class="legend-row minor"><span class="legend-label">Forfeited / Expired<span class="ret"> · returned to pool</span></span><span class="legend-value">${fmtShares(totalForfeitedOrExpired)} · ${fmtPct(pctOfPool(totalForfeitedOrExpired))}</span></div>
         </div>
       </div>
 
