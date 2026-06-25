@@ -309,7 +309,7 @@ export default defineEventHandler(async (event) => {
   .print-btn{cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:var(--ink);font-size:12.5px;font-weight:600;padding:9px 14px;border-radius:10px}
   .print-btn:hover{background:#f8fafc}
   /* The slide: one landscape page. */
-  .slide{max-width:1160px;margin:18px auto 48px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 34px rgba(15,23,42,.12);padding:30px 44px 24px;display:flex;flex-direction:column;gap:14px}
+  .slide{max-width:1360px;margin:18px auto 48px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 34px rgba(15,23,42,.12);padding:30px 40px 24px;display:flex;flex-direction:column;gap:14px}
   .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
   /* Header band */
   .head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;border-bottom:2px solid #1e1b4b;padding-bottom:12px}
@@ -324,7 +324,7 @@ export default defineEventHandler(async (event) => {
   .kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:2px;font-weight:700}
   .kpi-sub{font-size:11px;color:var(--brand);margin-top:2px;font-weight:600}
   /* Body grid: two columns */
-  .body{display:grid;grid-template-columns:1.05fr 1fr;gap:34px}
+  .body{display:grid;grid-template-columns:1.05fr 1fr;gap:26px}
   .panel h2{margin:0 0 2px;font-size:13.5px;font-weight:800;letter-spacing:-.01em}
   .panel .desc{margin:0 0 11px;font-size:11px;color:var(--muted)}
   .split{display:grid;grid-template-columns:148px 1fr;gap:20px;align-items:center}
@@ -363,7 +363,7 @@ export default defineEventHandler(async (event) => {
   .callout b{font-weight:800}
   .foot{display:flex;justify-content:space-between;color:var(--faint);font-size:10px;border-top:1px solid var(--line);padding-top:9px;margin-top:2px}
   @media (max-width:880px){ .kpis{grid-template-columns:repeat(2,1fr)} .body{grid-template-columns:1fr} .split{grid-template-columns:1fr;justify-items:center} }
-  @page{ size:landscape; margin:11mm }
+  @page{ size:landscape; margin:10mm 6mm }
   @media print{
     body{background:#fff}
     .toolbar{display:none}
