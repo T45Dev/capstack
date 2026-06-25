@@ -154,16 +154,30 @@ export default defineEventHandler(async (event) => {
   const shpc = (shares: number, pctFrac: number) =>
     `<span class="sh">${fmtShares(shares)}</span><span class="pc">${fmtPct(pctFrac)}</span>`
 
-  // Vertical burn-down bars: available pool at each year-end. Actual years are
-  // solid; projected years (future, at the current grant pace) are hatched.
-  function vbars(bars: Array<{ year: number; val: number; projected: boolean }>, maxVal: number): string {
-    if (!bars.length) return '<div class="empty">Not enough dated history to chart.</div>'
+  // Burn-down line chart: available pool at each year-end. The actual stretch is
+  // a solid line over a light area; the projection (future years at the current
+  // grant pace) is a dashed line running down toward the dry date. Strokes use
+  // non-scaling-stroke so they stay crisp when the SVG stretches to fill width.
+  function lineChart(pts: Array<{ year: number; val: number; projected: boolean }>, maxVal: number): string {
+    if (pts.length < 2) return '<div class="empty">Not enough dated history to chart.</div>'
     const m = Math.max(1, maxVal)
-    return `<div class="vbars">${bars.map(b => `
-      <div class="vbar" title="${esc(String(b.year) + ': ' + fmtShares(b.val) + ' available')}">
-        <div class="vbar-col${b.projected ? ' proj' : ''}" style="height:${Math.max(2, (b.val / m) * 46).toFixed(0)}px"></div>
-        <div class="vbar-lbl${b.projected ? ' proj' : ''}">'${String(b.year).slice(2)}</div>
-      </div>`).join('')}</div>`
+    const n = pts.length, W = n - 1, H = 100
+    const xy = (i: number) => `${i.toFixed(2)},${(H - (pts[i]!.val / m) * H).toFixed(2)}`
+    let lastActual = 0
+    pts.forEach((p, i) => { if (!p.projected) lastActual = i })
+    const actualIdx = pts.map((_, i) => i).filter(i => i <= lastActual)
+    const projIdx = pts.map((_, i) => i).filter(i => i >= lastActual)
+    const area = `0,${H} ${actualIdx.map(xy).join(' ')} ${lastActual},${H}`
+    const labels = pts.map(p => `<span class="lc-lbl${p.projected ? ' proj' : ''}">'${String(p.year).slice(2)}</span>`).join('')
+    return `<div class="linechart">
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="lc-svg" role="img" aria-label="Option pool available over time">
+        <polygon points="${area}" class="lc-area"/>
+        <line x1="0" y1="${H}" x2="${W}" y2="${H}" class="lc-base"/>
+        <polyline points="${actualIdx.map(xy).join(' ')}" class="lc-line"/>
+        <polyline points="${projIdx.map(xy).join(' ')}" class="lc-proj"/>
+      </svg>
+      <div class="lc-axis">${labels}</div>
+    </div>`
   }
 
   function kpi(value: string, label: string, sub = '', sub2 = ''): string {
@@ -311,7 +325,7 @@ export default defineEventHandler(async (event) => {
   .print-btn{cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:var(--ink);font-size:12.5px;font-weight:600;padding:9px 14px;border-radius:10px}
   .print-btn:hover{background:#f8fafc}
   /* The slide: one landscape page. */
-  .slide{max-width:1360px;margin:18px auto 48px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 34px rgba(15,23,42,.12);padding:22px 40px 16px;display:flex;flex-direction:column;gap:9px}
+  .slide{max-width:1360px;margin:18px auto 48px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 34px rgba(15,23,42,.12);padding:20px 40px 12px;display:flex;flex-direction:column;gap:9px}
   .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
   /* Header band */
   .head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;border-bottom:2px solid #1e1b4b;padding-bottom:8px}
@@ -320,7 +334,7 @@ export default defineEventHandler(async (event) => {
   .badge{display:inline-block;font-size:9.5px;letter-spacing:.14em;font-weight:800;color:#4f46e5;background:#eef2ff;padding:3px 8px;border-radius:999px}
   /* KPI strip */
   .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
-  .kpi{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:11px 15px}
+  .kpi{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:10px 14px}
   .kpi-value{font-size:22px;font-weight:800;letter-spacing:-.02em;color:var(--ink);font-variant-numeric:tabular-nums}
   .kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:2px;font-weight:700}
   .kpi-sub{font-size:11px;color:var(--brand);margin-top:2px;font-weight:600}
@@ -343,13 +357,16 @@ export default defineEventHandler(async (event) => {
   .brow.minor{margin-top:5px;padding-top:7px;border-top:1px dashed var(--line)}
   .brow.minor .lbl{color:var(--muted);font-size:11.5px}
   .brow .ret{color:var(--faint)}
-  /* Vertical burn-down bars: available pool by year, actual (solid) + projected (hatched) */
-  .vbars{display:flex;align-items:flex-end;gap:6px;height:58px;margin-bottom:9px}
-  .vbar{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;flex:1;gap:3px;height:100%}
-  .vbar-col{width:100%;max-width:26px;background:linear-gradient(180deg,#6366f1,#4f46e5);border-radius:4px 4px 0 0;min-height:2px}
-  .vbar-col.proj{background:repeating-linear-gradient(45deg,#c7d2fe,#c7d2fe 3px,#eef2ff 3px,#eef2ff 6px);border:1px solid #c7d2fe;border-bottom:none}
-  .vbar-lbl{font-size:8.5px;color:var(--muted);font-variant-numeric:tabular-nums}
-  .vbar-lbl.proj{color:var(--faint)}
+  /* Burn-down line chart: available pool over time, actual (solid) + projected (dashed) */
+  .linechart{margin-bottom:6px}
+  .lc-svg{display:block;width:100%;height:48px}
+  .lc-area{fill:#eef2ff;stroke:none}
+  .lc-base{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}
+  .lc-line{fill:none;stroke:#4f46e5;stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round;stroke-linecap:round}
+  .lc-proj{fill:none;stroke:#94a3b8;stroke-width:2;stroke-dasharray:4 3;vector-effect:non-scaling-stroke;stroke-linejoin:round;stroke-linecap:round}
+  .lc-axis{display:flex;justify-content:space-between;margin-top:3px}
+  .lc-lbl{font-size:8.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .lc-lbl.proj{color:var(--faint)}
   /* Runway recommendation note */
   .pnote{margin:7px 0 0;font-size:11px;line-height:1.32;padding:6px 9px;border-radius:8px;border-left:3px solid}
   .pnote.ok{background:#ecfdf5;color:#065f46;border-color:#34d399}
@@ -373,12 +390,12 @@ export default defineEventHandler(async (event) => {
   .proposed-total .tl{font-weight:800;color:var(--ink);margin-right:auto}
   .empty{font-size:12px;color:var(--faint);padding:8px 0;font-style:italic}
   /* Callout */
-  .callout{font-size:12px;border-radius:10px;padding:9px 14px;line-height:1.35}
+  .callout{font-size:12px;border-radius:10px;padding:8px 13px;line-height:1.3}
   .callout.ok{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}
   .callout.warn{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
   .callout.neutral{background:#f8fafc;color:var(--ink-2);border:1px solid var(--line)}
   .callout b{font-weight:800}
-  .foot{display:flex;justify-content:space-between;color:var(--faint);font-size:10px;border-top:1px solid var(--line);padding-top:9px;margin-top:2px}
+  .foot{display:flex;justify-content:space-between;color:var(--faint);font-size:10px;border-top:1px solid var(--line);padding-top:6px;margin-top:0}
   @media (max-width:880px){ .kpis{grid-template-columns:repeat(2,1fr)} .body{grid-template-columns:1fr} }
   @page{ size:landscape; margin:4mm 5mm }
   @media print{
@@ -427,7 +444,7 @@ export default defineEventHandler(async (event) => {
       <div class="panel">
         <h2>Pool burn-down &amp; dry date</h2>
         <p class="desc">Available pool over time (year-end), projected at the ~${fmtShares(burnRounded)}/yr grant pace. Hatched bars = projection.</p>
-        ${vbars(burnBars, maxBar)}
+        ${lineChart(burnBars, maxBar)}
         <div class="breakdown">
           <div class="brow"><span class="lbl">Grant pace (avg)</span><span class="sh">${fmtShares(burnRounded)}</span><span class="pc">/yr</span></div>
           <div class="brow head"><span class="lbl">Projected dry</span><span class="sh">${fmtMY(dryMs)}</span><span class="pc">${yearsToDry != null ? '~' + (yearsToDry as number).toFixed(1) + 'y' : ''}</span></div>
