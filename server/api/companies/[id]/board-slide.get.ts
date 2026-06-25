@@ -202,69 +202,61 @@ export default defineEventHandler(async (event) => {
     founders: '#7c3aed', seed: '#0d9488', series: '#4f46e5',
   }
 
-  function donut(segments: Array<{ label: string; value: number; color: string }>, centerTop: string, centerBottom: string): string {
-    const total = segments.reduce((a, s) => a + Math.max(0, s.value), 0)
-    const r = 56, cx = 72, cy = 72, sw = 22, circ = 2 * Math.PI * r
-    if (total <= 0) return '<div class="empty">No pool authorized yet.</div>'
-    let acc = 0
-    const arcs = segments.filter(s => s.value > 0).map(s => {
-      const frac = s.value / total
-      const len = frac * circ
-      const off = -acc * circ
-      acc += frac
-      return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${sw}" stroke-dasharray="${len.toFixed(2)} ${(circ - len).toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}" transform="rotate(-90 ${cx} ${cy})"/>`
-    }).join('')
-    return `<svg viewBox="0 0 144 144" width="144" height="144" role="img" aria-label="Option pool allocation">
-      ${arcs}
-      <text x="${cx}" y="${cy - 2}" text-anchor="middle" class="donut-top">${esc(centerTop)}</text>
-      <text x="${cx}" y="${cy + 14}" text-anchor="middle" class="donut-bot">${esc(centerBottom)}</text>
-    </svg>`
-  }
+  // Consistent value cell used everywhere a figure is shown: bold shares, then a
+  // gap, then a non-bold % — both right-aligned in fixed columns so they line up
+  // across every row (no dots, no misalignment).
+  const shpc = (shares: number, pctFrac: number) =>
+    `<span class="sh">${fmtShares(shares)}</span><span class="pc">${fmtPct(pctFrac)}</span>`
 
-  function hbars(items: Array<{ label: string; value: number; valueLabel: string; sub?: string; color: string }>): string {
+  function hbars(items: Array<{ label: string; value: number; shares: number; pctFrac: number; sub?: string; color: string }>): string {
     if (!items.length) return '<div class="empty">Nothing to show.</div>'
     const max = Math.max(1, ...items.map(i => i.value))
     return `<div class="bars">${items.map(i => `
       <div class="bar-row">
         <div class="bar-label" title="${esc(i.label)}">${esc(i.label)}${i.sub ? `<span class="bar-sub">${esc(i.sub)}</span>` : ''}</div>
         <div class="bar-track"><div class="bar-fill" style="width:${Math.max(2, (i.value / max) * 100).toFixed(1)}%;background:${i.color}"></div></div>
-        <div class="bar-value">${esc(i.valueLabel)}</div>
+        <div class="bar-value">${shpc(i.shares, i.pctFrac)}</div>
       </div>`).join('')}</div>`
   }
 
-  function kpi(value: string, label: string, sub = ''): string {
-    return `<div class="kpi"><div class="kpi-value">${esc(value)}</div><div class="kpi-label">${esc(label)}</div>${sub ? `<div class="kpi-sub">${esc(sub)}</div>` : ''}</div>`
+  function kpi(value: string, label: string, sub = '', sub2 = ''): string {
+    return `<div class="kpi"><div class="kpi-value">${esc(value)}</div><div class="kpi-label">${esc(label)}</div>${sub ? `<div class="kpi-sub">${esc(sub)}</div>` : ''}${sub2 ? `<div class="kpi-sub2">${esc(sub2)}</div>` : ''}</div>`
   }
 
-  // Donut: Outstanding + Exercised (= allocated) + Proposed claim + free remainder.
-  // If proposals exceed what's free, the overflow shows as an over-allocated arc.
   const overBy = afterProposed < 0 ? Math.abs(afterProposed) : 0
-  const donutSegments = [
-    { label: 'Outstanding', value: allocatedOutstanding, color: C.outstanding },
-    { label: 'Exercised', value: allocatedExercised, color: C.exercised },
-    { label: 'Proposed', value: totalProposed, color: C.proposed },
-    ...(afterProposed >= 0
-      ? [{ label: 'Available', value: afterProposed, color: C.available }]
-      : [{ label: 'Over-allocated', value: overBy, color: C.over }]),
-  ]
 
   const stageBars = (['Founders', 'Seed', 'Series'] as Stage[]).map(s => ({
     label: s,
     value: stages[s].shares,
-    valueLabel: `${fmtShares(stages[s].shares)} · ${fmtPct(pctOfPool(stages[s].shares))}`,
+    shares: stages[s].shares,
+    pctFrac: pctOfPool(stages[s].shares),
     sub: stages[s].roundNames.length
       ? stages[s].roundNames.slice(0, 4).join(', ') + (stages[s].roundNames.length > 4 ? ` +${stages[s].roundNames.length - 4}` : '')
       : '—',
     color: s === 'Founders' ? C.founders : s === 'Seed' ? C.seed : C.series,
   }))
 
-  // Proposed grants — sorted largest first, shares + % of FDS. Keep the board
-  // slide to the headline names; roll any tail into a single summary row.
+  // Proposed grants — list ALL of them, sorted largest first. The recipient cell
+  // carries the name plus a "title · role" sub-line; award type and vesting start
+  // are their own columns. With more than a handful we split the list into two
+  // side-by-side tables so the whole roster still fits on one page.
   const proposedSorted = [...proposed].sort((a, b) => (b.quantity || 0) - (a.quantity || 0))
-  const PROPOSED_SHOWN = 6
-  const proposedHead = proposedSorted.slice(0, PROPOSED_SHOWN)
-  const proposedTail = proposedSorted.slice(PROPOSED_SHOWN)
-  const tailShares = proposedTail.reduce((a, g) => a + (g.quantity || 0), 0)
+  function proposedRows(list: Grant[]): string {
+    return list.map(g => {
+      const name = g.recipient_name || g.job_title || 'Unnamed'
+      const subBits = [g.recipient_name ? g.job_title : null, g.recipient_type].filter(Boolean)
+      const sub = subBits.length ? `<span class="rsub">${esc(subBits.join(' · '))}</span>` : ''
+      return `<tr><td class="name">${esc(name)}${sub}</td><td>${esc(g.award_type || '—')}</td><td>${fmtDate(g.vesting_start)}</td><td class="r sh">${fmtShares(g.quantity)}</td><td class="r pc">${fmtPct(pctOfFds(g.quantity || 0))}</td></tr>`
+    }).join('')
+  }
+  const proposedTable = (list: Grant[]) =>
+    `<table class="prop"><thead><tr><th>Recipient</th><th>Award</th><th>Vesting</th><th class="r">Shares</th><th class="r">% FDS</th></tr></thead><tbody>${proposedRows(list)}</tbody></table>`
+  const proposedSplit = Math.ceil(proposedSorted.length / 2)
+  const proposedHtml = proposedSorted.length === 0
+    ? '<div class="empty">No grants are currently proposed.</div>'
+    : proposedSorted.length <= 6
+      ? proposedTable(proposedSorted)
+      : `<div class="two-col">${proposedTable(proposedSorted.slice(0, proposedSplit))}${proposedTable(proposedSorted.slice(proposedSplit))}</div>`
 
   // ---- Actionable callout ----
   let calloutClass = 'ok'
@@ -309,65 +301,76 @@ export default defineEventHandler(async (event) => {
   .print-btn{cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:var(--ink);font-size:12.5px;font-weight:600;padding:9px 14px;border-radius:10px}
   .print-btn:hover{background:#f8fafc}
   /* The slide: one landscape page. */
-  .slide{max-width:1160px;margin:18px auto 48px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 34px rgba(15,23,42,.12);padding:30px 44px 24px;display:flex;flex-direction:column;gap:14px}
+  .slide{max-width:1360px;margin:18px auto 48px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 34px rgba(15,23,42,.12);padding:24px 40px 18px;display:flex;flex-direction:column;gap:11px}
   .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
   /* Header band */
-  .head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;border-bottom:2px solid #1e1b4b;padding-bottom:12px}
+  .head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;border-bottom:2px solid #1e1b4b;padding-bottom:8px}
   .head h1{margin:3px 0 1px;font-size:21px;font-weight:800;letter-spacing:-.01em}
   .head .sub{margin:0;color:var(--muted);font-size:12px}
   .badge{display:inline-block;font-size:9.5px;letter-spacing:.14em;font-weight:800;color:#4f46e5;background:#eef2ff;padding:3px 8px;border-radius:999px}
-  .head .right{text-align:right;color:var(--faint);font-size:11px;white-space:nowrap}
   /* KPI strip */
-  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
-  .kpi{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:13px 16px}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .kpi{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:11px 15px}
   .kpi-value{font-size:22px;font-weight:800;letter-spacing:-.02em;color:var(--ink);font-variant-numeric:tabular-nums}
   .kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:2px;font-weight:700}
   .kpi-sub{font-size:11px;color:var(--brand);margin-top:2px;font-weight:600}
+  .kpi-sub2{font-size:10px;color:var(--faint);margin-top:1px;font-weight:500;font-variant-numeric:tabular-nums}
   /* Body grid: two columns */
-  .body{display:grid;grid-template-columns:1.05fr 1fr;gap:34px}
+  .body{display:grid;grid-template-columns:1.05fr 1fr;gap:26px}
   .panel h2{margin:0 0 2px;font-size:13.5px;font-weight:800;letter-spacing:-.01em}
-  .panel .desc{margin:0 0 11px;font-size:11px;color:var(--muted)}
-  .split{display:grid;grid-template-columns:148px 1fr;gap:20px;align-items:center}
-  /* Donut + legend */
-  .donut-top{font-size:17px;font-weight:800;fill:var(--ink)}
-  .donut-bot{font-size:8.5px;letter-spacing:.07em;fill:var(--muted);text-transform:uppercase}
-  .legend{display:flex;flex-direction:column;gap:7px}
-  .legend-row{display:flex;align-items:center;gap:9px;font-size:12px}
-  .dot{width:10px;height:10px;border-radius:3px;flex:none}
-  .legend-label{color:var(--ink-2)}
-  .legend-value{margin-left:auto;font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink)}
-  .legend-row.total{border-top:1px dashed var(--line);padding-top:5px;margin-top:0}
+  .panel .desc{margin:0 0 8px;font-size:11px;color:var(--muted)}
+  /* Shared value cell: bold shares, fixed gap, non-bold % — right-aligned so
+     every figure lines up across rows. Used in the breakdown, bars, and tables. */
+  .sh{font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;text-align:right}
+  .pc{font-weight:400;color:var(--muted);font-variant-numeric:tabular-nums;text-align:right}
+  /* Pool composition breakdown — label | shares | % in fixed columns, no dots */
+  .breakdown{display:flex;flex-direction:column;gap:6px}
+  .brow{display:grid;grid-template-columns:1fr 92px 50px;column-gap:10px;align-items:baseline;font-size:12px}
+  .brow .lbl{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .brow.head .lbl{font-weight:700;color:var(--ink)}
+  .brow.sub .lbl{padding-left:16px;color:var(--muted);font-size:11.5px}
+  .brow.sub .sh{font-weight:600;color:var(--ink-2)}
+  .brow.minor{margin-top:5px;padding-top:7px;border-top:1px dashed var(--line)}
+  .brow.minor .lbl{color:var(--muted);font-size:11.5px}
+  .brow .ret{color:var(--faint)}
   /* Horizontal bars */
-  .bars{display:flex;flex-direction:column;gap:11px}
+  .bars{display:flex;flex-direction:column;gap:9px}
   .bar-row{display:grid;grid-template-columns:1fr 160px;grid-template-areas:"label value" "track track";column-gap:12px;row-gap:3px;align-items:center}
   .bar-label{grid-area:label;font-size:12px;color:var(--ink);font-weight:700;overflow:hidden}
   .bar-sub{display:block;font-size:10px;color:var(--faint);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .bar-track{grid-area:track;background:#f1f5f9;border-radius:6px;height:13px;overflow:hidden}
   .bar-fill{height:100%;border-radius:6px;min-width:2px}
-  .bar-value{grid-area:value;font-size:12px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;color:var(--ink)}
-  /* Proposed table */
-  .lower{display:grid;grid-template-columns:1fr;gap:12px}
+  .bar-value{grid-area:value;display:grid;grid-template-columns:1fr 50px;column-gap:8px;align-items:baseline;font-size:12px}
+  /* Proposed grants — single table, or two side-by-side when there are many */
+  .lower{display:grid;grid-template-columns:1fr;gap:10px}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:6px 26px;align-items:start}
   table{width:100%;border-collapse:collapse;font-size:11.5px}
-  th{text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;padding:6px 11px;border-bottom:1px solid var(--line)}
-  td{padding:6px 11px;border-bottom:1px solid #f1f5f9;color:var(--ink-2);font-variant-numeric:tabular-nums}
+  .two-col table.prop{font-size:10px}
+  .two-col td,.two-col th{padding:3px 8px}
+  th{text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;padding:4px 9px;border-bottom:1px solid var(--line)}
+  td{padding:4px 9px;border-bottom:1px solid #f1f5f9;color:var(--ink-2);font-variant-numeric:tabular-nums}
   td.r,th.r{text-align:right}
+  td.sh{font-weight:700;color:var(--ink)}
+  td.pc{font-weight:400;color:var(--muted)}
   tr:last-child td{border-bottom:none}
   tbody .name{font-weight:600;color:var(--ink)}
-  tfoot td{font-weight:800;color:var(--ink);border-top:2px solid var(--line);border-bottom:none}
+  .rsub{display:block;font-size:9px;color:var(--faint);font-weight:400;margin-top:0}
+  .proposed-total{display:flex;align-items:baseline;gap:10px;border-top:2px solid var(--line);padding-top:7px;font-size:12px}
+  .proposed-total .tl{font-weight:800;color:var(--ink);margin-right:auto}
   .empty{font-size:12px;color:var(--faint);padding:8px 0;font-style:italic}
   /* Callout */
-  .callout{font-size:12px;border-radius:10px;padding:12px 15px;line-height:1.4}
+  .callout{font-size:12px;border-radius:10px;padding:9px 14px;line-height:1.35}
   .callout.ok{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}
   .callout.warn{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
   .callout.neutral{background:#f8fafc;color:var(--ink-2);border:1px solid var(--line)}
   .callout b{font-weight:800}
   .foot{display:flex;justify-content:space-between;color:var(--faint);font-size:10px;border-top:1px solid var(--line);padding-top:9px;margin-top:2px}
-  @media (max-width:880px){ .kpis{grid-template-columns:repeat(2,1fr)} .body{grid-template-columns:1fr} .split{grid-template-columns:1fr;justify-items:center} }
-  @page{ size:landscape; margin:11mm }
+  @media (max-width:880px){ .kpis{grid-template-columns:repeat(2,1fr)} .body{grid-template-columns:1fr} }
+  @page{ size:landscape; margin:7mm 6mm }
   @media print{
     body{background:#fff}
     .toolbar{display:none}
-    .slide{max-width:none;margin:0;border:none;box-shadow:none;border-radius:0;padding:6px 14px;gap:13px}
+    .slide{max-width:none;margin:0;border:none;box-shadow:none;border-radius:0;padding:4px 14px;gap:9px}
   }
 </style>
 </head>
@@ -384,11 +387,10 @@ export default defineEventHandler(async (event) => {
         <h1>${esc(company.name)} — Option Pool</h1>
         <p class="sub">Board review${roundName ? ` · modelling ${esc(roundName)}` : ''}</p>
       </div>
-      <div class="right">${esc(generatedOn)}<br/>Figures mirror the Option Grants page</div>
     </header>
 
     <section class="kpis">
-      ${kpi(fmtShares(poolAuthorized), 'Total option pool', `${fmtPct(pctOfFds(poolAuthorized))} of FDS`)}
+      ${kpi(fmtShares(poolAuthorized), 'Total option pool', `${fmtPct(pctOfFds(poolAuthorized))} of FDS`, `FDS basis ${fmtShares(postFDS)}`)}
       ${kpi(fmtShares(allocated), 'Allocated', `${fmtPct(pctOfPool(allocated))} of pool`)}
       ${kpi(fmtShares(unallocated), 'Unallocated', `${fmtPct(pctOfPool(unallocated))} of pool`)}
       ${kpi(fmtShares(totalProposed), 'Proposed', `${fmtPct(pctOfFds(totalProposed))} of FDS · ${proposed.length} draft${proposed.length === 1 ? '' : 's'}`)}
@@ -396,17 +398,15 @@ export default defineEventHandler(async (event) => {
 
     <section class="body">
       <div class="panel">
-        <h2>Pool allocation</h2>
-        <p class="desc">How the ${fmtShares(poolAuthorized)}-option pool (${fmtPct(pctOfFds(poolAuthorized))} of FDS) breaks down today, including draft proposals.</p>
-        <div class="split">
-          <div style="display:flex;justify-content:center">${donut(donutSegments, fmtShares(poolAuthorized), 'options')}</div>
-          <div class="legend">
-            <div class="legend-row"><span class="dot" style="background:${C.outstanding}"></span><span class="legend-label">Allocated — outstanding</span><span class="legend-value">${fmtShares(allocatedOutstanding)} · ${fmtPct(pctOfPool(allocatedOutstanding))}</span></div>
-            <div class="legend-row"><span class="dot" style="background:${C.exercised}"></span><span class="legend-label">Allocated — exercised</span><span class="legend-value">${fmtShares(allocatedExercised)} · ${fmtPct(pctOfPool(allocatedExercised))}</span></div>
-            <div class="legend-row"><span class="dot" style="background:${C.proposed}"></span><span class="legend-label">Proposed (pending)</span><span class="legend-value">${fmtShares(totalProposed)} · ${fmtPct(pctOfPool(totalProposed))}</span></div>
-            <div class="legend-row"><span class="dot" style="background:${afterProposed >= 0 ? C.available : C.over}"></span><span class="legend-label">${afterProposed >= 0 ? 'Available after proposed' : 'Over-allocated'}</span><span class="legend-value">${afterProposed >= 0 ? `${fmtShares(afterProposed)} · ${fmtPct(pctOfPool(afterProposed))}` : `(${fmtShares(overBy)})`}</span></div>
-            <div class="legend-row total"><span class="dot" style="background:#1e1b4b"></span><span class="legend-label"><b>Unallocated (available)</b></span><span class="legend-value">${fmtShares(unallocated)} · ${fmtPct(pctOfPool(unallocated))}</span></div>
-          </div>
+        <h2>Pool composition</h2>
+        <p class="desc">How the ${fmtShares(poolAuthorized)}-option pool breaks down. Allocated = outstanding + exercised; % is of the pool.</p>
+        <div class="breakdown">
+          <div class="brow head"><span class="lbl">Allocated</span>${shpc(allocated, pctOfPool(allocated))}</div>
+          <div class="brow sub"><span class="lbl">Outstanding (held)</span>${shpc(allocatedOutstanding, pctOfPool(allocatedOutstanding))}</div>
+          <div class="brow sub"><span class="lbl">Exercised</span>${shpc(allocatedExercised, pctOfPool(allocatedExercised))}</div>
+          <div class="brow head"><span class="lbl">Available (unallocated)</span>${shpc(unallocated, pctOfPool(unallocated))}</div>
+          <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After proposed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
+          <div class="brow minor"><span class="lbl">Forfeited / Expired<span class="ret"> · returned to pool</span></span>${shpc(totalForfeitedOrExpired, pctOfPool(totalForfeitedOrExpired))}</div>
         </div>
       </div>
 
@@ -420,22 +420,15 @@ export default defineEventHandler(async (event) => {
     <section class="lower">
       <div class="panel">
         <h2>Proposed grants</h2>
-        <p class="desc">Every grant currently proposed — title, award type, and vesting start, with shares and % of post-round FDS.</p>
-        ${proposedSorted.length ? `<table>
-          <thead><tr><th>Recipient</th><th>Title</th><th>Role</th><th>Award</th><th>Vesting starts</th><th class="r">Shares</th><th class="r">% of FDS</th></tr></thead>
-          <tbody>
-            ${proposedHead.map(g => `<tr><td class="name">${esc(g.recipient_name || g.job_title || 'Unnamed')}</td><td>${esc(g.job_title || '—')}</td><td>${esc(g.recipient_type || '—')}</td><td>${esc(g.award_type || '—')}</td><td>${fmtDate(g.vesting_start)}</td><td class="r">${fmtShares(g.quantity)}</td><td class="r">${fmtPct(pctOfFds(g.quantity || 0))}</td></tr>`).join('')}
-            ${proposedTail.length ? `<tr><td class="name">+ ${proposedTail.length} more proposed grant${proposedTail.length === 1 ? '' : 's'}</td><td>—</td><td>—</td><td>—</td><td>—</td><td class="r">${fmtShares(tailShares)}</td><td class="r">${fmtPct(pctOfFds(tailShares))}</td></tr>` : ''}
-          </tbody>
-          <tfoot><tr><td>Total proposed</td><td></td><td></td><td></td><td></td><td class="r">${fmtShares(totalProposed)}</td><td class="r">${fmtPct(pctOfFds(totalProposed))}</td></tr></tfoot>
-        </table>` : '<div class="empty">No grants are currently proposed.</div>'}
+        <p class="desc">All ${proposed.length} proposed grant${proposed.length === 1 ? '' : 's'} — recipient (title · role), award type, vesting start, with shares and % of post-round FDS.</p>
+        ${proposedHtml}
+        ${proposedSorted.length ? `<div class="proposed-total"><span class="tl">Total proposed</span>${shpc(totalProposed, pctOfFds(totalProposed))}</div>` : ''}
       </div>
       <div class="callout ${calloutClass}">${calloutText}</div>
     </section>
 
     <div class="foot">
-      <span>Generated by CapStack · ${esc(generatedOn)} · Confidential</span>
-      <span>Pool ${fmtShares(poolAuthorized)} · FDS ${fmtShares(postFDS)} · Allocated ${fmtPct(pctOfPool(allocated))} · Available ${fmtPct(pctOfPool(unallocated))}</span>
+      <span>Generated by Pariva, a tool by T45 Labs · ${esc(generatedOn)} · Confidential</span>
     </div>
   </div>
 </body>
