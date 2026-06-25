@@ -26,6 +26,8 @@ interface Grant {
   status: string
   approval_status: string | null
   job_title: string | null
+  award_type: string | null
+  vesting_start: string | null
   issue_date: string | null
   quantity_issued?: number | null
   quantity_exercised?: number | null
@@ -186,6 +188,11 @@ export default defineEventHandler(async (event) => {
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
   const fmtShares = (n: number | null | undefined) => (n == null || !isFinite(n)) ? '—' : nf0.format(Math.round(n))
   const fmtPct = (frac: number | null | undefined, d = 1) => (frac == null || !isFinite(frac)) ? '—' : `${(frac * 100).toFixed(d)}%`
+  const fmtDate = (s: string | null | undefined) => {
+    if (!s) return '—'
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s))
+    return m ? `${m[1]}-${m[2]}-${m[3]}` : String(s)
+  }
   const pctOfPool = (n: number) => poolAuthorized > 0 ? n / poolAuthorized : 0
   const pctOfFds = (n: number) => postFDS > 0 ? n / postFDS : 0
 
@@ -302,65 +309,65 @@ export default defineEventHandler(async (event) => {
   .print-btn{cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:var(--ink);font-size:12.5px;font-weight:600;padding:9px 14px;border-radius:10px}
   .print-btn:hover{background:#f8fafc}
   /* The slide: one landscape page. */
-  .slide{max-width:1180px;margin:12px auto 40px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 34px rgba(15,23,42,.12);padding:20px 28px 14px;display:flex;flex-direction:column;gap:9px}
+  .slide{max-width:1160px;margin:18px auto 48px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 34px rgba(15,23,42,.12);padding:30px 44px 24px;display:flex;flex-direction:column;gap:14px}
   .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
   /* Header band */
-  .head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;border-bottom:2px solid #1e1b4b;padding-bottom:8px}
+  .head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;border-bottom:2px solid #1e1b4b;padding-bottom:12px}
   .head h1{margin:3px 0 1px;font-size:21px;font-weight:800;letter-spacing:-.01em}
   .head .sub{margin:0;color:var(--muted);font-size:12px}
   .badge{display:inline-block;font-size:9.5px;letter-spacing:.14em;font-weight:800;color:#4f46e5;background:#eef2ff;padding:3px 8px;border-radius:999px}
   .head .right{text-align:right;color:var(--faint);font-size:11px;white-space:nowrap}
   /* KPI strip */
-  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-  .kpi{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:9px 13px}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .kpi{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:13px 16px}
   .kpi-value{font-size:22px;font-weight:800;letter-spacing:-.02em;color:var(--ink);font-variant-numeric:tabular-nums}
   .kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:2px;font-weight:700}
   .kpi-sub{font-size:11px;color:var(--brand);margin-top:2px;font-weight:600}
   /* Body grid: two columns */
-  .body{display:grid;grid-template-columns:1.05fr 1fr;gap:20px}
+  .body{display:grid;grid-template-columns:1.05fr 1fr;gap:34px}
   .panel h2{margin:0 0 2px;font-size:13.5px;font-weight:800;letter-spacing:-.01em}
-  .panel .desc{margin:0 0 7px;font-size:11px;color:var(--muted)}
-  .split{display:grid;grid-template-columns:148px 1fr;gap:14px;align-items:center}
+  .panel .desc{margin:0 0 11px;font-size:11px;color:var(--muted)}
+  .split{display:grid;grid-template-columns:148px 1fr;gap:20px;align-items:center}
   /* Donut + legend */
   .donut-top{font-size:17px;font-weight:800;fill:var(--ink)}
   .donut-bot{font-size:8.5px;letter-spacing:.07em;fill:var(--muted);text-transform:uppercase}
-  .legend{display:flex;flex-direction:column;gap:5px}
+  .legend{display:flex;flex-direction:column;gap:7px}
   .legend-row{display:flex;align-items:center;gap:9px;font-size:12px}
   .dot{width:10px;height:10px;border-radius:3px;flex:none}
   .legend-label{color:var(--ink-2)}
   .legend-value{margin-left:auto;font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink)}
   .legend-row.total{border-top:1px dashed var(--line);padding-top:5px;margin-top:0}
   /* Horizontal bars */
-  .bars{display:flex;flex-direction:column;gap:7px}
+  .bars{display:flex;flex-direction:column;gap:11px}
   .bar-row{display:grid;grid-template-columns:1fr 160px;grid-template-areas:"label value" "track track";column-gap:12px;row-gap:3px;align-items:center}
   .bar-label{grid-area:label;font-size:12px;color:var(--ink);font-weight:700;overflow:hidden}
   .bar-sub{display:block;font-size:10px;color:var(--faint);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .bar-track{grid-area:track;background:#f1f5f9;border-radius:6px;height:12px;overflow:hidden}
+  .bar-track{grid-area:track;background:#f1f5f9;border-radius:6px;height:13px;overflow:hidden}
   .bar-fill{height:100%;border-radius:6px;min-width:2px}
   .bar-value{grid-area:value;font-size:12px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;color:var(--ink)}
   /* Proposed table */
-  .lower{display:grid;grid-template-columns:1fr;gap:9px}
+  .lower{display:grid;grid-template-columns:1fr;gap:12px}
   table{width:100%;border-collapse:collapse;font-size:11.5px}
-  th{text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;padding:3.5px 10px;border-bottom:1px solid var(--line)}
-  td{padding:3.5px 10px;border-bottom:1px solid #f1f5f9;color:var(--ink-2);font-variant-numeric:tabular-nums}
+  th{text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;padding:6px 11px;border-bottom:1px solid var(--line)}
+  td{padding:6px 11px;border-bottom:1px solid #f1f5f9;color:var(--ink-2);font-variant-numeric:tabular-nums}
   td.r,th.r{text-align:right}
   tr:last-child td{border-bottom:none}
   tbody .name{font-weight:600;color:var(--ink)}
   tfoot td{font-weight:800;color:var(--ink);border-top:2px solid var(--line);border-bottom:none}
   .empty{font-size:12px;color:var(--faint);padding:8px 0;font-style:italic}
   /* Callout */
-  .callout{font-size:12px;border-radius:10px;padding:9px 13px;line-height:1.35}
+  .callout{font-size:12px;border-radius:10px;padding:12px 15px;line-height:1.4}
   .callout.ok{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}
   .callout.warn{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
   .callout.neutral{background:#f8fafc;color:var(--ink-2);border:1px solid var(--line)}
   .callout b{font-weight:800}
-  .foot{display:flex;justify-content:space-between;color:var(--faint);font-size:10px;border-top:1px solid var(--line);padding-top:6px}
+  .foot{display:flex;justify-content:space-between;color:var(--faint);font-size:10px;border-top:1px solid var(--line);padding-top:9px;margin-top:2px}
   @media (max-width:880px){ .kpis{grid-template-columns:repeat(2,1fr)} .body{grid-template-columns:1fr} .split{grid-template-columns:1fr;justify-items:center} }
-  @page{ size:landscape; margin:6mm }
+  @page{ size:landscape; margin:11mm }
   @media print{
     body{background:#fff}
     .toolbar{display:none}
-    .slide{max-width:none;margin:0;border:none;box-shadow:none;border-radius:0;padding:0;gap:8px}
+    .slide{max-width:none;margin:0;border:none;box-shadow:none;border-radius:0;padding:6px 14px;gap:13px}
   }
 </style>
 </head>
@@ -413,14 +420,14 @@ export default defineEventHandler(async (event) => {
     <section class="lower">
       <div class="panel">
         <h2>Proposed grants</h2>
-        <p class="desc">Every grant currently proposed, with its share count and % of post-round FDS.</p>
+        <p class="desc">Every grant currently proposed — title, award type, and vesting start, with shares and % of post-round FDS.</p>
         ${proposedSorted.length ? `<table>
-          <thead><tr><th>Recipient</th><th>Role</th><th class="r">Shares</th><th class="r">% of FDS</th></tr></thead>
+          <thead><tr><th>Recipient</th><th>Title</th><th>Role</th><th>Award</th><th>Vesting starts</th><th class="r">Shares</th><th class="r">% of FDS</th></tr></thead>
           <tbody>
-            ${proposedHead.map(g => `<tr><td class="name">${esc(g.recipient_name || g.job_title || 'Unnamed')}</td><td>${esc(g.recipient_type || '—')}</td><td class="r">${fmtShares(g.quantity)}</td><td class="r">${fmtPct(pctOfFds(g.quantity || 0))}</td></tr>`).join('')}
-            ${proposedTail.length ? `<tr><td class="name">+ ${proposedTail.length} more proposed grant${proposedTail.length === 1 ? '' : 's'}</td><td>—</td><td class="r">${fmtShares(tailShares)}</td><td class="r">${fmtPct(pctOfFds(tailShares))}</td></tr>` : ''}
+            ${proposedHead.map(g => `<tr><td class="name">${esc(g.recipient_name || g.job_title || 'Unnamed')}</td><td>${esc(g.job_title || '—')}</td><td>${esc(g.recipient_type || '—')}</td><td>${esc(g.award_type || '—')}</td><td>${fmtDate(g.vesting_start)}</td><td class="r">${fmtShares(g.quantity)}</td><td class="r">${fmtPct(pctOfFds(g.quantity || 0))}</td></tr>`).join('')}
+            ${proposedTail.length ? `<tr><td class="name">+ ${proposedTail.length} more proposed grant${proposedTail.length === 1 ? '' : 's'}</td><td>—</td><td>—</td><td>—</td><td>—</td><td class="r">${fmtShares(tailShares)}</td><td class="r">${fmtPct(pctOfFds(tailShares))}</td></tr>` : ''}
           </tbody>
-          <tfoot><tr><td>Total proposed</td><td></td><td class="r">${fmtShares(totalProposed)}</td><td class="r">${fmtPct(pctOfFds(totalProposed))}</td></tr></tfoot>
+          <tfoot><tr><td>Total proposed</td><td></td><td></td><td></td><td></td><td class="r">${fmtShares(totalProposed)}</td><td class="r">${fmtPct(pctOfFds(totalProposed))}</td></tr></tfoot>
         </table>` : '<div class="empty">No grants are currently proposed.</div>'}
       </div>
       <div class="callout ${calloutClass}">${calloutText}</div>
