@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle, UploadCloud, AlertTriangle, CheckCircle2, X, Award, Lightbulb, BarChart3 } from 'lucide-vue-next'
+import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle, UploadCloud, AlertTriangle, CheckCircle2, X, Award, Lightbulb, BarChart3, Presentation } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtDate, fmtPricePerShare, normalizeDate } from '~/utils/format'
 import { calcSum, calcPct, calcValueUSD } from '~/utils/calc'
 import { authorizedPool, poolEquation, grantIssued, grantOutstanding } from '~/utils/capTable'
@@ -796,6 +796,12 @@ function openCeoReport() {
   window.open(`/api/companies/${id.value}/ceo-report`, '_blank', 'noopener')
 }
 
+// Board slide — a one-page, highly-visual option-pool summary (HTML) sized to
+// drop into a board deck. Opens in a new tab with its own "Print / Save as PDF".
+function openBoardSlide() {
+  window.open(`/api/companies/${id.value}/board-slide`, '_blank', 'noopener')
+}
+
 // ---- Smart import of proposed grants ----
 // Two-step flow so the operator can sanity-check column mapping before
 // committing: upload → /import-preview returns mapping + sample rows;
@@ -932,6 +938,7 @@ const fieldLabels: Record<string, string> = {
       <template #title><Award :size="20" /> Option grants</template>
       <template #actions>
         <UiButton @click="openCeoReport"><BarChart3 :size="14" /> CEO report</UiButton>
+        <UiButton @click="openBoardSlide"><Presentation :size="14" /> Board slide</UiButton>
         <UiButton :disabled="!proposed.length && !ideasCount" @click="exportBoardApproval">
           <FileDown :size="14" /> Export board approval (.xlsx)
         </UiButton>
