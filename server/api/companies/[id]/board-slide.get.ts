@@ -28,6 +28,7 @@ interface Grant {
   job_title: string | null
   award_type: string | null
   vesting_start: string | null
+  notes: string | null
   issue_date: string | null
   quantity_issued?: number | null
   quantity_exercised?: number | null
@@ -261,27 +262,27 @@ export default defineEventHandler(async (event) => {
     runwayNote = `At ~${fmtShares(burnRounded)}/yr the pool lasts to ~${fmtMY(dryMs)} (${(yearsToDry as number).toFixed(1)} yrs); revisit a top-up by ${fmtMY(topUpByMs)}.`
   }
 
-  // Proposed grants — list ALL of them, sorted largest first. The recipient cell
-  // carries the name plus a "title · role" sub-line; award type and vesting start
-  // are their own columns. With more than a handful we split the list into two
-  // side-by-side tables so the whole roster still fits on one page.
+  // Proposed grants — list ALL of them, sorted largest first, ALWAYS in two
+  // side-by-side tables. The recipient cell carries the name + a "title · role"
+  // sub-line; award type, vesting start, shares, % FDS, and notes are columns.
+  // Columns are narrow (fixed layout) so two of these fit per page; notes wrap.
   const proposedSorted = [...proposed].sort((a, b) => (b.quantity || 0) - (a.quantity || 0))
   function proposedRows(list: Grant[]): string {
     return list.map(g => {
       const name = g.recipient_name || g.job_title || 'Unnamed'
       const subBits = [g.recipient_name ? g.job_title : null, g.recipient_type].filter(Boolean)
       const sub = subBits.length ? `<span class="rsub">${esc(subBits.join(' · '))}</span>` : ''
-      return `<tr><td class="name">${esc(name)}${sub}</td><td>${esc(g.award_type || '—')}</td><td>${fmtDate(g.vesting_start)}</td><td class="r sh">${fmtShares(g.quantity)}</td><td class="r pc">${fmtPct(pctOfFds(g.quantity || 0))}</td></tr>`
+      return `<tr><td class="name">${esc(name)}${sub}</td><td>${esc(g.award_type || '—')}</td><td>${fmtDate(g.vesting_start)}</td><td class="r sh">${fmtShares(g.quantity)}</td><td class="r pc">${fmtPct(pctOfFds(g.quantity || 0))}</td><td class="notes">${esc(g.notes || '—')}</td></tr>`
     }).join('')
   }
   const proposedTable = (list: Grant[]) =>
-    `<table class="prop"><thead><tr><th>Recipient</th><th>Award</th><th>Vesting</th><th class="r">Shares</th><th class="r">% FDS</th></tr></thead><tbody>${proposedRows(list)}</tbody></table>`
+    `<table class="prop"><colgroup><col class="c-rec"/><col class="c-aw"/><col class="c-vest"/><col class="c-sh"/><col class="c-pc"/><col class="c-notes"/></colgroup>`
+    + `<thead><tr><th>Recipient</th><th>Award</th><th>Vesting</th><th class="r">Shares</th><th class="r">% FDS</th><th>Notes</th></tr></thead>`
+    + `<tbody>${proposedRows(list)}</tbody></table>`
   const proposedSplit = Math.ceil(proposedSorted.length / 2)
   const proposedHtml = proposedSorted.length === 0
     ? '<div class="empty">No grants are currently proposed.</div>'
-    : proposedSorted.length <= 6
-      ? proposedTable(proposedSorted)
-      : `<div class="two-col">${proposedTable(proposedSorted.slice(0, proposedSplit))}${proposedTable(proposedSorted.slice(proposedSplit))}</div>`
+    : `<div class="two-col">${proposedTable(proposedSorted.slice(0, proposedSplit))}${proposedSorted.length > proposedSplit ? proposedTable(proposedSorted.slice(proposedSplit)) : ''}</div>`
 
   // ---- Actionable callout ----
   let calloutClass = 'ok'
@@ -377,20 +378,27 @@ export default defineEventHandler(async (event) => {
   .pnote.ok{background:#ecfdf5;color:#065f46;border-color:#34d399}
   .pnote.warn{background:#fef2f2;color:#991b1b;border-color:#f87171}
   .pnote.neutral{background:#f8fafc;color:var(--ink-2);border-color:#cbd5e1}
-  /* Proposed grants — single table, or two side-by-side when there are many */
+  /* Proposed grants — ALWAYS two narrow side-by-side tables; notes wrap. */
   .lower{display:grid;grid-template-columns:1fr;gap:10px}
-  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:6px 26px;align-items:start}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:6px 22px;align-items:start}
   table{width:100%;border-collapse:collapse;font-size:11.5px}
-  .two-col table.prop{font-size:10px}
-  .two-col td,.two-col th{padding:3px 8px}
+  table.prop{table-layout:fixed;font-size:9px;line-height:1.25}
+  .prop .c-rec{width:27%}
+  .prop .c-aw{width:8%}
+  .prop .c-vest{width:14%}
+  .prop .c-sh{width:14%}
+  .prop .c-pc{width:10%}
+  .prop .c-notes{width:27%}
+  .two-col td,.two-col th{padding:2px 5px;vertical-align:top}
   th{text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;padding:4px 9px;border-bottom:1px solid var(--line)}
   td{padding:4px 9px;border-bottom:1px solid #f1f5f9;color:var(--ink-2);font-variant-numeric:tabular-nums}
   td.r,th.r{text-align:right}
   td.sh{font-weight:700;color:var(--ink)}
   td.pc{font-weight:400;color:var(--muted)}
+  td.notes{white-space:normal;overflow-wrap:anywhere;color:var(--muted);font-weight:400;font-variant-numeric:normal}
   tr:last-child td{border-bottom:none}
-  tbody .name{font-weight:600;color:var(--ink)}
-  .rsub{display:block;font-size:9px;color:var(--faint);font-weight:400;margin-top:0}
+  tbody .name{font-weight:600;color:var(--ink);overflow-wrap:anywhere}
+  .rsub{display:block;font-size:8px;color:var(--faint);font-weight:400;margin-top:0}
   .proposed-total{display:flex;align-items:baseline;gap:10px;border-top:2px solid var(--line);padding-top:7px;font-size:12px}
   .proposed-total .tl{font-weight:800;color:var(--ink);margin-right:auto}
   .empty{font-size:12px;color:var(--faint);padding:8px 0;font-style:italic}
@@ -469,7 +477,7 @@ export default defineEventHandler(async (event) => {
     <section class="lower">
       <div class="panel" data-block="proposed">
         <h2>Proposed grants</h2>
-        <p class="desc">All ${proposed.length} proposed grant${proposed.length === 1 ? '' : 's'} — recipient (title · role), award type, vesting start, with shares and % of post-round FDS.</p>
+        <p class="desc">All ${proposed.length} proposed grant${proposed.length === 1 ? '' : 's'} — recipient (title · role), award type, vesting start, shares, % of post-round FDS, and notes.</p>
         ${proposedHtml}
         ${proposedSorted.length ? `<div class="proposed-total"><span class="tl">Total proposed</span>${shpc(totalProposed, pctOfFds(totalProposed))}</div>` : ''}
       </div>
