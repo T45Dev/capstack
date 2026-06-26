@@ -209,6 +209,9 @@ function vestedHeldAt(asOf: string): number {
 const termVestedHeld = computed(() => vestedHeldAt(termDate.value))
 const termUnvested = computed(() => Math.max(0, lcOutstanding.value - termVestedHeld.value))
 const expiresOn = computed(() => addDays(termDate.value, Math.max(0, Math.floor(windowDays.value || 0))))
+// Exercise can be partial — these drive the "leaves N outstanding" preview.
+const exNow = computed(() => Math.max(0, Math.min(lcOutstanding.value, Math.floor(exShares.value || 0))))
+const exRemaining = computed(() => Math.max(0, lcOutstanding.value - exNow.value))
 
 function openLife(mode: LifeMode) {
   lifeMode.value = lifeMode.value === mode ? 'none' : mode
@@ -219,8 +222,8 @@ function confirmTerminate() {
   emit('terminate', { termination_date: termDate.value, exercise_window_days: Math.max(0, Math.floor(windowDays.value || 0)) })
 }
 function confirmExercise() {
-  const n = Math.max(1, Math.min(lcOutstanding.value, Math.floor(exShares.value || 0)))
-  emit('exercise', { shares: n, exercise_date: exDate.value })
+  if (exNow.value < 1) return
+  emit('exercise', { shares: exNow.value, exercise_date: exDate.value })
 }
 
 const canSave = computed(() => form.recipient_name.trim().length > 0 && form.quantity > 0 && !props.saving)
@@ -354,14 +357,17 @@ function onSave() {
         </div>
       </div>
 
-      <!-- Exercise (portion or all) -->
+      <!-- Exercise (portion or all) — partial is fine; the rest stays outstanding -->
       <div v-if="lifeMode === 'exercise'" class="mt-3 rounded-md border border-ink-200 bg-white p-3">
         <div class="flex flex-wrap items-end gap-x-4 gap-y-3">
           <UiInput v-model="exShares" type="number" label="Shares to exercise" step="100" class="w-40" />
           <UiInput v-model="exDate" type="date" label="Exercise date" class="w-40" />
-          <div class="text-[11px] text-ink-500 leading-tight">{{ fmtShares(lcOutstanding) }} held · {{ fmtShares(vestedHeldAt(today)) }} vested today.<br />Exercised shares convert to common.</div>
-          <UiButton variant="primary" class="ml-auto" :disabled="saving || exShares < 1" @click="confirmExercise"><Coins :size="14" /> {{ saving ? 'Working…' : 'Exercise' }}</UiButton>
+          <UiButton variant="primary" class="ml-auto" :disabled="saving || exNow < 1" @click="confirmExercise"><Coins :size="14" /> {{ saving ? 'Working…' : 'Exercise' }}</UiButton>
         </div>
+        <p class="mt-2 text-[11px] text-ink-600 leading-snug">
+          {{ fmtShares(lcOutstanding) }} held · {{ fmtShares(vestedHeldAt(today)) }} vested today{{ lcExercised ? ` · ${fmtShares(lcExercised)} already exercised` : '' }}.
+          Exercising <b>{{ fmtShares(exNow) }}</b> converts to common and leaves <b>{{ fmtShares(exRemaining) }}</b> outstanding — you can exercise the rest later.
+        </p>
       </div>
 
       <!-- Terminate (forfeit unvested, vested exercisable for a window, then expire) -->
