@@ -329,7 +329,7 @@ export default defineEventHandler(async (event) => {
   .head .sub{margin:0;color:var(--muted);font-size:12px}
   .badge{display:inline-block;font-size:9.5px;letter-spacing:.14em;font-weight:800;color:#4f46e5;background:#eef2ff;padding:3px 8px;border-radius:999px}
   /* KPI strip */
-  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
   .kpi{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:10px 14px}
   .kpi-value{font-size:22px;font-weight:800;letter-spacing:-.02em;color:var(--ink);font-variant-numeric:tabular-nums}
   .kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:2px;font-weight:700}
@@ -450,6 +450,7 @@ export default defineEventHandler(async (event) => {
       ${kpi(fmtShares(allocated), 'Allocated', `${fmtPct(pctOfPool(allocated))} of pool`)}
       ${kpi(fmtShares(unallocated), 'Unallocated', `${fmtPct(pctOfPool(unallocated))} of pool`)}
       ${kpi(fmtShares(totalProposed), 'Committed', `${fmtPct(pctOfFds(totalProposed))} of FDS · ${proposed.length} draft${proposed.length === 1 ? '' : 's'}`)}
+      ${kpi(fmtShares(afterProposed), 'Projected available', afterProposed >= 0 ? `${fmtPct(pctOfPool(afterProposed))} of pool · after committed` : `over-allocated by ${fmtShares(overBy)}`)}
     </section>
 
     <section class="body">
