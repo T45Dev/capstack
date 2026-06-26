@@ -775,6 +775,17 @@ async function demoteToIdea(g: Grant) {
   await Promise.all([refresh(), refreshPoolEvents()])
 }
 
+async function promoteIdea(g: Grant) {
+  // Bring a pool "idea" back up to a live proposed grant — the inverse of
+  // demoteToIdea. The row id is `idea:<pool_event_id>`; strip the prefix to
+  // address the underlying pool event.
+  if (!isIdeaRow(g)) return
+  const peId = String(g.id).replace(/^idea:/, '')
+  if (!confirm(`Promote ${g.recipient_name}'s pool idea back to a proposed grant?`)) return
+  await $fetch(`/api/pool-events/${peId}/promote-to-proposed`, { method: 'POST' })
+  await Promise.all([refresh(), refreshPoolEvents()])
+}
+
 async function destroy(g: Grant) {
   if (isIdeaRow(g)) return
   if (!confirm(`Permanently delete grant for ${g.recipient_name}? (history will not be retained)`)) return
@@ -1265,7 +1276,10 @@ const fieldLabels: Record<string, string> = {
                       <button class="text-ink-500 hover:text-amber-600 px-1 py-0.5 rounded" @click="demoteToIdea(g)" title="Demote to pool idea"><Lightbulb :size="13" /></button>
                       <button class="text-ink-500 hover:text-red-600 px-1 py-0.5 rounded" @click="destroy(g)" title="Delete"><Trash2 :size="13" /></button>
                     </template>
-                    <NuxtLink v-else :to="`/companies/${id}/pool`" class="text-[10px] text-amber-700 hover:underline" title="Pool idea — manage on Option Pool Impact">on Pool ↗</NuxtLink>
+                    <template v-else>
+                      <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded align-middle" @click="promoteIdea(g)" title="Promote to proposed grant"><ArrowUpCircle :size="13" /></button>
+                      <NuxtLink :to="`/companies/${id}/pool`" class="text-[10px] text-amber-700 hover:underline align-middle" title="Pool idea — manage on Option Pool Impact">on Pool ↗</NuxtLink>
+                    </template>
                   </td>
                 </template>
               </tr>
