@@ -224,10 +224,10 @@ export default defineEventHandler(async (event) => {
     const lead = status === 'below' ? 'Below floor — ' : status === 'near' ? 'Approaching floor — ' : 'Healthy — '
     let body: string
     if (recTopUp > 0) {
-      body = `recommended top-up ≈ <b>${fmtShares(recTopUp)}</b> options → pool at <b>${fmtPct(poolPctOfFds(poolAuthorized, postFDS, recTopUp))}</b> of FDS, leaving ${fmtShares(availAfter)} available after proposed`
+      body = `recommended top-up ≈ <b>${fmtShares(recTopUp)}</b> options → pool at <b>${fmtPct(poolPctOfFds(poolAuthorized, postFDS, recTopUp))}</b> of FDS, leaving ${fmtShares(availAfter)} available after committed`
         + (floor > 0 ? ` (floor ${fmtShares(floor)}).` : '.')
     } else {
-      body = `no top-up needed — ${fmtShares(afterProposed)} available after proposed`
+      body = `no top-up needed — ${fmtShares(afterProposed)} available after committed`
         + (floor > 0 ? ` clears your ${fmtShares(floor)} floor` : '')
         + ` and meets the ${fmtPct(targetFrac)} target.`
     }
@@ -271,7 +271,7 @@ export default defineEventHandler(async (event) => {
     + `<tbody>${proposedRows(list)}</tbody></table>`
   const proposedSplit = Math.ceil(proposedSorted.length / 2)
   const proposedHtml = proposedSorted.length === 0
-    ? '<div class="empty">No grants are currently proposed.</div>'
+    ? '<div class="empty">No grants are currently committed.</div>'
     : `<div class="two-col">${proposedTable(proposedSorted.slice(0, proposedSplit))}${proposedSorted.length > proposedSplit ? proposedTable(proposedSorted.slice(proposedSplit)) : ''}</div>`
 
   // ---- Actionable callout ----
@@ -279,17 +279,17 @@ export default defineEventHandler(async (event) => {
   let calloutText = ''
   if (totalProposed <= 0) {
     calloutClass = 'neutral'
-    calloutText = `No grants are currently proposed. ${fmtShares(unallocated)} options (${fmtPct(pctOfPool(unallocated))} of the pool) are available to grant.`
+    calloutText = `No grants are currently committed. ${fmtShares(unallocated)} options (${fmtPct(pctOfPool(unallocated))} of the pool) are available to grant.`
   } else if (afterProposed < 0) {
     calloutClass = 'warn'
-    calloutText = `Action needed — the ${fmtShares(totalProposed)} options proposed exceed the unallocated pool by ${fmtShares(overBy)}. Approving them requires a pool top-up of at least that much.`
+    calloutText = `Action needed — the ${fmtShares(totalProposed)} options committed exceed the unallocated pool by ${fmtShares(overBy)}. Approving them requires a pool top-up of at least that much.`
   } else if (afterProposed < poolAuthorized * 0.05) {
     calloutClass = 'warn'
-    calloutText = `Running low — approving the ${fmtShares(totalProposed)} proposed options leaves only ${fmtShares(afterProposed)} (${fmtPct(pctOfPool(afterProposed))} of the pool). Plan a top-up for future hires.`
+    calloutText = `Running low — approving the ${fmtShares(totalProposed)} committed options leaves only ${fmtShares(afterProposed)} (${fmtPct(pctOfPool(afterProposed))} of the pool). Plan a top-up for future hires.`
   } else {
-    calloutText = `Healthy — approving the ${fmtShares(totalProposed)} proposed options (${fmtPct(pctOfFds(totalProposed))} of FDS) still leaves ${fmtShares(afterProposed)} (${fmtPct(pctOfPool(afterProposed))} of the pool) for future grants.`
+    calloutText = `Healthy — approving the ${fmtShares(totalProposed)} committed options (${fmtPct(pctOfFds(totalProposed))} of FDS) still leaves ${fmtShares(afterProposed)} (${fmtPct(pctOfPool(afterProposed))} of the pool) for future grants.`
   }
-  if (totalIdeas > 0) calloutText += ` A further ${fmtShares(totalIdeas)} options sit in "ideas" on the pool-impact timeline.`
+  if (totalIdeas > 0) calloutText += ` A further ${fmtShares(totalIdeas)} options sit in "proposed" on the pool-impact timeline.`
 
   const generatedOn = today.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
   const roundName = currentRound ? (currentRound.name || currentRound.code || 'current round') : null
@@ -430,7 +430,7 @@ export default defineEventHandler(async (event) => {
       <label><input type="checkbox" data-block="kpis" checked> Headline KPIs</label>
       <label><input type="checkbox" data-block="composition" checked> Pool composition</label>
       <label><input type="checkbox" data-block="poolrec" checked> Pool recommendation</label>
-      <label><input type="checkbox" data-block="proposed" checked> Proposed grants</label>
+      <label><input type="checkbox" data-block="proposed" checked> Committed grants</label>
       <label><input type="checkbox" data-block="callout" checked> Recommendation</label>
     </div>
     <button class="print-btn" onclick="window.print()">⎙ Print / Save as PDF</button>
@@ -449,7 +449,7 @@ export default defineEventHandler(async (event) => {
       ${kpi(fmtShares(poolAuthorized), 'Total option pool', `${fmtPct(pctOfFds(poolAuthorized))} of FDS`, `FDS basis ${fmtShares(postFDS)}`)}
       ${kpi(fmtShares(allocated), 'Allocated', `${fmtPct(pctOfPool(allocated))} of pool`)}
       ${kpi(fmtShares(unallocated), 'Unallocated', `${fmtPct(pctOfPool(unallocated))} of pool`)}
-      ${kpi(fmtShares(totalProposed), 'Proposed', `${fmtPct(pctOfFds(totalProposed))} of FDS · ${proposed.length} draft${proposed.length === 1 ? '' : 's'}`)}
+      ${kpi(fmtShares(totalProposed), 'Committed', `${fmtPct(pctOfFds(totalProposed))} of FDS · ${proposed.length} draft${proposed.length === 1 ? '' : 's'}`)}
     </section>
 
     <section class="body">
@@ -461,14 +461,14 @@ export default defineEventHandler(async (event) => {
           <div class="brow sub"><span class="lbl">Outstanding (held)</span>${shpc(allocatedOutstanding, pctOfPool(allocatedOutstanding))}</div>
           <div class="brow sub"><span class="lbl">Exercised</span>${shpc(allocatedExercised, pctOfPool(allocatedExercised))}</div>
           <div class="brow head"><span class="lbl">Available (unallocated)</span>${shpc(unallocated, pctOfPool(unallocated))}</div>
-          <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After proposed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
+          <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After committed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
           <div class="brow minor"><span class="lbl">Forfeited / Expired<span class="ret"> · returned to pool</span></span>${shpc(totalForfeitedOrExpired, pctOfPool(totalForfeitedOrExpired))}</div>
         </div>
       </div>
 
       <div class="panel" data-block="poolrec">
         <h2>Pool recommendation</h2>
-        <p class="desc">Top-up to keep the pool above its floor and to hit a target size — set both below and the figures recompute live. "Avail. after" is the unallocated pool after proposed grants and the top-up; a top-up grows the pool and FDS together.</p>
+        <p class="desc">Top-up to keep the pool above its floor and to hit a target size — set both below and the figures recompute live. "Avail. after" is the unallocated pool after committed grants and the top-up; a top-up grows the pool and FDS together.</p>
         <div class="rec-controls">
           <label class="rec-ctl">Target pool
             <span class="rec-inwrap"><input id="rec-target" type="number" min="0" max="60" step="0.5" value="${(defaultTargetPct * 100).toFixed(1)}"><span class="rec-unit">% of FDS</span></span>
@@ -489,10 +489,10 @@ export default defineEventHandler(async (event) => {
 
     <section class="lower">
       <div class="panel" data-block="proposed">
-        <h2>Proposed grants</h2>
-        <p class="desc">All ${proposed.length} proposed grant${proposed.length === 1 ? '' : 's'} — recipient (title · role), award type, vesting start, shares, % of post-round FDS, and notes.</p>
+        <h2>Committed grants</h2>
+        <p class="desc">All ${proposed.length} committed grant${proposed.length === 1 ? '' : 's'} — recipient (title · role), award type, vesting start, shares, % of post-round FDS, and notes.</p>
         ${proposedHtml}
-        ${proposedSorted.length ? `<div class="proposed-total"><span class="tl">Total proposed</span>${shpc(totalProposed, pctOfFds(totalProposed))}</div>` : ''}
+        ${proposedSorted.length ? `<div class="proposed-total"><span class="tl">Total committed</span>${shpc(totalProposed, pctOfFds(totalProposed))}</div>` : ''}
       </div>
       <div class="callout ${calloutClass}" data-block="callout">${calloutText}</div>
     </section>
@@ -587,9 +587,9 @@ export default defineEventHandler(async (event) => {
         var body;
         if (recTopUp > 0) {
           body = 'recommended top-up ≈ <b>' + fShares(recTopUp) + '</b> options → pool at <b>' + fPct(pctAfter(recTopUp))
-            + '</b> of FDS, leaving ' + fShares(availAfter) + ' available after proposed' + (floor > 0 ? ' (floor ' + fShares(floor) + ').' : '.');
+            + '</b> of FDS, leaving ' + fShares(availAfter) + ' available after committed' + (floor > 0 ? ' (floor ' + fShares(floor) + ').' : '.');
         } else {
-          body = 'no top-up needed — ' + fShares(REC.afterProposed) + ' available after proposed'
+          body = 'no top-up needed — ' + fShares(REC.afterProposed) + ' available after committed'
             + (floor > 0 ? ' clears your ' + fShares(floor) + ' floor' : '') + ' and meets the ' + fPct(targetFrac) + ' target.';
         }
         var tail = '';

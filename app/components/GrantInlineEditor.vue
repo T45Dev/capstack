@@ -266,7 +266,7 @@ function onSave() {
         <label class="block w-full sm:w-44">
           <span class="block text-xs font-medium text-ink-700 mb-1">Status</span>
           <select v-model="form.status" :class="SELECT_CLASS">
-            <option value="proposed">Proposed (draft)</option>
+            <option value="proposed">Committed (draft)</option>
             <option value="outstanding">Outstanding (live)</option>
           </select>
         </label>

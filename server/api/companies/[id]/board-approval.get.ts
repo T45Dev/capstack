@@ -56,7 +56,7 @@ export default defineEventHandler(async (event) => {
     for (const ie of ideas) {
       proposedGrants.push({
         id: `idea:${ie.id}`,
-        recipient_name: ie.name || 'Idea',
+        recipient_name: ie.name || 'Proposed',
         recipient_type: ie.recipient_type || 'Employees',
         award_type: ie.kind || null,
         quantity: ie.shares || 0,
@@ -303,7 +303,7 @@ export default defineEventHandler(async (event) => {
   r += 2
 
   // ---- Section 1: Proposed new grants ----
-  setSectionHeader(r, 'PROPOSED NEW GRANTS')
+  setSectionHeader(r, 'COMMITTED NEW GRANTS')
   r++
 
   // GRANTEE | GRANT DETAILS sub-headers

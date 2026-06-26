@@ -102,7 +102,7 @@ const proposedByStakeholder = computed(() => {
     if (cur) {
       cur.shares += g.quantity || 0
     } else {
-      map.set(sid, { stakeholderId: sid, name: g.recipient_name || 'Proposed grant', shares: g.quantity || 0 })
+      map.set(sid, { stakeholderId: sid, name: g.recipient_name || 'Committed grant', shares: g.quantity || 0 })
     }
   }
   return map
@@ -246,7 +246,7 @@ const rows = computed<DilRow[]>(() => {
       const postValue = shares * sharePrice
       out.push({
         stakeholderId: `idea:${ie.id}`,
-        name: ie.name || 'Idea',
+        name: ie.name || 'Proposed',
         type: 'idea',
         preShares: 0,
         postShares: shares,
@@ -377,7 +377,7 @@ async function onImported() {
         </label>
         <label class="inline-flex items-center gap-2 cursor-pointer select-none text-xs text-ink-700 bg-white border border-ink-300 rounded-md px-3 py-1.5 hover:border-ink-400">
           <input type="checkbox" v-model="includeFuture" class="accent-brand" />
-          <span>Include proposed + ideas in post</span>
+          <span>Include committed + proposed in post</span>
         </label>
       </template>
     </PageHeader>

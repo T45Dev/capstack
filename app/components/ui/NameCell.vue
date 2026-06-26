@@ -26,8 +26,8 @@ const props = withDefaults(defineProps<Props>(), { linked: 0 })
 
 const CHIP = 'text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border align-middle shrink-0'
 const SOURCE: Record<string, { label: string; cls: string }> = {
-  proposed: { label: 'Proposed', cls: 'border-blue-200 bg-blue-50 text-blue-700' },
-  idea: { label: 'Idea', cls: 'border-amber-300 bg-amber-50 text-amber-700' },
+  proposed: { label: 'Committed', cls: 'border-blue-200 bg-blue-50 text-blue-700' },
+  idea: { label: 'Proposed', cls: 'border-amber-300 bg-amber-50 text-amber-700' },
 }
 const source = computed(() => (props.source && SOURCE[props.source]) || null)
 const linkTitle = computed(() => (props.linkedNames?.length ? `Rolls up: ${props.linkedNames.join(', ')}` : undefined))

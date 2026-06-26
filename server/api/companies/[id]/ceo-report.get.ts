@@ -333,7 +333,7 @@ export default defineEventHandler(async (event) => {
   const donutSegments = [
     { label: 'Outstanding', value: totalOutstanding, color: C.outstanding },
     { label: 'Exercised', value: totalExercised, color: C.exercised },
-    { label: 'Proposed', value: totalProposed, color: C.proposed },
+    { label: 'Committed', value: totalProposed, color: C.proposed },
     ...(futAvail >= 0
       ? [{ label: 'Available', value: futAvail, color: C.available }]
       : [{ label: 'Over-allocated', value: Math.abs(futAvail), color: C.over }]),
@@ -445,9 +445,9 @@ export default defineEventHandler(async (event) => {
     ${kpi(fmtShares(postFDS), 'Post-round FDS', 'Fully-diluted shares')}
     ${kpi(fmtShares(poolAuthorized), 'Options authorized', `${fmtPct(postFDS > 0 ? poolAuthorized / postFDS : 0)} of FDS`)}
     ${kpi(fmtShares(totalOutstanding), 'Options outstanding', `${numHolders} holder${numHolders === 1 ? '' : 's'}`)}
-    ${kpi(fmtShares(pool.available), 'Available now', futAvail < 0 ? 'Over-allocated after proposed' : `${fmtShares(futAvail)} after proposed`)}
+    ${kpi(fmtShares(pool.available), 'Available now', futAvail < 0 ? 'Over-allocated after committed' : `${fmtShares(futAvail)} after committed`)}
     ${kpi(fmtPct(postFDS > 0 ? totalOutstanding / postFDS : 0), 'Option overhang', 'Outstanding ÷ FDS')}
-    ${kpi(fmtShares(totalProposed), 'Proposed', `${proposed.length} draft${proposed.length === 1 ? '' : 's'} · ${recentlyApproved.length} approved`)}
+    ${kpi(fmtShares(totalProposed), 'Committed', `${proposed.length} draft${proposed.length === 1 ? '' : 's'} · ${recentlyApproved.length} approved`)}
     ${kpi(fmtShares(avgGrant), 'Avg per holder', `median ${fmtShares(medianHolder)}`)}
     ${kpi(ppsAnchor > 0 ? fmtUSD(totalOutstanding * ppsAnchor) : '—', 'Outstanding value', ppsAnchor > 0 ? `at ${fmtUSD(ppsAnchor)}/sh` : 'no PPS set')}
   </section>
@@ -461,18 +461,18 @@ export default defineEventHandler(async (event) => {
         ${legend([
           { label: 'Outstanding (held)', value: `${fmtShares(totalOutstanding)} · ${fmtPct(poolAuthorized > 0 ? totalOutstanding / poolAuthorized : 0)}`, color: C.outstanding },
           { label: 'Exercised → common', value: `${fmtShares(totalExercised)} · ${fmtPct(poolAuthorized > 0 ? totalExercised / poolAuthorized : 0)}`, color: C.exercised },
-          { label: 'Proposed (draft)', value: `${fmtShares(totalProposed)} · ${fmtPct(poolAuthorized > 0 ? totalProposed / poolAuthorized : 0)}`, color: C.proposed },
+          { label: 'Committed (draft)', value: `${fmtShares(totalProposed)} · ${fmtPct(poolAuthorized > 0 ? totalProposed / poolAuthorized : 0)}`, color: C.proposed },
           futAvail >= 0
-            ? { label: 'Available after proposed', value: `${fmtShares(futAvail)} · ${fmtPct(poolAuthorized > 0 ? futAvail / poolAuthorized : 0)}`, color: C.available }
+            ? { label: 'Available after committed', value: `${fmtShares(futAvail)} · ${fmtPct(poolAuthorized > 0 ? futAvail / poolAuthorized : 0)}`, color: C.available }
             : { label: 'Over-allocated', value: `(${fmtShares(Math.abs(futAvail))})`, color: C.over },
         ])}
         <p class="note">
           ${futAvail < 0
-            ? `<span class="pill warn">Action needed</span> Proposed grants exceed the available pool by ${fmtShares(Math.abs(futAvail))} options — a pool top-up is required before approval.`
+            ? `<span class="pill warn">Action needed</span> Committed grants exceed the available pool by ${fmtShares(Math.abs(futAvail))} options — a pool top-up is required before approval.`
             : futAvail < poolAuthorized * 0.05
               ? `<span class="pill warn">Running low</span> Only ${fmtPct(poolAuthorized > 0 ? futAvail / poolAuthorized : 0)} of the pool remains after the current proposals.`
               : `<span class="pill ok">Healthy</span> ${fmtShares(futAvail)} options (${fmtPct(poolAuthorized > 0 ? futAvail / poolAuthorized : 0)} of the pool) remain after the current proposals.`}
-          ${totalIdeas > 0 ? ` A further ${fmtShares(totalIdeas)} options sit in "ideas" on the pool-impact timeline.` : ''}
+          ${totalIdeas > 0 ? ` A further ${fmtShares(totalIdeas)} options sit in "proposed" on the pool-impact timeline.` : ''}
         </p>
       </div>
     </div>
@@ -522,7 +522,7 @@ export default defineEventHandler(async (event) => {
     <div class="grid-2">
       <div>
         <h2>Pending board approval</h2>
-        <p class="desc">Proposed grants awaiting sign-off — the upcoming decisions.</p>
+        <p class="desc">Committed grants awaiting sign-off — the upcoming decisions.</p>
         ${pendingApproval.length ? `<table><thead><tr><th>Recipient</th><th>Role</th><th class="r">Options</th><th class="r">% FDS</th></tr></thead><tbody>
           ${pendingApproval.map(g => `<tr><td class="name">${esc(g.recipient_name)}</td><td>${esc(g.recipient_type || '—')}</td><td class="r">${fmtShares(g.quantity)}</td><td class="r">${fmtPct(postFDS > 0 ? g.quantity / postFDS : 0)}</td></tr>`).join('')}
         </tbody></table>` : '<div class="empty">No grants pending approval.</div>'}

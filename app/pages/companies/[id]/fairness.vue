@@ -235,7 +235,7 @@ const confMeta: Record<string, { label: string; cls: string }> = {
 // Calc-tooltip strings — actual numbers behind each derived value.
 function fTotal(h: Holder): string | null {
   const parts: Array<[string, number]> = [['Options', h.optionShares]]
-  if (data.value?.includeFuture && h.proposedShares) parts.push(['Proposed', h.proposedShares])
+  if (data.value?.includeFuture && h.proposedShares) parts.push(['Committed', h.proposedShares])
   if (h.heldShares) parts.push(['Held', h.heldShares])
   return parts.length > 1 ? calcSum(parts) : null
 }
@@ -405,7 +405,7 @@ const calDetailRows = computed(() =>
       <template #actions>
         <span class="text-xs text-ink-500">Basis <span class="text-ink-700 font-medium">{{ selName }}</span> <span class="text-ink-400">(most recent round)</span></span>
         <label class="flex items-center gap-1.5 text-xs text-ink-600 border border-ink-300 rounded px-2 py-1.5 bg-white cursor-pointer select-none">
-          <input v-model="includeFuture" type="checkbox" class="accent-brand"> Include proposed + ideas
+          <input v-model="includeFuture" type="checkbox" class="accent-brand"> Include committed + proposed
         </label>
         <UiButton :disabled="!data.holders.length" @click="exportXlsx">
           <FileDown :size="14" /> Export (.xlsx)
@@ -505,7 +505,7 @@ const calDetailRows = computed(() =>
     </UiCard>
 
     <!-- TAB 2: Current holdings, fully diluted to the selected round -->
-    <UiCard v-else-if="tab === 'holdings'" :padded="false" class="max-w-5xl" :subtitle="`Fully diluted to ${selName}${data.includeFuture ? ' · incl. proposed + ideas' : ''}`">
+    <UiCard v-else-if="tab === 'holdings'" :padded="false" class="max-w-5xl" :subtitle="`Fully diluted to ${selName}${data.includeFuture ? ' · incl. committed + proposed' : ''}`">
       <p class="px-4 pt-3 pb-1 text-[11px] text-ink-500 leading-relaxed">
         <span class="font-medium text-ink-700">Post %</span> is the apples-to-apples ownership <span class="font-medium">today</span>.
         <span class="font-medium text-ink-700">% at hire</span> is each holder's slice at the round they were granted in —
@@ -563,7 +563,7 @@ const calDetailRows = computed(() =>
           <span class="text-sm font-medium text-ink-700">Total recommended new options <span class="font-normal text-ink-400">· all grades</span></span>
           <div class="text-right">
             <div class="text-xl font-semibold leading-tight" :class="data.recommendedTotalAddl > 0 ? 'text-brand' : 'text-ink-500'">{{ data.recommendedTotalAddl > 0 ? '+' + fmtShares(data.recommendedTotalAddl) : '0' }}</div>
-            <div v-if="data.includeFuture && data.ideasShares" class="text-[10px] text-ink-400">Basis includes {{ fmtShares(data.ideasShares) }} pool ideas reserved</div>
+            <div v-if="data.includeFuture && data.ideasShares" class="text-[10px] text-ink-400">Basis includes {{ fmtShares(data.ideasShares) }} pool proposed grants reserved</div>
           </div>
         </div>
 
@@ -609,13 +609,13 @@ const calDetailRows = computed(() =>
              placements (where the idea's size lands them). -->
         <UiCard v-if="ideaRecs.length" :padded="false" class="mb-5">
           <div class="px-4 py-3 border-b border-ink-200 flex items-baseline gap-2 flex-wrap">
-            <h2 class="text-sm font-semibold text-ink-900">Pool ideas <span class="text-ink-400 font-normal">· {{ ideaRecs.length }}</span></h2>
+            <h2 class="text-sm font-semibold text-ink-900">Pool proposed grants <span class="text-ink-400 font-normal">· {{ ideaRecs.length }}</span></h2>
             <span class="text-[11px] text-ink-500">recommended placement</span>
           </div>
           <table class="text-sm num data-table w-full">
             <thead>
               <tr class="text-[11px] uppercase tracking-wider text-ink-500 border-b border-ink-200 bg-ink-100">
-                <th class="text-left font-medium px-4 py-2">Idea</th>
+                <th class="text-left font-medium px-4 py-2">Proposed</th>
                 <th class="text-right font-medium px-3 py-2">Options</th>
                 <th class="text-right font-medium px-3 py-2">Resulting %</th>
                 <th class="text-left font-medium px-3 py-2 pl-6">Recommended level</th>
