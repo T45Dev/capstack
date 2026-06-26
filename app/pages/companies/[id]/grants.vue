@@ -33,6 +33,8 @@ interface Grant {
   acceleration?: string | null
   vesting_schedule_id?: string | null
   vesting_schedule_name?: string | null
+  termination_date?: string | null
+  exercise_window_days?: number | null
 }
 
 interface VestingSchedule { id: string; name: string; vest_months: number; cliff_months: number; cadence: string }
@@ -1069,6 +1071,11 @@ const fieldLabels: Record<string, string> = {
                   <td v-if="c.key === 'recipient_name'" class="sticky-col px-2.5 py-1.5 font-medium border-b border-ink-200 bg-white group-hover:bg-brand-50/40" :title="g.recipient_name">
                     <NameCell :name="g.recipient_name" :award="g.award_type || null" />
                     <span v-if="!g.linked_stakeholder" class="ml-1 text-[9px] uppercase tracking-wide text-amber-700">unlinked</span>
+                    <span
+                      v-if="g.termination_date"
+                      class="ml-1 inline-block align-middle text-[9px] font-semibold uppercase tracking-wide text-red-700 bg-red-50 border border-red-200 rounded px-1 leading-tight"
+                      :title="`Terminated ${g.termination_date}${g.exercise_window_days != null ? ` · ${g.exercise_window_days}-day exercise window` : ''}`"
+                    >terminated</span>
                   </td>
                   <td v-else-if="c.key === 'strike'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">{{ fmtPricePerShare(g.strike) }}</td>
                   <td v-else-if="c.key === 'issue_date'" class="px-2.5 py-1.5 text-ink-600 border-b border-ink-200 group-hover:bg-brand-50/40">{{ fmtDate(g.issue_date) }}</td>
