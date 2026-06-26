@@ -12,8 +12,9 @@
 // doesn't get a full-width box). The grant-size field carries a live readout
 // of its shares / % / $ equivalents as clickable chips: click one to size the
 // grant in that unit (it adopts the computed number into the input).
-import { Award, X } from 'lucide-vue-next'
+import { Award, X, Ban, Coins } from 'lucide-vue-next'
 import { fmtShares, fmtPct } from '~/utils/format'
+import { vestedFraction, grantIssued, grantOutstanding } from '~/utils/capTable'
 
 interface VestingScheduleOpt {
   id: string
@@ -57,6 +58,13 @@ interface GrantInput {
   cliff_months?: number | null
   status?: string | null
   notes?: string | null
+  // Lifecycle detail — drives the terminate/exercise actions below.
+  quantity_issued?: number | null
+  quantity_exercised?: number | null
+  quantity_forfeited?: number | null
+  quantity_expired?: number | null
+  termination_date?: string | null
+  exercise_window_days?: number | null
 }
 
 const props = withDefaults(defineProps<{
@@ -71,6 +79,8 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: 'save', form: Record<string, any>): void
   (e: 'cancel'): void
+  (e: 'terminate', payload: { termination_date: string; exercise_window_days: number }): void
+  (e: 'exercise', payload: { shares: number; exercise_date: string }): void
 }>()
 
 const today = new Date().toISOString().slice(0, 10)
@@ -169,6 +179,49 @@ watch(() => [form.vest_months, form.cliff_months], () => {
     form.vesting_schedule_id = null
   }
 })
+
+// ── Grant lifecycle · terminate / exercise (existing outstanding grants only) ──
+const isLiveGrant = computed(() => !!props.grant?.id && props.grant?.status === 'outstanding')
+const lcTerminated = computed(() => !!props.grant?.termination_date)
+const lcIssued = computed(() => grantIssued((props.grant || {}) as any))
+const lcOutstanding = computed(() => grantOutstanding((props.grant || {}) as any))
+const lcExercised = computed(() => props.grant?.quantity_exercised || 0)
+
+type LifeMode = 'none' | 'terminate' | 'exercise'
+const lifeMode = ref<LifeMode>('none')
+const termDate = ref(today)
+const windowDays = ref(90)
+const exDate = ref(today)
+const exShares = ref(0)
+
+function dms(s: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || '')
+  return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : Date.now()
+}
+function addDays(s: string, n: number): string {
+  return new Date(dms(s) + n * 86400000).toISOString().slice(0, 10)
+}
+// Vested-still-held as of a date = vested-of-issued − already-exercised, capped at outstanding.
+function vestedHeldAt(asOf: string): number {
+  const frac = vestedFraction((props.grant || {}) as any, dms(asOf))
+  return Math.max(0, Math.min(lcOutstanding.value, Math.floor(lcIssued.value * frac) - lcExercised.value))
+}
+const termVestedHeld = computed(() => vestedHeldAt(termDate.value))
+const termUnvested = computed(() => Math.max(0, lcOutstanding.value - termVestedHeld.value))
+const expiresOn = computed(() => addDays(termDate.value, Math.max(0, Math.floor(windowDays.value || 0))))
+
+function openLife(mode: LifeMode) {
+  lifeMode.value = lifeMode.value === mode ? 'none' : mode
+  if (mode === 'exercise') exShares.value = vestedHeldAt(today) || lcOutstanding.value
+  if (mode === 'terminate') { termDate.value = today; windowDays.value = 90 }
+}
+function confirmTerminate() {
+  emit('terminate', { termination_date: termDate.value, exercise_window_days: Math.max(0, Math.floor(windowDays.value || 0)) })
+}
+function confirmExercise() {
+  const n = Math.max(1, Math.min(lcOutstanding.value, Math.floor(exShares.value || 0)))
+  emit('exercise', { shares: n, exercise_date: exDate.value })
+}
 
 const canSave = computed(() => form.recipient_name.trim().length > 0 && form.quantity > 0 && !props.saving)
 function onSave() {
@@ -288,6 +341,41 @@ function onSave() {
       <span class="block text-xs font-medium text-ink-700 mb-1">Notes</span>
       <input v-model="form.notes" type="text" class="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" placeholder="Optional memo" />
     </label>
+
+    <!-- ── Grant lifecycle · terminate / exercise (existing outstanding grants) ── -->
+    <div v-if="isLiveGrant" class="border-t border-brand-200/70 pt-3">
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-ink-400">Grant lifecycle</div>
+        <span v-if="lcTerminated" class="text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-0.5">Terminated {{ props.grant?.termination_date }}</span>
+        <span class="text-[11px] text-ink-500">{{ fmtShares(lcOutstanding) }} outstanding{{ lcExercised ? ` · ${fmtShares(lcExercised)} exercised` : '' }}</span>
+        <div class="ml-auto flex gap-2">
+          <UiButton variant="ghost" :disabled="lcOutstanding < 1" @click="openLife('exercise')"><Coins :size="14" /> Record exercise</UiButton>
+          <UiButton v-if="!lcTerminated" variant="ghost" @click="openLife('terminate')"><Ban :size="14" /> Terminate</UiButton>
+        </div>
+      </div>
+
+      <!-- Exercise (portion or all) -->
+      <div v-if="lifeMode === 'exercise'" class="mt-3 rounded-md border border-ink-200 bg-white p-3">
+        <div class="flex flex-wrap items-end gap-x-4 gap-y-3">
+          <UiInput v-model="exShares" type="number" label="Shares to exercise" step="100" class="w-40" />
+          <UiInput v-model="exDate" type="date" label="Exercise date" class="w-40" />
+          <div class="text-[11px] text-ink-500 leading-tight">{{ fmtShares(lcOutstanding) }} held · {{ fmtShares(vestedHeldAt(today)) }} vested today.<br />Exercised shares convert to common.</div>
+          <UiButton variant="primary" class="ml-auto" :disabled="saving || exShares < 1" @click="confirmExercise"><Coins :size="14" /> {{ saving ? 'Working…' : 'Exercise' }}</UiButton>
+        </div>
+      </div>
+
+      <!-- Terminate (forfeit unvested, vested exercisable for a window, then expire) -->
+      <div v-if="lifeMode === 'terminate'" class="mt-3 rounded-md border border-red-200 bg-red-50/50 p-3">
+        <div class="flex flex-wrap items-end gap-x-4 gap-y-3">
+          <UiInput v-model="termDate" type="date" label="Termination date" class="w-40" />
+          <UiInput v-model="windowDays" type="number" label="Exercise window (days)" step="1" class="w-40" />
+          <UiButton variant="primary" class="ml-auto" :disabled="saving" @click="confirmTerminate"><Ban :size="14" /> {{ saving ? 'Working…' : 'Terminate grant' }}</UiButton>
+        </div>
+        <p class="mt-2 text-[11px] text-ink-600 leading-snug">
+          <b>{{ fmtShares(termUnvested) }}</b> unvested forfeit on termination; <b>{{ fmtShares(termVestedHeld) }}</b> vested stay exercisable until <b>{{ expiresOn }}</b>, then expire. Forfeited &amp; expired shares return to the pool.
+        </p>
+      </div>
+    </div>
 
     <div class="flex justify-end gap-2">
       <UiButton variant="ghost" @click="emit('cancel')"><X :size="14" /> Cancel</UiButton>

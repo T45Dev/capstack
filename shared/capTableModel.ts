@@ -184,3 +184,39 @@ export function grantOutstanding(g: GrantLifecycle): number {
   if (g.quantity != null && g.quantity !== issued) return g.quantity
   return issued - (g.quantity_exercised || 0) - (g.quantity_forfeited || 0) - (g.quantity_expired || 0)
 }
+
+/** Vesting terms — a linear monthly vest after a cliff. */
+export interface VestingTerms {
+  vesting_start?: string | null
+  vest_months?: number | null
+  cliff_months?: number | null
+}
+
+const MS_PER_MONTH = 86400000 * 30.4375
+
+function vestingStartMs(s: string | null | undefined): number | null {
+  if (!s) return null
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s))
+  return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null
+}
+
+/**
+ * Fraction of a grant vested as of `asOfMs` (epoch ms). Linear monthly accrual
+ * after the cliff: 0 before the cliff, then elapsed/vest_months, capped at 1.
+ * No vest schedule (vest_months ≤ 0) ⇒ fully vested. Shared so the Option
+ * Grants page, the CEO report, and the termination math can't drift.
+ */
+export function vestedFraction(g: VestingTerms, asOfMs: number): number {
+  const vm = g.vest_months || 0
+  if (vm <= 0) return 1
+  const start = vestingStartMs(g.vesting_start)
+  if (start == null) return 0
+  const elapsed = (asOfMs - start) / MS_PER_MONTH
+  if (elapsed < (g.cliff_months || 0)) return 0
+  return Math.max(0, Math.min(1, elapsed / vm))
+}
+
+/** Vested share count of an `issued`-size grant as of `asOfMs`. */
+export function vestedShares(issued: number, g: VestingTerms, asOfMs: number): number {
+  return Math.floor((issued || 0) * vestedFraction(g, asOfMs))
+}
