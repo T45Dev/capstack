@@ -1076,6 +1076,11 @@ const fieldLabels: Record<string, string> = {
                       class="ml-1 inline-block align-middle text-[9px] font-semibold uppercase tracking-wide text-red-700 bg-red-50 border border-red-200 rounded px-1 leading-tight"
                       :title="`Terminated ${g.termination_date}${g.exercise_window_days != null ? ` · ${g.exercise_window_days}-day exercise window` : ''}`"
                     >terminated</span>
+                    <span
+                      v-if="g.quantity_exercised"
+                      class="ml-1 text-[9px] uppercase tracking-wide text-cyan-700"
+                      :title="`${fmtShares(g.quantity_exercised)} exercised (converted to common) · ${fmtShares(g.quantity)} still outstanding`"
+                    >{{ fmtShares(g.quantity_exercised) }} ex.</span>
                   </td>
                   <td v-else-if="c.key === 'strike'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200 group-hover:bg-brand-50/40">{{ fmtPricePerShare(g.strike) }}</td>
                   <td v-else-if="c.key === 'issue_date'" class="px-2.5 py-1.5 text-ink-600 border-b border-ink-200 group-hover:bg-brand-50/40">{{ fmtDate(g.issue_date) }}</td>
