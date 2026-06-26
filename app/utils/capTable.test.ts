@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest'
 // Import the canonical shared module directly (vitest resolves the relative
 // path without the Nuxt `~~` alias that the re-export in ./capTable uses).
-import { newSharesIssued, openRoundPostFds, authorizedPool, availablePool, poolEquation, grantIssued, grantOutstanding, vestedFraction, vestedShares } from '../../shared/capTableModel'
+import { newSharesIssued, openRoundPostFds, authorizedPool, availablePool, poolEquation, poolTopUpForTarget, poolPctOfFds, grantIssued, grantOutstanding, vestedFraction, vestedShares } from '../../shared/capTableModel'
 
 describe('newSharesIssued', () => {
   it('floors new money ÷ share price', () => {
@@ -109,6 +109,28 @@ describe('poolEquation', () => {
     expect(f.issued).toBe(0)
     expect(f.available).toBe(1000)
     expect(f.futureAvailable).toBe(1000)
+  })
+})
+
+describe('poolTopUpForTarget / poolPctOfFds', () => {
+  it('grosses up the top-up so the new pool hits the target % of the NEW fds', () => {
+    // pool 1.5M of 10M FDS = 15%; want the pool to be 20% of FDS.
+    const t = poolTopUpForTarget({ poolAuthorized: 1_500_000, fds: 10_000_000, targetPctOfFds: 0.20 })
+    expect(t).toBe(625_000)                                  // (0.2·10M − 1.5M) / (1 − 0.2)
+    expect(poolPctOfFds(1_500_000, 10_000_000, t)).toBeCloseTo(0.20, 10) // round-trips to target
+  })
+  it('returns 0 when the pool already meets or exceeds the target', () => {
+    expect(poolTopUpForTarget({ poolAuthorized: 2_000_000, fds: 10_000_000, targetPctOfFds: 0.15 })).toBe(0)
+    expect(poolTopUpForTarget({ poolAuthorized: 2_000_000, fds: 10_000_000, targetPctOfFds: 0.20 })).toBe(0) // exactly at
+  })
+  it('returns 0 for a target outside (0, 1)', () => {
+    expect(poolTopUpForTarget({ poolAuthorized: 1_000_000, fds: 10_000_000, targetPctOfFds: 0 })).toBe(0)
+    expect(poolTopUpForTarget({ poolAuthorized: 1_000_000, fds: 10_000_000, targetPctOfFds: 1 })).toBe(0)
+    expect(poolTopUpForTarget({ poolAuthorized: 1_000_000, fds: 10_000_000, targetPctOfFds: 1.5 })).toBe(0)
+  })
+  it('poolPctOfFds with no top-up is the current pool %, and guards a zero denominator', () => {
+    expect(poolPctOfFds(1_500_000, 10_000_000)).toBeCloseTo(0.15, 10)
+    expect(poolPctOfFds(0, 0)).toBe(0)
   })
 })
 

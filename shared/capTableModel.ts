@@ -142,6 +142,49 @@ export function poolEquation(c: PoolEquationCounts): PoolEquationFigures {
   return { authorized, issued, outstanding, exercised, forfeitedOrExpired, available, proposed, ideas, futureAvailable }
 }
 
+export interface PoolTopUpInputs {
+  /** Current authorized option pool (shares) — from authorizedPool(). */
+  poolAuthorized: number
+  /** Current fully-diluted shares; MUST already include the current pool. */
+  fds: number
+  /** Desired total pool as a fraction of post-top-up FDS (0 < t < 1). */
+  targetPctOfFds: number
+}
+
+/**
+ * Shares to ADD to the option pool so that, AFTER the top-up, the pool equals
+ * `targetPctOfFds` of fully-diluted shares — grossed up for the fact that the
+ * new pool shares ALSO enlarge FDS (the iterative pool calculation a term sheet
+ * uses, not a naive target·FDS):
+ *
+ *   (pool + T) / (fds + T) = target   ⟹   T = (target·fds − pool) / (1 − target)
+ *
+ * Returns 0 when the pool already meets/exceeds the target (T would be ≤ 0) and
+ * 0 for a target outside (0, 1), which has no finite/meaningful solution. The
+ * canonical spec for the board-slide Pool-recommendation block (which mirrors
+ * this formula in its client-side recompute) — keep the two in lockstep.
+ */
+export function poolTopUpForTarget(p: PoolTopUpInputs): number {
+  const t = p.targetPctOfFds
+  if (!(t > 0) || t >= 1) return 0
+  const pool = p.poolAuthorized || 0
+  const fds = p.fds || 0
+  const topUp = (t * fds - pool) / (1 - t)
+  return topUp > 0 ? topUp : 0
+}
+
+/**
+ * Pool as a fraction of FDS after adding `topUp` shares (both the pool and FDS
+ * grow by the top-up). With topUp = 0 it's the current pool % of FDS; it's the
+ * inverse of poolTopUpForTarget, so feeding that function's result back here
+ * returns the target. Returns 0 when the denominator is non-positive.
+ */
+export function poolPctOfFds(poolAuthorized: number, fds: number, topUp = 0): number {
+  const denom = (fds || 0) + (topUp || 0)
+  if (denom <= 0) return 0
+  return ((poolAuthorized || 0) + (topUp || 0)) / denom
+}
+
 export interface GrantLifecycle {
   /** Carta exports store this as the NET outstanding (already minus the
    *  lifecycle counts below), not the original grant size. */
