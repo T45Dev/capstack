@@ -414,47 +414,48 @@ const newDraftPostMoney = computed(() => {
                        Price/sh sits UNDER post-money as a fraction to show the division; the operators
                        line up with the top input row. Amber labels = user input; ink labels with * are
                        derived (override by typing). -->
-                  <!-- nowrap + horizontal scroll: the equation stays on ONE line so the
-                       +/= operators never orphan. Inputs are sized tight (w-24/w-20) so it
-                       fits a normal-width card without scrolling; narrow viewports scroll. -->
-                  <div class="flex flex-nowrap items-start gap-x-1.5 overflow-x-auto pb-1">
-                    <div class="flex flex-col gap-1 shrink-0">
+                  <!-- One line, no scroll. The width sits on each COLUMN wrapper, not on
+                       the NumberInput: NumberInput's root is w-full and Tailwind orders w-full
+                       after w-24, so a width class on the component itself loses. Sized tight
+                       (w-24 value cols, w-20 pool/notes) so all seven terms fit one row. -->
+                  <div class="flex flex-nowrap items-start gap-x-1 overflow-x-auto">
+                    <div class="flex flex-col gap-1 shrink-0 w-24">
                       <span class="text-[10px] uppercase tracking-wider text-ink-500 whitespace-nowrap">Pre-money <span class="text-amber-500" title="Derived from the prior round's post-money — override by typing">*</span></span>
-                      <NumberInput v-model="draft.pre_money" prefix="$" :placeholder="prevPostMoney != null ? fmtUSD(prevPostMoney) : '0'" class="w-24" />
+                      <NumberInput v-model="draft.pre_money" prefix="$" :placeholder="prevPostMoney != null ? fmtUSD(prevPostMoney) : '0'" />
                     </div>
                     <div class="flex flex-col gap-1 shrink-0"><span class="text-[10px] uppercase tracking-wider">&nbsp;</span><span class="flex items-center h-[30px] text-ink-400">+</span></div>
-                    <div class="flex flex-col gap-1 shrink-0">
+                    <div class="flex flex-col gap-1 shrink-0 w-24">
                       <span class="text-[10px] uppercase tracking-wider text-amber-600">New money</span>
-                      <NumberInput v-model="draft.new_money" prefix="$" placeholder="0" class="w-24" />
+                      <NumberInput v-model="draft.new_money" prefix="$" placeholder="0" />
                     </div>
                     <div class="flex flex-col gap-1 shrink-0"><span class="text-[10px] uppercase tracking-wider">&nbsp;</span><span class="flex items-center h-[30px] text-ink-400">=</span></div>
                     <!-- post-money over price/sh -->
-                    <div class="flex flex-col gap-1 shrink-0">
+                    <div class="flex flex-col gap-1 shrink-0 w-24">
                       <span class="text-[10px] uppercase tracking-wider text-ink-500">Post-money</span>
-                      <div class="w-24 px-2 py-1 text-sm text-ink-600 italic border border-dashed border-ink-200 rounded-md bg-ink-50/50 num truncate">{{ previewPostMoney != null ? fmtUSD(previewPostMoney) : '—' }}</div>
-                      <div class="w-24 border-t border-ink-400 mt-1.5 mb-0.5"></div>
+                      <div class="w-full px-2 py-1 text-sm text-ink-600 italic border border-dashed border-ink-200 rounded-md bg-ink-50/50 num truncate">{{ previewPostMoney != null ? fmtUSD(previewPostMoney) : '—' }}</div>
+                      <div class="w-full border-t border-ink-400 mt-1.5 mb-0.5"></div>
                       <span class="text-[10px] uppercase tracking-wider text-amber-600 whitespace-nowrap">Price / sh</span>
-                      <NumberInput v-model="draft.share_price" prefix="$" :digits="5" placeholder="—" class="w-24" />
+                      <NumberInput v-model="draft.share_price" prefix="$" :digits="5" placeholder="—" />
                     </div>
                     <div class="flex flex-col gap-1 shrink-0"><span class="text-[10px] uppercase tracking-wider">&nbsp;</span><span class="flex items-center h-[30px] text-ink-400">=</span></div>
-                    <div class="flex flex-col gap-1 shrink-0">
+                    <div class="flex flex-col gap-1 shrink-0 w-24">
                       <span class="text-[10px] uppercase tracking-wider text-ink-500 whitespace-nowrap">Preferred FDS</span>
-                      <NumberInput v-model="draft.preferred_issued_override" :placeholder="previewNewShares != null ? fmtShares(previewNewShares) : fmtShares(r.preferred_issued)" class="w-24" />
+                      <NumberInput v-model="draft.preferred_issued_override" :placeholder="previewNewShares != null ? fmtShares(previewNewShares) : fmtShares(r.preferred_issued)" />
                     </div>
                     <div class="flex flex-col gap-1 shrink-0"><span class="text-[10px] uppercase tracking-wider">&nbsp;</span><span class="flex items-center h-[30px] text-ink-400">+</span></div>
-                    <div class="flex flex-col gap-1 shrink-0">
+                    <div class="flex flex-col gap-1 shrink-0 w-20">
                       <span class="text-[10px] uppercase tracking-wider text-amber-600 whitespace-nowrap">Pool issued</span>
-                      <NumberInput v-model="draft.option_pool_issued" placeholder="0" class="w-20" />
+                      <NumberInput v-model="draft.option_pool_issued" placeholder="0" />
                     </div>
                     <div class="flex flex-col gap-1 shrink-0"><span class="text-[10px] uppercase tracking-wider">&nbsp;</span><span class="flex items-center h-[30px] text-ink-400">+</span></div>
-                    <div class="flex flex-col gap-1 shrink-0">
+                    <div class="flex flex-col gap-1 shrink-0 w-20">
                       <span class="text-[10px] uppercase tracking-wider text-amber-600 whitespace-nowrap">Notes conv.</span>
-                      <NumberInput v-model="draft.notes_converted_override" :placeholder="(r.notes_converted ?? 0) > 0 ? fmtShares(r.notes_converted) : 'auto'" class="w-20" />
+                      <NumberInput v-model="draft.notes_converted_override" :placeholder="(r.notes_converted ?? 0) > 0 ? fmtShares(r.notes_converted) : 'auto'" />
                     </div>
                     <div class="flex flex-col gap-1 shrink-0"><span class="text-[10px] uppercase tracking-wider">&nbsp;</span><span class="flex items-center h-[30px] text-ink-400">=</span></div>
-                    <div class="flex flex-col gap-1 shrink-0">
+                    <div class="flex flex-col gap-1 shrink-0 w-24">
                       <span class="text-[10px] uppercase tracking-wider text-ink-500 whitespace-nowrap">Total FDS <span class="text-amber-500" title="Derived cumulatively — pin by typing">*</span></span>
-                      <NumberInput v-model="draft.total_shares_fds_override" :placeholder="fmtShares(r.total_shares_fds)" class="w-24" />
+                      <NumberInput v-model="draft.total_shares_fds_override" :placeholder="fmtShares(r.total_shares_fds)" />
                     </div>
                   </div>
 
