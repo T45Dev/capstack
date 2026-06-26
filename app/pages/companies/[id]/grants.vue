@@ -644,6 +644,34 @@ async function saveEditor(formVals: any) {
   }
 }
 
+// Terminate the grant being edited: forfeit unvested now, keep vested exercisable
+// for the chosen window, expire the rest after. The server recomputes the
+// lifecycle counts; refresh re-reads them (and the pool-impact timeline derives
+// the forfeit/expire events from those counts).
+async function terminateGrant(payload: { termination_date: string; exercise_window_days: number }) {
+  if (!editingId.value || saving.value) return
+  saving.value = true
+  try {
+    await $fetch(`/api/grants/${editingId.value}/terminate`, { method: 'POST', body: payload })
+    cancelEdit()
+    await refresh()
+  } finally {
+    saving.value = false
+  }
+}
+// Exercise part or all of the grant being edited (converts options to common).
+async function exerciseGrant(payload: { shares: number; exercise_date: string }) {
+  if (!editingId.value || saving.value) return
+  saving.value = true
+  try {
+    await $fetch(`/api/grants/${editingId.value}/exercise`, { method: 'POST', body: payload })
+    cancelEdit()
+    await refresh()
+  } finally {
+    saving.value = false
+  }
+}
+
 // Quick single-field inline cell edits (Note, Vesting date) — PATCH just the
 // one column without opening the full row editor.
 async function quickPatch(g: Grant, patch: Record<string, any>) {
@@ -1033,7 +1061,7 @@ const fieldLabels: Record<string, string> = {
               <template v-for="g in sortedOutstanding" :key="g.id">
               <tr v-if="editingId === g.id">
                 <td :colspan="outstandingVisibleCols.length" class="p-0 border-b border-ink-200">
-                  <GrantInlineEditor :grant="g" :schedules="vestingSchedules" :post-fds="postFDS" :post-pps="postPPS" :saving="saving" @save="saveEditor" @cancel="cancelEdit" />
+                  <GrantInlineEditor :grant="g" :schedules="vestingSchedules" :post-fds="postFDS" :post-pps="postPPS" :saving="saving" @save="saveEditor" @cancel="cancelEdit" @terminate="terminateGrant" @exercise="exerciseGrant" />
                 </td>
               </tr>
               <tr v-else class="group">
@@ -1140,7 +1168,7 @@ const fieldLabels: Record<string, string> = {
               <template v-for="g in sortedProposed" :key="g.id">
               <tr v-if="editingId === g.id">
                 <td :colspan="proposedVisibleCols.length" class="p-0 border-b border-ink-200">
-                  <GrantInlineEditor :grant="g" :schedules="vestingSchedules" :post-fds="postFDS" :post-pps="postPPS" :saving="saving" @save="saveEditor" @cancel="cancelEdit" />
+                  <GrantInlineEditor :grant="g" :schedules="vestingSchedules" :post-fds="postFDS" :post-pps="postPPS" :saving="saving" @save="saveEditor" @cancel="cancelEdit" @terminate="terminateGrant" @exercise="exerciseGrant" />
                 </td>
               </tr>
               <tr v-else class="group">

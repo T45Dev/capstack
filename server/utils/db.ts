@@ -417,6 +417,13 @@ function migrate(d: Database.Database): void {
   // Reference to an operator-defined vesting schedule (vesting_schedules.id).
   // When set, the grant's vest_months/cliff_months are snapshotted from it.
   ensureColumn('grants', 'vesting_schedule_id', 'TEXT')
+  // Termination tracking. When an employee is terminated the unvested portion
+  // forfeits immediately (quantity_forfeited / forfeited_date) and the vested
+  // portion stays exercisable for exercise_window_days; whatever isn't exercised
+  // by termination_date + window expires (quantity_expired / expired_date). The
+  // expiry is materialized lazily once the window closes (see grants.get).
+  ensureColumn('grants', 'termination_date', 'TEXT')
+  ensureColumn('grants', 'exercise_window_days', 'INTEGER')
   // Ideas import header-mapping overrides (JSON), stored alongside the grants
   // import mappings on the same per-company settings row.
   ensureColumn('grant_settings', 'idea_import_mappings', 'TEXT')

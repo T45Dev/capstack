@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest'
 // Import the canonical shared module directly (vitest resolves the relative
 // path without the Nuxt `~~` alias that the re-export in ./capTable uses).
-import { newSharesIssued, openRoundPostFds, authorizedPool, availablePool, poolEquation, grantIssued, grantOutstanding } from '../../shared/capTableModel'
+import { newSharesIssued, openRoundPostFds, authorizedPool, availablePool, poolEquation, grantIssued, grantOutstanding, vestedFraction, vestedShares } from '../../shared/capTableModel'
 
 describe('newSharesIssued', () => {
   it('floors new money ÷ share price', () => {
@@ -134,5 +134,31 @@ describe('grantIssued / grantOutstanding', () => {
     const g = { quantity: 50 }
     expect(grantIssued(g)).toBe(50)
     expect(grantOutstanding(g)).toBe(50)
+  })
+})
+
+describe('vestedFraction', () => {
+  // 48-month vest, 12-month cliff, vesting from 2020-01-01.
+  const g = { vesting_start: '2020-01-01', vest_months: 48, cliff_months: 12 }
+  const at = (iso: string) => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10))
+  it('is 0 before the cliff', () => {
+    expect(vestedFraction(g, at('2020-06-01'))).toBe(0)      // 5 months < 12-month cliff
+    expect(vestedFraction(g, at('2019-12-01'))).toBe(0)      // before vesting start
+  })
+  it('accrues linearly after the cliff and caps at 1', () => {
+    expect(vestedFraction(g, at('2022-01-01'))).toBeCloseTo(24 / 48, 2) // ~2 yrs → 50%
+    expect(vestedFraction(g, at('2024-01-01'))).toBe(1)                  // 4 yrs → fully vested
+    expect(vestedFraction(g, at('2030-01-01'))).toBe(1)                  // beyond → still 1
+  })
+  it('treats no vesting schedule as fully vested, and no start as unvested', () => {
+    expect(vestedFraction({ vest_months: 0 }, at('2020-01-01'))).toBe(1)
+    expect(vestedFraction({ vesting_start: null, vest_months: 48 }, at('2025-01-01'))).toBe(0)
+  })
+  it('vestedShares floors issued × fraction', () => {
+    const mid = vestedShares(100_000, g, at('2022-01-01')) // ~2 yrs → ~50% (day-based month)
+    expect(mid).toBeGreaterThanOrEqual(49_500)
+    expect(mid).toBeLessThanOrEqual(50_500)
+    expect(vestedShares(100_001, g, at('2024-01-01'))).toBe(100_001) // fully vested
+    expect(vestedShares(100_000, g, at('2020-06-01'))).toBe(0)       // before cliff
   })
 })
