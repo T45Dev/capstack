@@ -357,7 +357,9 @@ export default defineEventHandler(async (event) => {
   .rec-controls{display:flex;flex-wrap:wrap;gap:8px 18px;margin:2px 0 8px}
   .rec-ctl{display:inline-flex;align-items:center;gap:7px;font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
   .rec-inwrap{display:inline-flex;align-items:baseline;gap:4px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:3px 8px}
-  .rec-inwrap input{width:54px;border:none;outline:none;font-size:13px;font-weight:800;color:var(--brand);text-align:right;font-variant-numeric:tabular-nums;background:transparent;padding:0}
+  .rec-inwrap input{border:none;outline:none;font-size:13px;font-weight:800;color:var(--brand);text-align:right;font-variant-numeric:tabular-nums;background:transparent;padding:0}
+  .rec-inwrap input#rec-target{width:58px}
+  .rec-inwrap input#rec-floor{width:104px}
   .rec-inwrap input::-webkit-outer-spin-button,.rec-inwrap input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
   .rec-inwrap input[type=number]{-moz-appearance:textfield;appearance:textfield}
   .rec-unit{font-size:10px;font-weight:600;color:var(--faint);text-transform:none;letter-spacing:0}
