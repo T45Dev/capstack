@@ -338,7 +338,7 @@ const payoutWidth = computed(() => payoutTable.cols.reduce((s, c) => s + c.width
                           v-if="r.isIdea"
                           class="ml-1.5 inline-block text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border border-amber-300 bg-amber-50 text-amber-800 align-middle"
                           title="Hypothetical grant from the Option Pool Impact page"
-                        >idea</span>
+                        >proposed</span>
                       </td>
                       <td v-else-if="c.key === 'postShares'" class="px-2.5 py-1.5 text-right text-ink-900 font-medium border-b border-ink-200">{{ fmtShares(r.postShares) }}</td>
                       <td v-else-if="c.key === 'postPct'" class="px-2.5 py-1.5 text-right text-ink-700 border-b border-ink-200"><UiCalcTip :formula="result.round.postRoundFDS > 0 ? calcPct(r.postShares, result.round.postRoundFDS, 2) : null">{{ result.round.postRoundFDS > 0 ? fmtPct(r.postShares / result.round.postRoundFDS, 2) : '—' }}</UiCalcTip></td>

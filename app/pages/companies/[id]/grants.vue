@@ -500,7 +500,7 @@ const ideaRows = computed(() => {
         // True when the idea is attributed to a known existing holder.
         matchedHolder: existing_total > 0,
         status: 'proposed',
-        recipient_name: ie.name || 'Idea',
+        recipient_name: ie.name || 'Proposed',
         recipient_type: ie.recipient_type || 'Employees',
         award_type: ie.kind || null,
         quantity: newShares,
@@ -1006,7 +1006,7 @@ const fieldLabels: Record<string, string> = {
         <div class="flex items-center gap-2 shrink-0">
           <label class="inline-flex items-center gap-1.5 text-[11px] text-ink-600 border border-ink-300 rounded px-2 py-1 cursor-pointer select-none hover:bg-ink-50">
             <input v-model="includeIdeas" type="checkbox" class="accent-brand">
-            Include ideas{{ totalIdeas ? ` (${fmtShares(totalIdeas)})` : '' }}
+            Include proposed{{ totalIdeas ? ` (${fmtShares(totalIdeas)})` : '' }}
           </label>
           <button
             type="button"
@@ -1106,7 +1106,7 @@ const fieldLabels: Record<string, string> = {
                   ><UiCalcTip :formula="fOut(g, c)">{{ fmtUnit(c.unit!, (g as any)[c.key]) }}</UiCalcTip></td>
                   <td v-else-if="c.key === 'actions'" class="px-2 py-1 text-right border-b border-ink-200 whitespace-nowrap group-hover:bg-brand-50/40">
                     <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded" @click="startEdit(g)" title="Edit"><Edit3 :size="13" /></button>
-                    <button class="text-ink-500 hover:text-amber-600 px-1 py-0.5 rounded" @click="demote(g)" title="Demote to proposed"><ArrowDownCircle :size="13" /></button>
+                    <button class="text-ink-500 hover:text-amber-600 px-1 py-0.5 rounded" @click="demote(g)" title="Demote to committed"><ArrowDownCircle :size="13" /></button>
                     <button class="text-ink-500 hover:text-red-600 px-1 py-0.5 rounded" @click="cancel(g)" title="Cancel"><Trash2 :size="13" /></button>
                   </td>
                 </template>
@@ -1128,7 +1128,7 @@ const fieldLabels: Record<string, string> = {
       </div>
 
       <div class="min-w-0" :style="secondStyle">
-      <UiCard title="Proposed" subtitle="Draft grants — promote to make them live. Pool ideas appear here flagged “Idea”." :padded="false">
+      <UiCard title="Committed" subtitle="Draft grants — promote to make them live. Pool proposed grants appear here flagged “Proposed”." :padded="false">
         <template #header>
           <TableUnitsToggle storage-key="capstack:grants:proposed:units" />
           <button
@@ -1273,11 +1273,11 @@ const fieldLabels: Record<string, string> = {
                     <template v-if="!g.isIdea">
                       <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded" @click="startEdit(g)" title="Edit"><Edit3 :size="13" /></button>
                       <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded" @click="promote(g)" title="Promote to outstanding"><ArrowUpCircle :size="13" /></button>
-                      <button class="text-ink-500 hover:text-amber-600 px-1 py-0.5 rounded" @click="demoteToIdea(g)" title="Demote to pool idea"><Lightbulb :size="13" /></button>
+                      <button class="text-ink-500 hover:text-amber-600 px-1 py-0.5 rounded" @click="demoteToIdea(g)" title="Demote to proposed"><Lightbulb :size="13" /></button>
                       <button class="text-ink-500 hover:text-red-600 px-1 py-0.5 rounded" @click="destroy(g)" title="Delete"><Trash2 :size="13" /></button>
                     </template>
                     <template v-else>
-                      <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded align-middle" @click="promoteIdea(g)" title="Promote to proposed grant"><ArrowUpCircle :size="13" /></button>
+                      <button class="text-ink-500 hover:text-brand-600 px-1 py-0.5 rounded align-middle" @click="promoteIdea(g)" title="Promote to committed grant"><ArrowUpCircle :size="13" /></button>
                       <NuxtLink :to="`/companies/${id}/pool`" class="text-[10px] text-amber-700 hover:underline align-middle" title="Pool idea — manage on Option Pool Impact">on Pool ↗</NuxtLink>
                     </template>
                   </td>
@@ -1298,7 +1298,7 @@ const fieldLabels: Record<string, string> = {
         <header class="px-5 py-3 border-b border-ink-200 flex items-center justify-between gap-2">
           <div>
             <h2 class="text-base font-semibold text-ink-900">Import proposed grants</h2>
-            <p class="text-xs text-ink-500 mt-0.5">Drop in an HR / finance spreadsheet — we'll match headers like "Name", "Shares", "Strike" automatically. Imports as Proposed.</p>
+            <p class="text-xs text-ink-500 mt-0.5">Drop in an HR / finance spreadsheet — we'll match headers like "Name", "Shares", "Strike" automatically. Imports as Committed.</p>
           </div>
           <button class="p-1.5 hover:bg-ink-200 rounded" @click="closeImport"><X :size="16" /></button>
         </header>

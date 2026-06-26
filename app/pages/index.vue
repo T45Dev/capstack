@@ -78,7 +78,7 @@ const features = [
   { icon: GitCompare, title: 'Dilution you can see', body: 'Pre- and post-money denominators side by side, so a holder whose share count never moves still shows the dilution they actually take.' },
   { icon: TrendingDown, title: 'Option-pool impact', body: 'Watch the authorized and available pool move as you size the next round — before you commit a single grant.' },
   { icon: FlaskConical, title: 'Exit scenarios', body: 'Run the waterfall across exit values and see what each stakeholder clears under your preference stack.' },
-  { icon: Scale, title: 'Grant Fairness', body: 'Pressure-test a proposed grant against ownership targets with the same canonical math the rest of the model uses.' },
+  { icon: Scale, title: 'Grant Fairness', body: 'Pressure-test a committed grant against ownership targets with the same canonical math the rest of the model uses.' },
 ]
 
 const steps = [

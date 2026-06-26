@@ -54,10 +54,10 @@ const proposedPlusIdeas = computed(() => f.value.proposed + f.value.ideas)
 const fIssued = computed(() => `Outstanding ${fmtShares(f.value.outstanding)} + exercised ${fmtShares(f.value.exercised)} + forfeited/expired ${fmtShares(f.value.forfeitedOrExpired)} = ${fmtShares(f.value.issued)}`)
 const fOutstanding = computed(() => `Issued ${fmtShares(f.value.issued)} − exercised ${fmtShares(f.value.exercised)} − forfeited/expired ${fmtShares(f.value.forfeitedOrExpired)} = ${fmtShares(f.value.outstanding)}`)
 const fAvailable = computed(() => `Authorized ${fmtShares(f.value.authorized)} − outstanding ${fmtShares(f.value.outstanding)} − exercised ${fmtShares(f.value.exercised)} = ${fmtShares(f.value.available)}`)
-const fProposedIdeas = computed(() => `Proposed ${fmtShares(f.value.proposed)} + ideas ${fmtShares(f.value.ideas)} = ${fmtShares(proposedPlusIdeas.value)}`)
+const fProposedIdeas = computed(() => `Committed ${fmtShares(f.value.proposed)} + proposed ${fmtShares(f.value.ideas)} = ${fmtShares(proposedPlusIdeas.value)}`)
 const fFutureAvailable = computed(() => {
-  const parts = [`Available ${fmtShares(f.value.available)}`, `− proposed ${fmtShares(f.value.proposed)}`]
-  if (props.showIdeas) parts.push(`− ideas ${fmtShares(f.value.ideas)}`)
+  const parts = [`Available ${fmtShares(f.value.available)}`, `− committed ${fmtShares(f.value.proposed)}`]
+  if (props.showIdeas) parts.push(`− proposed ${fmtShares(f.value.ideas)}`)
   return `${parts.join(' ')} = ${fmtShares(f.value.futureAvailable)}`
 })
 </script>
@@ -126,8 +126,8 @@ const fFutureAvailable = computed(() => {
       <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">−</span>
       <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
         <span class="text-[10px] uppercase tracking-wider text-ink-500 inline-flex items-center gap-1">
-          Proposed + Ideas
-          <button type="button" class="text-ink-400 hover:text-ink-700" title="Show Proposed and Ideas separately" @click="extrasCollapsed = false">
+          Committed + Proposed
+          <button type="button" class="text-ink-400 hover:text-ink-700" title="Show Committed and Proposed separately" @click="extrasCollapsed = false">
             <ChevronRight :size="11" />
           </button>
         </span>
@@ -138,8 +138,8 @@ const fFutureAvailable = computed(() => {
       <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">−</span>
       <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
         <span class="text-[10px] uppercase tracking-wider text-ink-500 inline-flex items-center gap-1">
-          Proposed
-          <button v-if="showIdeas" type="button" class="text-ink-400 hover:text-ink-700" title="Combine Proposed and Ideas into one number" @click="extrasCollapsed = true">
+          Committed
+          <button v-if="showIdeas" type="button" class="text-ink-400 hover:text-ink-700" title="Combine Committed and Proposed into one number" @click="extrasCollapsed = true">
             <ChevronDown :size="11" />
           </button>
         </span>
@@ -148,7 +148,7 @@ const fFutureAvailable = computed(() => {
       <template v-if="showIdeas">
         <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">−</span>
         <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500">Ideas</span>
+          <span class="text-[10px] uppercase tracking-wider text-ink-500">Proposed</span>
           <span class="text-2xl font-semibold leading-none text-amber-500">{{ fmtShares(f.ideas) }}</span>
         </div>
       </template>

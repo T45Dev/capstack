@@ -323,7 +323,7 @@ const ideasCols = useSortableTable({
   key: 'capstack:pool:ideas',
   columns: [
     { key: 'date', label: 'Date', width: 110, sortable: false, align: 'left' },
-    { key: 'name', label: 'Idea', width: 200, sortable: false, align: 'left' },
+    { key: 'name', label: 'Proposed', width: 200, sortable: false, align: 'left' },
     { key: 'role', label: 'Role', width: 130, sortable: false, align: 'left' },
     { key: 'type', label: 'Type', width: 120, sortable: false, align: 'left' },
     { key: 'shares', label: 'Shares', width: 120, sortable: false, align: 'right' },
@@ -647,7 +647,7 @@ async function deleteIdea(idea: any) {
     // settle the row.
     return
   }
-  if (!confirm(`Delete idea "${idea.name || 'untitled'}"?`)) return
+  if (!confirm(`Delete proposed grant "${idea.name || 'untitled'}"?`)) return
   await $fetch(`/api/pool-events/${idea.id}`, { method: 'DELETE' })
   await refreshIdeas()
 }
@@ -787,8 +787,8 @@ const pieSlices = computed<PieSlice[]>(() => {
   const segs = [
     { key: 'outstanding', label: 'Outstanding', value: t.outstandingShares, color: '#475569' },  // ink-500
     { key: 'exercised',   label: 'Exercised',   value: t.totalExercised,    color: '#94a3b8' },  // ink-400 — gone (lighter)
-    { key: 'proposed',    label: 'Proposed',    value: t.proposedShares,    color: '#2563eb' },  // brand-500
-    { key: 'ideas',       label: 'Ideas',       value: t.ideaGrants,        color: '#fbbf24' },  // amber-400
+    { key: 'proposed',    label: 'Committed',   value: t.proposedShares,    color: '#2563eb' },  // brand-500
+    { key: 'ideas',       label: 'Proposed',    value: t.ideaGrants,        color: '#fbbf24' },  // amber-400
     { key: 'available',   label: 'Available',   value: available,           color: '#a7f3d0' },  // emerald-200
   ]
   const sum = segs.reduce((a, s) => a + s.value, 0) || 1
@@ -850,7 +850,7 @@ const chart = computed(() => {
   <div class="flex flex-col" style="height: calc(100vh - 3.5rem - 3rem)">
     <PageHeader class="shrink-0" :breadcrumb="[{ label: 'Cap-table model' }, { label: 'Option Pool Impact' }]">
       <template #title><ArrowDownIcon :size="20" /> Option pool impact</template>
-      <template #description>Chronological view of every event that affects the pool — pool top-ups, outstanding grants, proposed grants, and your future ideas.</template>
+      <template #description>Chronological view of every event that affects the pool — pool top-ups, outstanding grants, committed grants, and your future proposed grants.</template>
     </PageHeader>
 
     <!-- Missing-date callout: when imported grants are missing issue
@@ -1077,18 +1077,18 @@ const chart = computed(() => {
           <div class="shrink-0">
             <h2 class="text-sm font-semibold text-ink-900 inline-flex items-center gap-1.5">
               <Lightbulb :size="14" class="text-amber-500" />
-              Ideas
+              Proposed
               <span class="text-ink-400 font-normal">({{ ideaEventsList.length }})</span>
             </h2>
             <p class="text-xs text-ink-500">Hypothetical future events. Folded into the projected Available + chart above, but not the Timeline.</p>
           </div>
           <div class="flex items-center gap-2">
-            <UiButton @click="openImport"><UploadCloud :size="14" /> Import ideas</UiButton>
-            <UiButton variant="primary" @click="openModal()"><Plus :size="14" /> Add idea</UiButton>
+            <UiButton @click="openImport"><UploadCloud :size="14" /> Import proposed grants</UiButton>
+            <UiButton variant="primary" @click="openModal()"><Plus :size="14" /> Add proposed grant</UiButton>
           </div>
         </div>
         <div v-if="!ideaEventsList.length" class="px-4 py-8 text-sm text-ink-500 text-center">
-          No ideas yet. Click <span class="font-medium text-ink-700">Add idea</span> to model a future top-up, grant, exercise, forfeit, or floor.
+          Nothing proposed yet. Click <span class="font-medium text-ink-700">Add proposed grant</span> to model a future top-up, grant, exercise, forfeit, or floor.
         </div>
         <div v-else class="overflow-y-auto min-h-0 flex-1">
           <table class="text-[13px] num data-table">
@@ -1144,7 +1144,7 @@ const chart = computed(() => {
     <div v-if="showModal" class="fixed inset-0 z-40 bg-ink-900/40 backdrop-blur-sm grid place-items-center p-4" @click.self="showModal = false">
       <div class="w-full max-w-xl rounded-lg border border-ink-300 bg-white p-5 shadow-card-hover">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-base font-semibold text-ink-900">{{ editingIdea ? 'Edit idea' : 'Add idea' }}</h2>
+          <h2 class="text-base font-semibold text-ink-900">{{ editingIdea ? 'Edit proposed grant' : 'Add proposed grant' }}</h2>
           <button class="p-1.5 hover:bg-ink-200 rounded" @click="showModal = false"><X :size="14" /></button>
         </div>
 
@@ -1230,7 +1230,7 @@ const chart = computed(() => {
         <div class="mt-5 flex justify-end gap-2">
           <UiButton variant="ghost" @click="showModal = false">Cancel</UiButton>
           <UiButton variant="primary" :disabled="!form.name.trim() || form.shares <= 0 || saving" @click="saveIdea">
-            <Lightbulb :size="14" /> {{ saving ? 'Saving…' : (editingIdea ? 'Update idea' : 'Add idea') }}
+            <Lightbulb :size="14" /> {{ saving ? 'Saving…' : (editingIdea ? 'Update proposed grant' : 'Add proposed grant') }}
           </UiButton>
         </div>
       </div>
@@ -1241,8 +1241,8 @@ const chart = computed(() => {
       <div class="w-full max-w-3xl rounded-lg border border-ink-300 bg-white shadow-card-hover">
         <header class="px-5 py-3 border-b border-ink-200 flex items-center justify-between gap-2">
           <div>
-            <h2 class="text-base font-semibold text-ink-900">Import ideas</h2>
-            <p class="text-xs text-ink-500 mt-0.5">Drop a spreadsheet of future option-grant ideas — we match headers like "Name", "Shares", "Target date". Imported as Future grant ideas.</p>
+            <h2 class="text-base font-semibold text-ink-900">Import proposed grants</h2>
+            <p class="text-xs text-ink-500 mt-0.5">Drop a spreadsheet of proposed option grants — we match headers like "Name", "Shares", "Target date". Imported as proposed grants.</p>
           </div>
           <button class="p-1.5 hover:bg-ink-200 rounded" @click="closeImport"><X :size="16" /></button>
         </header>
@@ -1317,9 +1317,9 @@ const chart = computed(() => {
           <div v-else-if="collisions.length && !importDone" class="space-y-3">
             <div class="rounded-md border border-amber-200 bg-amber-50 p-3">
               <h4 class="text-[11px] font-semibold uppercase tracking-wide text-amber-700 mb-1 flex items-center gap-1">
-                <AlertTriangle :size="12" /> {{ collisions.length }} match{{ collisions.length === 1 ? '' : 'es' }} with existing grant-ideas
+                <AlertTriangle :size="12" /> {{ collisions.length }} match{{ collisions.length === 1 ? '' : 'es' }} with existing proposed grants
               </h4>
-              <p class="text-xs text-amber-900">Same name. <b>Combine</b> adds the imported shares, <b>Replace</b> overwrites the existing idea, <b>Skip</b> leaves it untouched.</p>
+              <p class="text-xs text-amber-900">Same name. <b>Combine</b> adds the imported shares, <b>Replace</b> overwrites the existing proposed grant, <b>Skip</b> leaves it untouched.</p>
             </div>
             <div class="border border-ink-200 rounded overflow-x-auto">
               <table class="text-[12px]">
@@ -1376,7 +1376,7 @@ const chart = computed(() => {
             :disabled="!importPreview.totalParsed || importCommitting"
             @click="commitImport(false)"
           >
-            <UploadCloud :size="14" /> {{ importCommitting ? 'Importing…' : `Import ${importPreview.totalParsed} idea${importPreview.totalParsed === 1 ? '' : 's'}` }}
+            <UploadCloud :size="14" /> {{ importCommitting ? 'Importing…' : `Import ${importPreview.totalParsed} proposed grant${importPreview.totalParsed === 1 ? '' : 's'}` }}
           </UiButton>
           <UiButton
             v-else-if="collisions.length && !importDone"

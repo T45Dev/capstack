@@ -267,7 +267,7 @@ function resetIdeaMapping(f: CanonicalField) {
       </UiCard>
 
       <!-- Import template field mapping -->
-      <UiCard title="Import template fields" subtitle="The column headers Pariva looks for when importing proposed grants, and the grant field each maps to.">
+      <UiCard title="Import template fields" subtitle="The column headers Pariva looks for when importing committed grants, and the grant field each maps to.">
         <template #header>
           <span v-if="mappingsSaved" class="text-xs text-emerald-700 font-medium">Saved ✓</span>
           <UiButton variant="primary" :disabled="savingMappings" @click="saveMappings">
@@ -309,7 +309,7 @@ function resetIdeaMapping(f: CanonicalField) {
 
     <!-- Option Pool tab -->
     <div v-else-if="activeTab === 'pool'" class="space-y-6 max-w-4xl">
-      <UiCard title="Ideas import template fields" subtitle="Column headers Pariva looks for when importing option-grant Ideas, and the pool-event field each maps to.">
+      <UiCard title="Proposed import template fields" subtitle="Column headers Pariva looks for when importing proposed grants, and the pool-event field each maps to.">
         <template #header>
           <span v-if="ideaMappingsSaved" class="text-xs text-emerald-700 font-medium">Saved ✓</span>
           <UiButton variant="primary" :disabled="savingIdeaMappings" @click="saveIdeaMappings">
@@ -317,7 +317,7 @@ function resetIdeaMapping(f: CanonicalField) {
           </UiButton>
         </template>
         <p class="text-[12px] text-ink-500 mb-3">
-          The Ideas importer only adds <b>Future grant</b> ideas (other event types — top-ups, exercises, forfeits, floors, reserves — stay on the Add idea modal). Imports match these headers first, then fall back to smart auto-detection.
+          The Proposed importer only adds <b>future grant</b> proposals (other event types — top-ups, exercises, forfeits, floors, reserves — stay on the Add proposed grant modal). Imports match these headers first, then fall back to smart auto-detection.
         </p>
         <div class="space-y-2">
           <div
