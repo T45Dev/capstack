@@ -145,44 +145,45 @@ export function poolEquation(c: PoolEquationCounts): PoolEquationFigures {
 export interface PoolTopUpInputs {
   /** Current authorized option pool (shares) — from authorizedPool(). */
   poolAuthorized: number
-  /** Current fully-diluted shares; MUST already include the current pool. */
+  /** Post-round FDS — the FIXED basis the target % is measured against. */
   fds: number
-  /** Desired total pool as a fraction of post-top-up FDS (0 < t < 1). */
+  /** Desired total pool as a fraction of FDS (0 < t < 1). */
   targetPctOfFds: number
 }
 
 /**
- * Shares to ADD to the option pool so that, AFTER the top-up, the pool equals
- * `targetPctOfFds` of fully-diluted shares — grossed up for the fact that the
- * new pool shares ALSO enlarge FDS (the iterative pool calculation a term sheet
- * uses, not a naive target·FDS):
+ * Shares to ADD to the option pool so the pool reaches `targetPctOfFds` of FDS,
+ * measured against the post-round FDS basis — the SAME denominator shown
+ * everywhere else on the slide ("always post for FDS"). A straight target minus
+ * the current pool:
  *
- *   (pool + T) / (fds + T) = target   ⟹   T = (target·fds − pool) / (1 − target)
+ *   target pool = target · fds   ⟹   T = target·fds − pool   (floored at 0)
  *
- * Returns 0 when the pool already meets/exceeds the target (T would be ≤ 0) and
- * 0 for a target outside (0, 1), which has no finite/meaningful solution. The
- * canonical spec for the board-slide Pool-recommendation block (which mirrors
- * this formula in its client-side recompute) — keep the two in lockstep.
+ * Returns 0 when the pool already meets/exceeds the target, or for a target
+ * outside (0, 1). NB: this deliberately does NOT gross up for the top-up's own
+ * dilution — holding the denominator at the post-round FDS keeps the resulting
+ * pool % consistent with every other "% of FDS" figure (feed the result back
+ * through poolPctOfFds and you get the target exactly). Canonical spec for the
+ * board-slide recommendation block, whose client recompute mirrors this — keep
+ * the two in lockstep.
  */
 export function poolTopUpForTarget(p: PoolTopUpInputs): number {
   const t = p.targetPctOfFds
   if (!(t > 0) || t >= 1) return 0
-  const pool = p.poolAuthorized || 0
-  const fds = p.fds || 0
-  const topUp = (t * fds - pool) / (1 - t)
+  const topUp = (t * (p.fds || 0)) - (p.poolAuthorized || 0)
   return topUp > 0 ? topUp : 0
 }
 
 /**
- * Pool as a fraction of FDS after adding `topUp` shares (both the pool and FDS
- * grow by the top-up). With topUp = 0 it's the current pool % of FDS; it's the
- * inverse of poolTopUpForTarget, so feeding that function's result back here
- * returns the target. Returns 0 when the denominator is non-positive.
+ * Pool as a fraction of FDS after adding `topUp` shares, measured against the
+ * fixed `fds` basis (post-round FDS): the top-up adds to the pool numerator but
+ * the denominator stays put, so feeding poolTopUpForTarget's result back here
+ * returns the target exactly. With topUp = 0 it's the current pool % of FDS.
+ * Returns 0 when fds is non-positive.
  */
 export function poolPctOfFds(poolAuthorized: number, fds: number, topUp = 0): number {
-  const denom = (fds || 0) + (topUp || 0)
-  if (denom <= 0) return 0
-  return ((poolAuthorized || 0) + (topUp || 0)) / denom
+  if (!(fds > 0)) return 0
+  return ((poolAuthorized || 0) + (topUp || 0)) / fds
 }
 
 export interface GrantLifecycle {

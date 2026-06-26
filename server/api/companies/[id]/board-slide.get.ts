@@ -194,7 +194,7 @@ export default defineEventHandler(async (event) => {
 
   // The recommendation math, kept in lockstep with the client recompute() below
   // (the slide is a static page, so the live version is mirrored in JS); the
-  // grossing-up itself is the shared poolTopUpForTarget helper.
+  // target sizing itself is the shared poolTopUpForTarget helper.
   const PRESETS = [0.10, 0.125, 0.15, 0.20]
   const topUpFor = (targetFrac: number) =>
     Math.round(poolTopUpForTarget({ poolAuthorized, fds: postFDS, targetPctOfFds: targetFrac }))
@@ -469,7 +469,7 @@ export default defineEventHandler(async (event) => {
 
       <div class="panel" data-block="poolrec">
         <h2>Pool recommendation</h2>
-        <p class="desc">Top-up to keep the pool above its floor and to hit a target size — set both below and the figures recompute live. "Avail. after" is the unallocated pool after committed grants and the top-up; a top-up grows the pool and FDS together.</p>
+        <p class="desc">Top-up to keep the pool above its floor and to hit a target size — set both below and the figures recompute live. "Avail. after" is the unallocated pool after committed grants and the top-up; targets and pool % are measured against post-round FDS.</p>
         <div class="rec-controls">
           <label class="rec-ctl">Target pool
             <span class="rec-inwrap"><input id="rec-target" type="number" min="0" max="60" step="0.5" value="${(defaultTargetPct * 100).toFixed(1)}"><span class="rec-unit">% of FDS</span></span>
@@ -546,15 +546,16 @@ export default defineEventHandler(async (event) => {
       function fShares(n) { return (n == null || !isFinite(n)) ? '—' : Math.round(n).toLocaleString('en-US'); }
       function fPct(frac) { return (frac == null || !isFinite(frac)) ? '—' : (frac * 100).toFixed(1) + '%'; }
       function fMY(ms) { return new Date(ms).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }); }
-      // T = (t·fds − pool) / (1 − t), floored at 0 — see poolTopUpForTarget().
+      // T = t·fds − pool, floored at 0 (straight % of post-round FDS, NOT
+      // grossed up) — see poolTopUpForTarget().
       function topUpFor(t) {
         if (!(t > 0) || t >= 1) return 0;
-        var x = (t * REC.postFDS - REC.poolAuthorized) / (1 - t);
+        var x = t * REC.postFDS - REC.poolAuthorized;
         return x > 0 ? Math.round(x) : 0;
       }
       function pctAfter(topUp) {
-        var d = REC.postFDS + topUp;
-        return d > 0 ? (REC.poolAuthorized + topUp) / d : 0;
+        // Fixed denominator: the top-up adds to the pool, FDS stays post-round.
+        return REC.postFDS > 0 ? (REC.poolAuthorized + topUp) / REC.postFDS : 0;
       }
       function rowHtml(targetFrac, floor, custom) {
         var topUp = topUpFor(targetFrac);
