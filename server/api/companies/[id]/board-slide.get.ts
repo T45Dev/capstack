@@ -298,8 +298,6 @@ export default defineEventHandler(async (event) => {
   .kpi-sub2{font-size:10px;color:var(--faint);margin-top:1px;font-weight:500;font-variant-numeric:tabular-nums}
   /* Body grid: two columns */
   .body{display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:18px}
-  /* Placeholder panel — empty, dashed; awaiting content for the third column. */
-  .ph{border:1px dashed #cbd5e1;border-radius:10px;padding:20px 14px;margin-top:2px;min-height:132px;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--faint);font-size:11.5px;font-style:italic;line-height:1.4}
   .panel h2{margin:0 0 2px;font-size:13.5px;font-weight:800;letter-spacing:-.01em}
   .panel .desc{margin:0 0 8px;font-size:11px;color:var(--muted)}
   /* Shared value cell: bold shares, fixed gap, non-bold % — right-aligned so
@@ -389,9 +387,8 @@ export default defineEventHandler(async (event) => {
       <label><input type="checkbox" data-block="kpis" checked> Headline KPIs</label>
       <label><input type="checkbox" data-block="composition" checked> Pool composition</label>
       <label><input type="checkbox" data-block="poolrec" checked> Pool recommendation</label>
-      <label><input type="checkbox" data-block="notes" checked> Notes</label>
+      <label><input type="checkbox" data-block="health" checked> Health check</label>
       <label><input type="checkbox" data-block="proposed" checked> Committed grants</label>
-      <label><input type="checkbox" data-block="callout" checked> Recommendation</label>
     </div>
     <button class="print-btn" onclick="window.print()">⎙ Print / Save as PDF</button>
   </div>
@@ -444,10 +441,10 @@ export default defineEventHandler(async (event) => {
         <p class="rec-foot">Current pool ${fmtShares(poolAuthorized)} · ${fmtPct(currentPoolPct)} of FDS</p>
       </div>
 
-      <div class="panel" data-block="notes">
-        <h2>Notes</h2>
-        <p class="desc">Board commentary or a custom metric for this slide.</p>
-        <div class="ph">Placeholder — tell me what to surface here<br/>(e.g. stage breakdown, key assumptions, recent grant activity).</div>
+      <div class="panel" data-block="health">
+        <h2>Option pool health check</h2>
+        <p class="desc">Whether the committed grants fit the pool, and what's left for future hires.</p>
+        <div class="callout ${calloutClass}">${calloutText}</div>
       </div>
     </section>
 
@@ -458,7 +455,6 @@ export default defineEventHandler(async (event) => {
         ${proposedHtml}
         ${proposedSorted.length ? `<div class="proposed-total"><span class="tl">Total committed</span>${shpc(totalProposed, pctOfFds(totalProposed))}</div>` : ''}
       </div>
-      <div class="callout ${calloutClass}" data-block="callout">${calloutText}</div>
     </section>
 
     <div class="foot">
