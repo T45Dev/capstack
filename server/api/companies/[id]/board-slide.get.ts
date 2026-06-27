@@ -136,11 +136,6 @@ export default defineEventHandler(async (event) => {
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
   const fmtShares = (n: number | null | undefined) => (n == null || !isFinite(n)) ? '—' : nf0.format(Math.round(n))
   const fmtPct = (frac: number | null | undefined, d = 1) => (frac == null || !isFinite(frac)) ? '—' : `${(frac * 100).toFixed(d)}%`
-  const fmtDate = (s: string | null | undefined) => {
-    if (!s) return '—'
-    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s))
-    return m ? `${m[1]}-${m[2]}-${m[3]}` : String(s)
-  }
   const pctOfPool = (n: number) => poolAuthorized > 0 ? n / poolAuthorized : 0
   const pctOfFds = (n: number) => postFDS > 0 ? n / postFDS : 0
   const today = new Date()
@@ -213,27 +208,24 @@ export default defineEventHandler(async (event) => {
     presets: PRESETS,
   }
 
-  // Proposed grants — list ALL of them, sorted largest first, ALWAYS in two
-  // side-by-side tables. The recipient cell carries the name + a "title · role"
-  // sub-line; award type, vesting start, shares, % FDS, and notes are columns.
-  // Columns are narrow (fixed layout) so two of these fit per page; notes wrap.
+  // Committed grants (for board approval) — listed largest first as a compact
+  // Recipient / Shares / % FDS table for the right-hand column. The recipient
+  // cell carries the name + an "award · title · role" sub-line; vesting and
+  // notes live in the board-approval export, not on this summary.
   const proposedSorted = [...proposed].sort((a, b) => (b.quantity || 0) - (a.quantity || 0))
-  function proposedRows(list: Grant[]): string {
+  function approveRows(list: Grant[]): string {
     return list.map(g => {
       const name = g.recipient_name || g.job_title || 'Unnamed'
-      const subBits = [g.recipient_name ? g.job_title : null, g.recipient_type].filter(Boolean)
+      const subBits = [g.award_type, g.recipient_name ? g.job_title : null, g.recipient_type].filter(Boolean)
       const sub = subBits.length ? `<span class="rsub">${esc(subBits.join(' · '))}</span>` : ''
-      return `<tr><td class="name">${esc(name)}${sub}</td><td>${esc(g.award_type || '—')}</td><td>${fmtDate(g.vesting_start)}</td><td class="r sh">${fmtShares(g.quantity)}</td><td class="r pc">${fmtPct(pctOfFds(g.quantity || 0))}</td><td class="notes">${esc(g.notes || '—')}</td></tr>`
+      return `<tr><td class="name">${esc(name)}${sub}</td><td class="r sh">${fmtShares(g.quantity)}</td><td class="r pc">${fmtPct(pctOfFds(g.quantity || 0))}</td></tr>`
     }).join('')
   }
-  const proposedTable = (list: Grant[]) =>
-    `<table class="prop"><colgroup><col class="c-rec"/><col class="c-aw"/><col class="c-vest"/><col class="c-sh"/><col class="c-pc"/><col class="c-notes"/></colgroup>`
-    + `<thead><tr><th>Recipient</th><th>Award</th><th>Vesting</th><th class="r">Shares</th><th class="r">% FDS</th><th>Notes</th></tr></thead>`
-    + `<tbody>${proposedRows(list)}</tbody></table>`
-  const proposedSplit = Math.ceil(proposedSorted.length / 2)
   const proposedHtml = proposedSorted.length === 0
     ? '<div class="empty">No grants are currently committed.</div>'
-    : `<div class="two-col">${proposedTable(proposedSorted.slice(0, proposedSplit))}${proposedSorted.length > proposedSplit ? proposedTable(proposedSorted.slice(proposedSplit)) : ''}</div>`
+    : `<table class="approve"><colgroup><col class="a-rec"/><col class="a-sh"/><col class="a-pc"/></colgroup>`
+      + `<thead><tr><th>Recipient</th><th class="r">Shares</th><th class="r">% FDS</th></tr></thead>`
+      + `<tbody>${approveRows(proposedSorted)}</tbody></table>`
 
   // ---- Actionable callout ----
   let calloutClass = 'ok'
@@ -297,7 +289,9 @@ export default defineEventHandler(async (event) => {
   .kpi-sub{font-size:11px;color:var(--brand);margin-top:2px;font-weight:600}
   .kpi-sub2{font-size:10px;color:var(--faint);margin-top:1px;font-weight:500;font-variant-numeric:tabular-nums}
   /* Body grid: two columns */
-  .body{display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:18px}
+  .body{display:grid;grid-template-columns:1fr 1.1fr 1.15fr;gap:18px;align-items:start}
+  /* Left column stacks composition + health check; the grants list gets its own column. */
+  .col-stack{display:flex;flex-direction:column;gap:18px;min-width:0}
   .panel h2{margin:0 0 2px;font-size:13.5px;font-weight:800;letter-spacing:-.01em}
   .panel .desc{margin:0 0 8px;font-size:11px;color:var(--muted)}
   /* Shared value cell: bold shares, fixed gap, non-bold % — right-aligned so
@@ -337,24 +331,18 @@ export default defineEventHandler(async (event) => {
   .pnote.ok{background:#ecfdf5;color:#065f46;border-color:#34d399}
   .pnote.warn{background:#fef2f2;color:#991b1b;border-color:#f87171}
   .pnote.neutral{background:#f8fafc;color:var(--ink-2);border-color:#cbd5e1}
-  /* Proposed grants — ALWAYS two narrow side-by-side tables; notes wrap. */
-  .lower{display:grid;grid-template-columns:1fr;gap:10px}
-  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:6px 22px;align-items:start}
+  /* Committed-grants approval list — compact, single column. */
   table{width:100%;border-collapse:collapse;font-size:11.5px}
-  table.prop{table-layout:fixed;font-size:9px;line-height:1.25}
-  .prop .c-rec{width:27%}
-  .prop .c-aw{width:8%}
-  .prop .c-vest{width:14%}
-  .prop .c-sh{width:14%}
-  .prop .c-pc{width:10%}
-  .prop .c-notes{width:27%}
-  .two-col td,.two-col th{padding:2px 5px;vertical-align:top}
+  table.approve{table-layout:fixed;font-size:10px;line-height:1.3}
+  .approve .a-rec{width:54%}
+  .approve .a-sh{width:28%}
+  .approve .a-pc{width:18%}
+  .approve td,.approve th{padding:3px 6px}
   th{text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;padding:4px 9px;border-bottom:1px solid var(--line)}
   td{padding:4px 9px;border-bottom:1px solid #f1f5f9;color:var(--ink-2);font-variant-numeric:tabular-nums}
   td.r,th.r{text-align:right}
   td.sh{font-weight:700;color:var(--ink)}
   td.pc{font-weight:400;color:var(--muted)}
-  td.notes{white-space:normal;overflow-wrap:anywhere;color:var(--muted);font-weight:400;font-variant-numeric:normal}
   tr:last-child td{border-bottom:none}
   tbody .name{font-weight:600;color:var(--ink);overflow-wrap:anywhere}
   .rsub{display:block;font-size:8px;color:var(--faint);font-weight:400;margin-top:0}
@@ -411,16 +399,24 @@ export default defineEventHandler(async (event) => {
     </section>
 
     <section class="body">
-      <div class="panel" data-block="composition">
-        <h2>Pool composition</h2>
-        <p class="desc">How the ${fmtShares(poolAuthorized)}-option pool breaks down. Allocated = outstanding + exercised; % is of the pool.</p>
-        <div class="breakdown">
-          <div class="brow head"><span class="lbl">Allocated</span>${shpc(allocated, pctOfPool(allocated))}</div>
-          <div class="brow sub"><span class="lbl">Outstanding (held)</span>${shpc(allocatedOutstanding, pctOfPool(allocatedOutstanding))}</div>
-          <div class="brow sub"><span class="lbl">Exercised</span>${shpc(allocatedExercised, pctOfPool(allocatedExercised))}</div>
-          <div class="brow head"><span class="lbl">Available (unallocated)</span>${shpc(unallocated, pctOfPool(unallocated))}</div>
-          <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After committed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
-          <div class="brow minor"><span class="lbl">Forfeited / Expired<span class="ret"> · returned to pool</span></span>${shpc(totalForfeitedOrExpired, pctOfPool(totalForfeitedOrExpired))}</div>
+      <div class="col-stack">
+        <div class="panel" data-block="composition">
+          <h2>Pool composition</h2>
+          <p class="desc">How the ${fmtShares(poolAuthorized)}-option pool breaks down. Allocated = outstanding + exercised; % is of the pool.</p>
+          <div class="breakdown">
+            <div class="brow head"><span class="lbl">Allocated</span>${shpc(allocated, pctOfPool(allocated))}</div>
+            <div class="brow sub"><span class="lbl">Outstanding (held)</span>${shpc(allocatedOutstanding, pctOfPool(allocatedOutstanding))}</div>
+            <div class="brow sub"><span class="lbl">Exercised</span>${shpc(allocatedExercised, pctOfPool(allocatedExercised))}</div>
+            <div class="brow head"><span class="lbl">Available (unallocated)</span>${shpc(unallocated, pctOfPool(unallocated))}</div>
+            <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After committed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
+            <div class="brow minor"><span class="lbl">Forfeited / Expired<span class="ret"> · returned to pool</span></span>${shpc(totalForfeitedOrExpired, pctOfPool(totalForfeitedOrExpired))}</div>
+          </div>
+        </div>
+
+        <div class="panel" data-block="health">
+          <h2>Option pool health check</h2>
+          <p class="desc">Whether the committed grants fit the pool, and what's left for future hires.</p>
+          <div class="callout ${calloutClass}">${calloutText}</div>
         </div>
       </div>
 
@@ -441,17 +437,9 @@ export default defineEventHandler(async (event) => {
         <p class="rec-foot">Current pool ${fmtShares(poolAuthorized)} · ${fmtPct(currentPoolPct)} of FDS</p>
       </div>
 
-      <div class="panel" data-block="health">
-        <h2>Option pool health check</h2>
-        <p class="desc">Whether the committed grants fit the pool, and what's left for future hires.</p>
-        <div class="callout ${calloutClass}">${calloutText}</div>
-      </div>
-    </section>
-
-    <section class="lower">
       <div class="panel" data-block="proposed">
         <h2>Committed grants</h2>
-        <p class="desc">All ${proposed.length} committed grant${proposed.length === 1 ? '' : 's'} — recipient (title · role), award type, vesting start, shares, % of post-round FDS, and notes.</p>
+        <p class="desc">All ${proposed.length} committed grant${proposed.length === 1 ? '' : 's'} for board approval — shares and % of post-round FDS.</p>
         ${proposedHtml}
         ${proposedSorted.length ? `<div class="proposed-total"><span class="tl">Total committed</span>${shpc(totalProposed, pctOfFds(totalProposed))}</div>` : ''}
       </div>
