@@ -113,11 +113,15 @@ describe('poolEquation', () => {
 })
 
 describe('poolTopUpForTarget / poolPctOfFds', () => {
-  it('grosses up the top-up so the new pool hits the target % of the NEW fds', () => {
+  it('tops up to a straight % of the (fixed) post-round FDS', () => {
     // pool 1.5M of 10M FDS = 15%; want the pool to be 20% of FDS.
     const t = poolTopUpForTarget({ poolAuthorized: 1_500_000, fds: 10_000_000, targetPctOfFds: 0.20 })
-    expect(t).toBe(625_000)                                  // (0.2·10M − 1.5M) / (1 − 0.2)
+    expect(t).toBe(500_000)                                  // 0.2·10M − 1.5M, NOT grossed up
     expect(poolPctOfFds(1_500_000, 10_000_000, t)).toBeCloseTo(0.20, 10) // round-trips to target
+  })
+  it('measures the % against the fixed FDS basis, not a grown one', () => {
+    // adding the top-up does NOT enlarge the denominator here.
+    expect(poolPctOfFds(1_500_000, 10_000_000, 500_000)).toBeCloseTo(0.20, 10) // 2M / 10M
   })
   it('returns 0 when the pool already meets or exceeds the target', () => {
     expect(poolTopUpForTarget({ poolAuthorized: 2_000_000, fds: 10_000_000, targetPctOfFds: 0.15 })).toBe(0)
