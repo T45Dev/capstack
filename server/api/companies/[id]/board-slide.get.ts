@@ -146,7 +146,7 @@ export default defineEventHandler(async (event) => {
   const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, c => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
   const fmtShares = (n: number | null | undefined) => (n == null || !isFinite(n)) ? '—' : nf0.format(Math.round(n))
-  const fmtPct = (frac: number | null | undefined, d = 1) => (frac == null || !isFinite(frac)) ? '—' : `${(frac * 100).toFixed(d)}%`
+  const fmtPct = (frac: number | null | undefined, d = 3) => (frac == null || !isFinite(frac)) ? '—' : `${(frac * 100).toFixed(d)}%`
   const pctOfPool = (n: number) => poolAuthorized > 0 ? n / poolAuthorized : 0
   const pctOfFds = (n: number) => postFDS > 0 ? n / postFDS : 0
   const today = new Date()
@@ -158,7 +158,8 @@ export default defineEventHandler(async (event) => {
     `<span class="sh">${fmtShares(shares)}</span><span class="pc">${fmtPct(pctFrac)}</span>`
 
   function kpi(value: string, label: string, sub = '', sub2 = ''): string {
-    return `<div class="kpi"><div class="kpi-value">${esc(value)}</div><div class="kpi-label">${esc(label)}</div>${sub ? `<div class="kpi-sub">${esc(sub)}</div>` : ''}${sub2 ? `<div class="kpi-sub2">${esc(sub2)}</div>` : ''}</div>`
+    // Label sits ABOVE the number.
+    return `<div class="kpi"><div class="kpi-label">${esc(label)}</div><div class="kpi-value">${esc(value)}</div>${sub ? `<div class="kpi-sub">${esc(sub)}</div>` : ''}${sub2 ? `<div class="kpi-sub2">${esc(sub2)}</div>` : ''}</div>`
   }
 
   const overBy = afterProposed < 0 ? Math.abs(afterProposed) : 0
@@ -317,6 +318,8 @@ export default defineEventHandler(async (event) => {
   .opts .opts-lbl{font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
   .opts label{display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap}
   .opts input{cursor:pointer;margin:0}
+  .opts .opt-sel{gap:6px}
+  .opts .opt-sel select{font-size:11.5px;border:1px solid #cbd5e1;border-radius:6px;padding:2px 4px;background:#fff;color:var(--ink);cursor:pointer}
   .print-btn{cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:var(--ink);font-size:12.5px;font-weight:600;padding:9px 14px;border-radius:10px;white-space:nowrap}
   /* An excluded block is left blank but keeps its space, so the layout is stable. */
   .blank{visibility:hidden}
@@ -332,8 +335,8 @@ export default defineEventHandler(async (event) => {
   /* KPI strip */
   .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
   .kpi{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:10px 14px}
+  .kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:3px;font-weight:700}
   .kpi-value{font-size:22px;font-weight:800;letter-spacing:-.02em;color:var(--ink);font-variant-numeric:tabular-nums}
-  .kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:2px;font-weight:700}
   .kpi-sub{font-size:11px;color:var(--brand);margin-top:2px;font-weight:600}
   .kpi-sub2{font-size:10px;color:var(--faint);margin-top:1px;font-weight:500;font-variant-numeric:tabular-nums}
   /* Body: three EQUAL columns. Left stacks composition + health; the middle
@@ -342,7 +345,8 @@ export default defineEventHandler(async (event) => {
   .body{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;align-items:start}
   .col-stack{display:flex;flex-direction:column;gap:18px;min-width:0}
   .panel h2{margin:0 0 2px;font-size:13.5px;font-weight:800;letter-spacing:-.01em}
-  .panel .desc{margin:0 0 8px;font-size:11px;color:var(--muted)}
+  /* Wrapping prose is held to 10px so it never crowds the figures. */
+  .panel .desc{margin:0 0 8px;font-size:10px;line-height:1.32;color:var(--muted)}
   /* Shared value cell: bold shares, fixed gap, non-bold % — right-aligned so
      every figure lines up across rows. Used in the breakdown, bars, and tables. */
   .sh{font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;text-align:right}
@@ -441,11 +445,15 @@ export default defineEventHandler(async (event) => {
     <div class="opts">
       <span class="opts-lbl">Include</span>
       <label><input type="checkbox" data-block="kpis" checked> Headline KPIs</label>
-      <label><input type="checkbox" data-block="composition" checked> Pool composition</label>
-      <label><input type="checkbox" data-block="health" checked> Health check</label>
-      ${committedSorted.length ? '<label><input type="checkbox" data-block="committed" checked> Committed grants</label>' : ''}
-      <label><input type="checkbox" data-block="proposed" checked> Proposed grants</label>
-      <label><input type="checkbox" data-block="poolrec" checked> Pool recommendation</label>
+      <label class="opt-sel">Pool composition
+        <select id="sel-comp"><option value="full">Full</option><option value="summary">Summary</option><option value="hidden">Hide</option></select>
+      </label>
+      <label><input type="checkbox" id="cb-health" checked> Health check</label>
+      ${committedSorted.length ? '<label><input type="checkbox" id="cb-committed" checked> Committed grants</label>' : ''}
+      <label><input type="checkbox" id="cb-proposed" checked> Proposed grants</label>
+      <label class="opt-sel">Pool recommendation
+        <select id="sel-rec"><option value="full">Full</option><option value="summary">Summary</option><option value="hidden">Hide</option></select>
+      </label>
     </div>
     <button class="print-btn" onclick="window.print()">⎙ Print / Save as PDF</button>
   </div>
@@ -466,9 +474,11 @@ export default defineEventHandler(async (event) => {
       ${kpi(fmtShares(afterProposed), 'Projected available', afterProposed >= 0 ? `${fmtPct(pctOfPool(afterProposed))} of pool after proposed` : `over-allocated by ${fmtShares(overBy)}`)}
     </section>
 
-    <section class="body">
+    <!-- Body is assembled by the layout engine below from the panels that
+         follow. This default markup is the no-JS fallback (detailed 3-column). -->
+    <section class="body" id="slide-body">
       <div class="col-stack">
-        <div class="panel" data-block="composition">
+        <div class="panel" id="p-comp-full">
           <h2>Pool composition</h2>
           <p class="desc">How the ${fmtShares(poolAuthorized)}-option pool breaks down. Allocated = outstanding + exercised; % is of the pool.</p>
           <div class="breakdown">
@@ -479,22 +489,21 @@ export default defineEventHandler(async (event) => {
             <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After committed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
             <div class="brow minor"><span class="lbl">Forfeited / Expired<span class="ret"> · returned to pool</span></span>${shpc(totalForfeitedOrExpired, pctOfPool(totalForfeitedOrExpired))}</div>
           </div>
-          <div class="health-wrap" data-block="health">
-            <div class="health-banner ${calloutClass}"><span class="health-icon">${healthIcon}</span><span class="health-word">${healthLabel}</span></div>
-            <div class="callout ${calloutClass}">${calloutText}</div>
-          </div>
+        </div>
+        <div class="health-wrap" id="p-health">
+          <div class="health-banner ${calloutClass}"><span class="health-icon">${healthIcon}</span><span class="health-word">${healthLabel}</span></div>
+          <div class="callout ${calloutClass}">${calloutText}</div>
         </div>
       </div>
 
-      <div class="col-stack">
-        ${committedSorted.length ? `<div class="panel" data-block="committed">
+      <div class="col-stack col-grants">
+        ${committedSorted.length ? `<div class="panel" id="p-committed">
           <h2>Committed grants</h2>
           <p class="desc">${committedSorted.length} board-approved grant${committedSorted.length === 1 ? '' : 's'} — shares and % of post-round FDS.</p>
           ${committedHtml}
           <div class="proposed-total"><span class="tl">Total committed</span>${shpc(committedTotal, pctOfFds(committedTotal))}</div>
         </div>` : ''}
-
-        <div class="panel" data-block="proposed">
+        <div class="panel" id="p-proposed">
           <h2>Proposed grants</h2>
           <p class="desc">${proposedList.length} proposed grant${proposedList.length === 1 ? '' : 's'}, grouped by batch — the note sits under each grantee.</p>
           ${proposedHtml}
@@ -502,9 +511,9 @@ export default defineEventHandler(async (event) => {
         </div>
       </div>
 
-      <div class="panel" data-block="poolrec">
+      <div class="panel" id="p-rec-full">
         <h2>Pool recommendation</h2>
-        <p class="desc">Set a target option-pool size as a % of FDS and the top-up recomputes live. "Avail. after" is the unallocated pool after committed grants and the top-up; targets and pool % are measured against post-round FDS.</p>
+        <p class="desc">Set a target option-pool size as a % of FDS and a floor for the available pool; the recommended top-up is the larger of the two and recomputes live. Targets and pool % are measured against post-round FDS.</p>
         <div class="rec-controls">
           <label class="rec-ctl">Target pool
             <span class="rec-inwrap"><input id="rec-target" type="number" min="0" max="60" step="0.5" value="${(defaultTargetPct * 100).toFixed(1)}"><span class="rec-unit">% of FDS</span></span>
@@ -523,107 +532,174 @@ export default defineEventHandler(async (event) => {
       </div>
     </section>
 
+    <!-- Summary variants — pulled into the layout when a side panel is set to
+         "Summary"; minimal wordiness so composition + recommendation share one
+         column and the grants get the width. -->
+    <div id="slide-panels" hidden>
+      <div class="panel" id="p-comp-summary">
+        <h2>Pool composition</h2>
+        <div class="breakdown">
+          <div class="brow head"><span class="lbl">Allocated</span>${shpc(allocated, pctOfPool(allocated))}</div>
+          <div class="brow head"><span class="lbl">Available</span>${shpc(unallocated, pctOfPool(unallocated))}</div>
+          <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After committed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
+        </div>
+      </div>
+      <div class="panel" id="p-rec-summary">
+        <h2>Pool recommendation</h2>
+        <p class="pnote ${initialNote.cls}">${initialNote.html}</p>
+        <p class="rec-foot">Current pool ${fmtShares(poolAuthorized)} · ${fmtPct(currentPoolPct)} of FDS · target ${fmtPct(defaultTargetPct)}${defaultFloor > 0 ? ` · floor ${fmtShares(defaultFloor)}` : ''}</p>
+      </div>
+    </div>
+
     <div class="foot">
       <span>Generated by Pariva, a tool by T45 Labs · ${esc(generatedOn)} · Confidential</span>
     </div>
   </div>
   <script>
     (function () {
-      var KEY = 'pariva-board-slide-blocks';
-      var state = {};
-      try { state = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
-      function apply(name, on) {
-        var els = document.querySelectorAll('.slide [data-block="' + name + '"]');
-        for (var i = 0; i < els.length; i++) els[i].classList.toggle('blank', !on);
-      }
-      var boxes = document.querySelectorAll('.opts input[type=checkbox]');
-      for (var i = 0; i < boxes.length; i++) (function (cb) {
-        var name = cb.getAttribute('data-block');
-        if (Object.prototype.hasOwnProperty.call(state, name)) cb.checked = !!state[name];
-        apply(name, cb.checked);
-        cb.addEventListener('change', function () {
-          state[name] = cb.checked;
-          try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
-          apply(name, cb.checked);
-        });
-      })(boxes[i]);
-    })();
+      var byId = function (id) { return document.getElementById(id); };
+      var body = byId('slide-body');
+      if (!body) return;
+      // Panel nodes (some start in the body, the summary variants in the hidden
+      // holder). appendChild MOVES them, so we just relocate the right ones.
+      var P = {
+        compFull: byId('p-comp-full'), compSummary: byId('p-comp-summary'),
+        health: byId('p-health'), committed: byId('p-committed'), proposed: byId('p-proposed'),
+        recFull: byId('p-rec-full'), recSummary: byId('p-rec-summary'),
+      };
+      var selComp = byId('sel-comp'), selRec = byId('sel-rec');
+      var cbHealth = byId('cb-health'), cbCommitted = byId('cb-committed'), cbProposed = byId('cb-proposed');
+      var kpisCb = document.querySelector('.opts input[data-block="kpis"]');
+      var kpisSec = document.querySelector('section.kpis');
+      var LKEY = 'pariva-board-slide-layout';
 
-    // Pool recommendation — live recompute of the note + comparison table as the
-    // operator edits the target % (persisted ad hoc to localStorage). The top-up
-    // formula mirrors poolTopUpForTarget() in shared/capTableModel.ts; keep the
-    // two in lockstep. Every other figure comes pre-computed in REC.
-    (function () {
-      var elT = document.getElementById('rec-target');
-      var elF = document.getElementById('rec-floor');
-      var elNote = document.getElementById('rec-note');
-      var elRows = document.getElementById('rec-rows');
-      if (!elT || !elNote || !elRows) return;
-      var REC = ${JSON.stringify(recData)};
-      var KEY = 'pariva-board-slide-rec';
       try {
-        var saved = JSON.parse(localStorage.getItem(KEY) || '{}');
-        if (saved && typeof saved.target === 'number') elT.value = saved.target;
-        if (elF && saved && typeof saved.floor === 'number') elF.value = saved.floor;
+        var s = JSON.parse(localStorage.getItem(LKEY) || '{}');
+        if (selComp && s.comp) selComp.value = s.comp;
+        if (selRec && s.rec) selRec.value = s.rec;
+        if (cbHealth && typeof s.health === 'boolean') cbHealth.checked = s.health;
+        if (cbCommitted && typeof s.committed === 'boolean') cbCommitted.checked = s.committed;
+        if (cbProposed && typeof s.proposed === 'boolean') cbProposed.checked = s.proposed;
+        if (kpisCb && typeof s.kpis === 'boolean') kpisCb.checked = s.kpis;
       } catch (e) {}
 
+      function col() { var d = document.createElement('div'); d.className = 'col-stack'; return d; }
+      function persist() {
+        try {
+          localStorage.setItem(LKEY, JSON.stringify({
+            comp: selComp ? selComp.value : 'full', rec: selRec ? selRec.value : 'full',
+            health: cbHealth ? cbHealth.checked : true,
+            committed: cbCommitted ? cbCommitted.checked : true,
+            proposed: cbProposed ? cbProposed.checked : true,
+            kpis: kpisCb ? kpisCb.checked : true,
+          }));
+        } catch (e) {}
+      }
+      function applyKpis() { if (kpisSec) kpisSec.classList.toggle('blank', !(kpisCb ? kpisCb.checked : true)); }
+
+      // Smart layout: when both side panels are Full we keep the 3-column board
+      // look (composition+health | grants | recommendation, grants widest). The
+      // moment either is Summary/Hidden, the side panels share ONE column and the
+      // grants take the rest — grants are always the priority.
+      function layout() {
+        var comp = selComp ? selComp.value : 'full';
+        var rec = selRec ? selRec.value : 'full';
+        var healthOn = cbHealth ? cbHealth.checked : true;
+        var committedOn = cbCommitted ? cbCommitted.checked : false;
+        var proposedOn = cbProposed ? cbProposed.checked : true;
+
+        var grants = col(); grants.className = 'col-stack col-grants';
+        if (committedOn && P.committed) grants.appendChild(P.committed);
+        if (proposedOn && P.proposed) grants.appendChild(P.proposed);
+
+        body.innerHTML = '';
+        if (comp === 'full' && rec === 'full') {
+          var c = col(); c.appendChild(P.compFull); if (healthOn && P.health) c.appendChild(P.health);
+          var r = col(); r.appendChild(P.recFull);
+          body.appendChild(c); body.appendChild(grants); body.appendChild(r);
+          body.style.gridTemplateColumns = '1fr 1.4fr 1fr';
+        } else {
+          var aux = col();
+          if (comp === 'full') aux.appendChild(P.compFull);
+          else if (comp === 'summary') aux.appendChild(P.compSummary);
+          if (healthOn && P.health) aux.appendChild(P.health);
+          if (rec === 'full') aux.appendChild(P.recFull);
+          else if (rec === 'summary') aux.appendChild(P.recSummary);
+          if (aux.children.length) {
+            body.appendChild(aux); body.appendChild(grants);
+            body.style.gridTemplateColumns = '1fr 1.7fr';
+          } else {
+            body.appendChild(grants);
+            body.style.gridTemplateColumns = '1fr';
+          }
+        }
+        wireRec();
+        persist();
+      }
+
+      // ---- Pool-recommendation recompute (only when rec-full is in the DOM) ----
+      var REC = ${JSON.stringify(recData)};
+      var recWired = false;
       function fShares(n) { return (n == null || !isFinite(n)) ? '—' : Math.round(n).toLocaleString('en-US'); }
-      function fPct(frac) { return (frac == null || !isFinite(frac)) ? '—' : (frac * 100).toFixed(1) + '%'; }
-      // T = t·fds − pool, floored at 0 (straight % of post-round FDS, NOT
-      // grossed up) — see poolTopUpForTarget().
-      function topUpFor(t) {
-        if (!(t > 0) || t >= 1) return 0;
-        var x = t * REC.postFDS - REC.poolAuthorized;
-        return x > 0 ? Math.round(x) : 0;
-      }
-      function pctAfter(topUp) {
-        // Fixed denominator: the top-up adds to the pool, FDS stays post-round.
-        return REC.postFDS > 0 ? (REC.poolAuthorized + topUp) / REC.postFDS : 0;
-      }
-      function rowHtml(targetFrac, floor, custom) {
-        var topUp = topUpFor(targetFrac);
-        var availAfter = REC.afterProposed + topUp;
-        var flag = floor > 0 ? (availAfter >= floor ? '<span class="ok-dot">✓</span>' : '<span class="bad-dot">✗</span>') : '';
-        var cls = ((custom ? 'rec-custom' : '') + (topUp <= 0 ? ' rec-met' : '')).trim();
-        return '<tr class="' + cls + '"><td>' + fPct(targetFrac) + '</td><td>' + (topUp > 0 ? fShares(topUp) : '—')
-          + '</td><td>' + fShares(REC.poolAuthorized + topUp) + '</td><td>' + fShares(availAfter) + flag + '</td></tr>';
-      }
+      function fPct(frac) { return (frac == null || !isFinite(frac)) ? '—' : (frac * 100).toFixed(3) + '%'; }
+      function topUpFor(t) { if (!(t > 0) || t >= 1) return 0; var x = t * REC.postFDS - REC.poolAuthorized; return x > 0 ? Math.round(x) : 0; }
+      function pctAfter(topUp) { return REC.postFDS > 0 ? (REC.poolAuthorized + topUp) / REC.postFDS : 0; }
       function recompute() {
+        var elT = byId('rec-target'), elF = byId('rec-floor'), elNote = byId('rec-note'), elRows = byId('rec-rows');
+        if (!elT || !elNote || !elRows) return;
         var targetFrac = (parseFloat(elT.value) || 0) / 100;
         var floor = elF ? (parseFloat(elF.value) || 0) : 0;
         var fracs = [];
-        for (var i = 0; i < REC.presets.length; i++) {
-          if (Math.abs(REC.presets[i] - targetFrac) > 0.001) fracs.push(REC.presets[i]);
-        }
+        for (var i = 0; i < REC.presets.length; i++) { if (Math.abs(REC.presets[i] - targetFrac) > 0.001) fracs.push(REC.presets[i]); }
         fracs.push(targetFrac);
         fracs.sort(function (a, b) { return a - b; });
         var rows = '';
-        for (var j = 0; j < fracs.length; j++) rows += rowHtml(fracs[j], floor, Math.abs(fracs[j] - targetFrac) < 1e-9);
+        for (var j = 0; j < fracs.length; j++) {
+          var tf = fracs[j], tu = topUpFor(tf), aa = REC.afterProposed + tu;
+          var flag = floor > 0 ? (aa >= floor ? '<span class="ok-dot">✓</span>' : '<span class="bad-dot">✗</span>') : '';
+          var cls = ((Math.abs(tf - targetFrac) < 1e-9 ? 'rec-custom' : '') + (tu <= 0 ? ' rec-met' : '')).trim();
+          rows += '<tr class="' + cls + '"><td>' + fPct(tf) + '</td><td>' + (tu > 0 ? fShares(tu) : '—')
+            + '</td><td>' + fShares(REC.poolAuthorized + tu) + '</td><td>' + fShares(aa) + flag + '</td></tr>';
+        }
         elRows.innerHTML = rows;
-
-        // Recommended top-up = larger of what the target asks and the floor needs.
         var targetTopUp = topUpFor(targetFrac);
         var floorTopUp = floor > 0 ? Math.max(0, Math.round(floor - REC.afterProposed)) : 0;
         var recTopUp = Math.max(targetTopUp, floorTopUp);
         var availAfter = REC.afterProposed + recTopUp;
-        var body;
+        var txt;
         if (recTopUp > 0) {
-          body = 'Top up ≈ <b>' + fShares(recTopUp) + '</b> options → '
-            + fShares(REC.poolAuthorized + recTopUp) + ' (' + fPct(pctAfter(recTopUp)) + ' of FDS), leaving '
-            + fShares(availAfter) + ' available'
+          txt = 'Top up ≈ <b>' + fShares(recTopUp) + '</b> options → ' + fShares(REC.poolAuthorized + recTopUp)
+            + ' (' + fPct(pctAfter(recTopUp)) + ' of FDS), leaving ' + fShares(availAfter) + ' available'
             + (floor > 0 ? ' — clears the ' + fShares(floor) + ' floor.' : ' to reach the ' + fPct(targetFrac) + ' target.');
         } else {
-          body = 'No top-up needed — the pool is <b>' + fPct(pctAfter(0)) + '</b> of FDS, '
+          txt = 'No top-up needed — the pool is <b>' + fPct(pctAfter(0)) + '</b> of FDS, '
             + fShares(REC.afterProposed) + ' available after proposed grants'
             + (floor > 0 ? ', clearing the ' + fShares(floor) + ' floor.' : ', at or above the ' + fPct(targetFrac) + ' target.');
         }
         elNote.className = 'pnote ' + (availAfter >= 0 ? 'ok' : 'warn');
-        elNote.innerHTML = body;
-        try { localStorage.setItem(KEY, JSON.stringify({ target: parseFloat(elT.value) || 0, floor: floor })); } catch (e) {}
+        elNote.innerHTML = txt;
+        try { localStorage.setItem('pariva-board-slide-rec', JSON.stringify({ target: parseFloat(elT.value) || 0, floor: floor })); } catch (e) {}
       }
-      elT.addEventListener('input', recompute);
-      if (elF) elF.addEventListener('input', recompute);
-      recompute();
+      function wireRec() {
+        var elT = byId('rec-target'), elF = byId('rec-floor');
+        if (elT && !recWired) {
+          try { var sv = JSON.parse(localStorage.getItem('pariva-board-slide-rec') || '{}'); if (typeof sv.target === 'number') elT.value = sv.target; if (elF && typeof sv.floor === 'number') elF.value = sv.floor; } catch (e) {}
+          elT.addEventListener('input', recompute);
+          if (elF) elF.addEventListener('input', recompute);
+          recWired = true;
+        }
+        recompute();
+      }
+
+      if (selComp) selComp.addEventListener('change', layout);
+      if (selRec) selRec.addEventListener('change', layout);
+      if (cbHealth) cbHealth.addEventListener('change', layout);
+      if (cbCommitted) cbCommitted.addEventListener('change', layout);
+      if (cbProposed) cbProposed.addEventListener('change', layout);
+      if (kpisCb) kpisCb.addEventListener('change', function () { applyKpis(); persist(); });
+
+      applyKpis();
+      layout();
     })();
   </script>
 </body>
