@@ -173,6 +173,14 @@ export default defineEventHandler(async (event) => {
   const currentPoolPct = poolPctOfFds(poolAuthorized, postFDS)
   const niceCeil = (frac: number) => Math.ceil(Math.max(0, frac) / 0.025) * 0.025
   const defaultTargetPct = niceCeil(Math.max(currentPoolPct, 0.15))
+  // Floor lever: the minimum the available pool shouldn't fall below. Seeded
+  // from a "floor" event on the Pool Impact timeline (highest wins) and editable
+  // ad hoc here. The recommended top-up is the larger of what the target asks
+  // and what the floor needs.
+  const floorShares = (poolEventsRaw || [])
+    .filter((e: any) => e.type === 'floor')
+    .reduce((a: number, e: any) => Math.max(a, e.shares || 0), 0)
+  const defaultFloor = floorShares > 0 ? floorShares : 0
 
   const PRESETS = [0.10, 0.125, 0.15, 0.20]
   const topUpFor = (targetFrac: number) =>
@@ -190,44 +198,44 @@ export default defineEventHandler(async (event) => {
   ])).sort((a, b) => a - b)
   const recRowsHtml = recRowFracs.map(f => recRowHtml(f, Math.abs(f - defaultTargetPct) < 1e-9)).join('')
 
-  // Headline note: the top-up to reach the target, and what's left for grants.
-  function recNote(targetFrac: number): { cls: string; html: string } {
-    const topUp = topUpFor(targetFrac)
-    const availAfter = afterProposed + topUp
+  // Headline note: the recommended top-up — the LARGER of what the target asks
+  // and what the floor needs — and what's left after proposed grants.
+  function recNote(targetFrac: number, floor: number): { cls: string; html: string } {
+    const targetTopUp = topUpFor(targetFrac)
+    const floorTopUp = floor > 0 ? Math.max(0, Math.round(floor - afterProposed)) : 0
+    const recTopUp = Math.max(targetTopUp, floorTopUp)
+    const availAfter = afterProposed + recTopUp
     let html: string
-    if (topUp > 0) {
-      html = `To reach a <b>${fmtPct(targetFrac)}</b> pool, top up ≈ <b>${fmtShares(topUp)}</b> options → ${fmtShares(poolAuthorized + topUp)} (${fmtPct(poolPctOfFds(poolAuthorized, postFDS, topUp))} of FDS), `
-        + (availAfter >= 0
-          ? `leaving ${fmtShares(availAfter)} available after committed grants.`
-          : `still ${fmtShares(Math.abs(availAfter))} short of covering committed grants.`)
+    if (recTopUp > 0) {
+      html = `Top up ≈ <b>${fmtShares(recTopUp)}</b> options → ${fmtShares(poolAuthorized + recTopUp)} (${fmtPct(poolPctOfFds(poolAuthorized, postFDS, recTopUp))} of FDS), leaving ${fmtShares(availAfter)} available`
+        + (floor > 0 ? ` — clears the ${fmtShares(floor)} floor.` : ` to reach the ${fmtPct(targetFrac)} target.`)
     } else {
-      html = `No top-up needed — the pool is already <b>${fmtPct(currentPoolPct)}</b> of FDS, at or above the ${fmtPct(targetFrac)} target. `
-        + (afterProposed >= 0
-          ? `${fmtShares(afterProposed)} available after committed grants.`
-          : `Committed grants exceed the unallocated pool by ${fmtShares(overBy)}.`)
+      html = `No top-up needed — the pool is <b>${fmtPct(currentPoolPct)}</b> of FDS, ${fmtShares(afterProposed)} available after proposed grants`
+        + (floor > 0 ? `, clearing the ${fmtShares(floor)} floor.` : `, at or above the ${fmtPct(targetFrac)} target.`)
     }
     return { cls: availAfter >= 0 ? 'ok' : 'warn', html }
   }
-  const initialNote = recNote(defaultTargetPct)
+  const initialNote = recNote(defaultTargetPct, defaultFloor)
 
   // Canonical figures the client recompute() reuses (so the live math can't
   // drift from the headline — it only varies the target % input).
   const recData = {
     poolAuthorized,
-    afterProposed,          // future-available: available − committed (ideas excluded)
+    afterProposed,          // future-available: available − proposed grants
     postFDS,
+    floor: defaultFloor,
     presets: PRESETS,
   }
 
   // One shared grant-row renderer so Committed and Proposed look identical:
-  // the grantee's name, an "award · title · role" line beneath it, the note on
-  // its own full-width line under that (free to run the width of the row, beneath
-  // the share count), and the shares + % FDS on the right.
+  // the grantee's name with their job title inline next to it (no award-type or
+  // recipient-type tags), the note on its own full-width line beneath (free to
+  // run under the share count), and the shares + % FDS on the right.
   function grantRow(g: Grant): string {
     const name = g.recipient_name || g.job_title || 'Unnamed'
-    const meta = [g.award_type, g.recipient_name ? g.job_title : null, g.recipient_type].filter(Boolean).join(' · ')
+    const title = (g.recipient_name && g.job_title) ? g.job_title : null
     return `<div class="pgrant">`
-      + `<div class="pg-top"><div class="pg-id"><div class="pg-name">${esc(name)}</div>${meta ? `<div class="pg-title">${esc(meta)}</div>` : ''}</div>`
+      + `<div class="pg-top"><div class="pg-id"><span class="pg-name">${esc(name)}</span>${title ? `<span class="pg-title">${esc(title)}</span>` : ''}</div>`
       + `<div class="pg-val"><span class="sh">${fmtShares(g.quantity)}</span><span class="pc">${fmtPct(pctOfFds(g.quantity || 0))}</span></div></div>`
       + `${g.notes ? `<div class="pg-note">${esc(g.notes)}</div>` : ''}</div>`
   }
@@ -351,13 +359,15 @@ export default defineEventHandler(async (event) => {
   .rec-ctl{display:inline-flex;align-items:center;gap:7px;font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
   .rec-inwrap{display:inline-flex;align-items:baseline;gap:4px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:3px 8px}
   .rec-inwrap input{border:none;outline:none;font-size:13px;font-weight:800;color:var(--brand);text-align:right;font-variant-numeric:tabular-nums;background:transparent;padding:0}
-  .rec-inwrap input#rec-target{width:58px}
+  .rec-inwrap input#rec-target{width:52px}
+  .rec-inwrap input#rec-floor{width:74px}
   .rec-inwrap input::-webkit-outer-spin-button,.rec-inwrap input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
   .rec-inwrap input[type=number]{-moz-appearance:textfield;appearance:textfield}
   .rec-unit{font-size:10px;font-weight:600;color:var(--faint);text-transform:none;letter-spacing:0}
-  .rec-table{width:100%;border-collapse:collapse;font-size:11.5px;margin-top:2px}
-  .rec-table th{text-align:right;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;padding:4px 8px;border-bottom:1px solid var(--line)}
-  .rec-table td{text-align:right;padding:4px 8px;border-bottom:1px solid #f1f5f9;color:var(--ink-2);font-variant-numeric:tabular-nums}
+  /* Squished so the "Target % FDS" header sits on a single line. */
+  .rec-table{width:100%;border-collapse:collapse;font-size:11px;margin-top:2px}
+  .rec-table th{text-align:right;font-size:9px;text-transform:uppercase;letter-spacing:.01em;color:var(--muted);font-weight:700;padding:4px 4px;border-bottom:1px solid var(--line);white-space:nowrap}
+  .rec-table td{text-align:right;padding:4px 4px;border-bottom:1px solid #f1f5f9;color:var(--ink-2);font-variant-numeric:tabular-nums}
   .rec-table td:first-child{font-weight:700;color:var(--ink)}
   .rec-table tr:last-child td{border-bottom:none}
   .rec-table tr.rec-met td{color:var(--faint)}
@@ -384,7 +394,7 @@ export default defineEventHandler(async (event) => {
   .pg-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
   .pg-id{min-width:0}
   .pg-name{font-size:11.5px;font-weight:600;color:var(--ink)}
-  .pg-title{font-size:9px;color:var(--muted);margin-top:1px}
+  .pg-title{font-size:9.5px;color:var(--muted);margin-left:6px}
   .pg-note{font-size:9px;color:var(--faint);line-height:1.3;margin-top:3px}
   .pg-val{white-space:nowrap;text-align:right;flex:none}
   .pg-val .sh{font-size:11px}.pg-val .pc{margin-left:7px;font-size:10px}
@@ -394,6 +404,7 @@ export default defineEventHandler(async (event) => {
   .callout.warn{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
   .callout.neutral{background:#f8fafc;color:var(--ink-2);border:1px solid var(--line)}
   .callout b{font-weight:800}
+  .health-wrap{margin-top:11px}
   .health-banner{display:flex;align-items:center;gap:10px;border-radius:10px;padding:9px 13px;margin-bottom:8px}
   .health-banner.ok{background:#059669;color:#fff}
   .health-banner.warn{background:#dc2626;color:#fff}
@@ -440,7 +451,7 @@ export default defineEventHandler(async (event) => {
       ${kpi(fmtShares(allocated), 'Allocated', `${fmtPct(pctOfPool(allocated))} of pool`)}
       ${kpi(fmtShares(unallocated), 'Unallocated', `${fmtPct(pctOfPool(unallocated))} of pool`)}
       ${kpi(fmtShares(totalProposed), committedSorted.length ? 'Committed + proposed' : 'Proposed grants', `${fmtPct(pctOfFds(totalProposed))} of FDS · ${proposed.length} proposed grant${proposed.length === 1 ? '' : 's'}`)}
-      ${kpi(fmtShares(afterProposed), 'Projected available', afterProposed >= 0 ? `${fmtPct(pctOfPool(afterProposed))} of pool after proposed grants` : `over-allocated by ${fmtShares(overBy)}`)}
+      ${kpi(fmtShares(afterProposed), 'Projected available', afterProposed >= 0 ? `${fmtPct(pctOfPool(afterProposed))} of pool after proposed` : `over-allocated by ${fmtShares(overBy)}`)}
     </section>
 
     <section class="body">
@@ -456,12 +467,10 @@ export default defineEventHandler(async (event) => {
             <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After committed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
             <div class="brow minor"><span class="lbl">Forfeited / Expired<span class="ret"> · returned to pool</span></span>${shpc(totalForfeitedOrExpired, pctOfPool(totalForfeitedOrExpired))}</div>
           </div>
-        </div>
-
-        <div class="panel" data-block="health">
-          <h2>Option pool health check</h2>
-          <div class="health-banner ${calloutClass}"><span class="health-icon">${healthIcon}</span><span class="health-word">${healthLabel}</span></div>
-          <div class="callout ${calloutClass}">${calloutText}</div>
+          <div class="health-wrap" data-block="health">
+            <div class="health-banner ${calloutClass}"><span class="health-icon">${healthIcon}</span><span class="health-word">${healthLabel}</span></div>
+            <div class="callout ${calloutClass}">${calloutText}</div>
+          </div>
         </div>
       </div>
 
@@ -488,10 +497,13 @@ export default defineEventHandler(async (event) => {
           <label class="rec-ctl">Target pool
             <span class="rec-inwrap"><input id="rec-target" type="number" min="0" max="60" step="0.5" value="${(defaultTargetPct * 100).toFixed(1)}"><span class="rec-unit">% of FDS</span></span>
           </label>
+          <label class="rec-ctl">Floor
+            <span class="rec-inwrap"><input id="rec-floor" type="number" min="0" step="1000" value="${Math.round(defaultFloor)}"><span class="rec-unit">options</span></span>
+          </label>
         </div>
         <p class="pnote ${initialNote.cls}" id="rec-note">${initialNote.html}</p>
         <table class="rec-table">
-          <colgroup><col style="width:22%"/><col style="width:26%"/><col style="width:26%"/><col style="width:26%"/></colgroup>
+          <colgroup><col style="width:31%"/><col style="width:23%"/><col style="width:23%"/><col style="width:23%"/></colgroup>
           <thead><tr><th>Target % FDS</th><th>Top-up</th><th>New pool</th><th>Avail. after</th></tr></thead>
           <tbody id="rec-rows">${recRowsHtml}</tbody>
         </table>
@@ -531,6 +543,7 @@ export default defineEventHandler(async (event) => {
     // two in lockstep. Every other figure comes pre-computed in REC.
     (function () {
       var elT = document.getElementById('rec-target');
+      var elF = document.getElementById('rec-floor');
       var elNote = document.getElementById('rec-note');
       var elRows = document.getElementById('rec-rows');
       if (!elT || !elNote || !elRows) return;
@@ -539,6 +552,7 @@ export default defineEventHandler(async (event) => {
       try {
         var saved = JSON.parse(localStorage.getItem(KEY) || '{}');
         if (saved && typeof saved.target === 'number') elT.value = saved.target;
+        if (elF && saved && typeof saved.floor === 'number') elF.value = saved.floor;
       } catch (e) {}
 
       function fShares(n) { return (n == null || !isFinite(n)) ? '—' : Math.round(n).toLocaleString('en-US'); }
@@ -573,26 +587,29 @@ export default defineEventHandler(async (event) => {
         for (var j = 0; j < fracs.length; j++) rows += rowHtml(fracs[j], Math.abs(fracs[j] - targetFrac) < 1e-9);
         elRows.innerHTML = rows;
 
-        var topUp = topUpFor(targetFrac);
-        var availAfter = REC.afterProposed + topUp;
+        // Recommended top-up = larger of what the target asks and the floor needs.
+        var floor = elF ? (parseFloat(elF.value) || 0) : 0;
+        var targetTopUp = topUpFor(targetFrac);
+        var floorTopUp = floor > 0 ? Math.max(0, Math.round(floor - REC.afterProposed)) : 0;
+        var recTopUp = Math.max(targetTopUp, floorTopUp);
+        var availAfter = REC.afterProposed + recTopUp;
         var body;
-        if (topUp > 0) {
-          body = 'To reach a <b>' + fPct(targetFrac) + '</b> pool, top up ≈ <b>' + fShares(topUp) + '</b> options → '
-            + fShares(REC.poolAuthorized + topUp) + ' (' + fPct(pctAfter(topUp)) + ' of FDS), '
-            + (availAfter >= 0
-              ? 'leaving ' + fShares(availAfter) + ' available after committed grants.'
-              : 'still ' + fShares(Math.abs(availAfter)) + ' short of covering committed grants.');
+        if (recTopUp > 0) {
+          body = 'Top up ≈ <b>' + fShares(recTopUp) + '</b> options → '
+            + fShares(REC.poolAuthorized + recTopUp) + ' (' + fPct(pctAfter(recTopUp)) + ' of FDS), leaving '
+            + fShares(availAfter) + ' available'
+            + (floor > 0 ? ' — clears the ' + fShares(floor) + ' floor.' : ' to reach the ' + fPct(targetFrac) + ' target.');
         } else {
-          body = 'No top-up needed — the pool is already <b>' + fPct(pctAfter(0)) + '</b> of FDS, at or above the ' + fPct(targetFrac) + ' target. '
-            + (REC.afterProposed >= 0
-              ? fShares(REC.afterProposed) + ' available after committed grants.'
-              : 'Committed grants exceed the unallocated pool by ' + fShares(-REC.afterProposed) + '.');
+          body = 'No top-up needed — the pool is <b>' + fPct(pctAfter(0)) + '</b> of FDS, '
+            + fShares(REC.afterProposed) + ' available after proposed grants'
+            + (floor > 0 ? ', clearing the ' + fShares(floor) + ' floor.' : ', at or above the ' + fPct(targetFrac) + ' target.');
         }
         elNote.className = 'pnote ' + (availAfter >= 0 ? 'ok' : 'warn');
         elNote.innerHTML = body;
-        try { localStorage.setItem(KEY, JSON.stringify({ target: parseFloat(elT.value) || 0 })); } catch (e) {}
+        try { localStorage.setItem(KEY, JSON.stringify({ target: parseFloat(elT.value) || 0, floor: floor })); } catch (e) {}
       }
       elT.addEventListener('input', recompute);
+      if (elF) elF.addEventListener('input', recompute);
       recompute();
     })();
   </script>
