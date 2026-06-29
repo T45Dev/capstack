@@ -18,13 +18,16 @@ export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
   if (!id) throw createError({ statusCode: 400, message: 'id required' })
 
-  // Export scope (?scope=approved|proposed|ideas):
-  //   approved → only proposed grants the board has marked Approved
-  //   proposed → all live proposals (Approved + Pending; Rejected excluded)
-  //   ideas    → the above PLUS anonymous pool ideas (future reserves)
+  // Export scope (?scope=approved|proposed). Grants are either Committed (real
+  // proposals) or Proposed (formerly "Ideas" — anonymous pool reserves):
+  //   approved → only Committed grants the board has marked Approved (strict)
+  //   proposed → all live Committed grants (Approved + Pending; Rejected excluded)
+  //              PLUS every Proposed pool reserve
+  // 'ideas' is accepted as a legacy alias of 'proposed' (it already included
+  // both); the two now behave identically.
   const scope = (() => {
     const s = String(getQuery(event).scope || 'proposed').toLowerCase()
-    return s === 'approved' || s === 'ideas' ? s : 'proposed'
+    return s === 'approved' ? 'approved' : 'proposed'
   })()
 
   // ---- Gather data ----
@@ -62,10 +65,12 @@ export default defineEventHandler(async (event) => {
         : (g.approval_status == null || g.approval_status !== 'Rejected')))
     .sort((a, b) => (b.quantity || 0) - (a.quantity || 0))
 
-  // Ideas: anonymous future reserves from the pool, surfaced as proposed-grant
-  // rows (no strike/stakeholder). Their shares roll into the proposed total and
-  // the post-FDS denominator just like real proposals.
-  if (scope === 'ideas') {
+  // Proposed (formerly "Ideas"): anonymous future reserves from the pool,
+  // surfaced as grant rows (no strike/stakeholder). Under the current vocabulary
+  // grants are either Committed (real proposals) or Proposed (pool reserves), so
+  // every non-strict export lists BOTH — only the Approved-only scope omits them.
+  // Their shares roll into the proposed total alongside the committed grants.
+  if (scope !== 'approved') {
     const ideas = db().prepare(`
       SELECT id, name, kind, shares, vest_months, cliff_months, notes, recipient_type
       FROM pool_events
@@ -356,8 +361,8 @@ export default defineEventHandler(async (event) => {
   confCell.alignment = { horizontal: 'center' }
   r += 2
 
-  // ---- Section 1: Proposed new grants ----
-  setSectionHeader(r, 'COMMITTED NEW GRANTS')
+  // ---- Section 1: New grants (committed + proposed, unless Approved-only) ----
+  setSectionHeader(r, scope === 'approved' ? 'COMMITTED NEW GRANTS (APPROVED)' : 'COMMITTED + PROPOSED NEW GRANTS')
   r++
 
   // GRANTEE | GRANT DETAILS sub-headers
@@ -709,7 +714,7 @@ export default defineEventHandler(async (event) => {
 
   // ---- Send ----
   const buffer = await wb.xlsx.writeBuffer() as Buffer
-  const scopeTag = scope === 'approved' ? 'approved' : scope === 'ideas' ? 'with-ideas' : 'proposed'
+  const scopeTag = scope === 'approved' ? 'approved' : 'committed-proposed'
   const filename = `${company.slug}-board-approval-${scopeTag}-${new Date().toISOString().slice(0, 10)}.xlsx`
   setHeader(event, 'Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
   setHeader(event, 'Content-Disposition', `attachment; filename="${filename}"`)
