@@ -325,7 +325,7 @@ export default defineEventHandler(async (event) => {
   .blank{visibility:hidden}
   .print-btn:hover{background:#f8fafc}
   /* The slide: one landscape page. */
-  .slide{max-width:1360px;margin:18px auto 48px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 34px rgba(15,23,42,.12);padding:20px 40px 12px;display:flex;flex-direction:column;gap:9px}
+  .slide{max-width:1360px;margin:18px auto 48px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 34px rgba(15,23,42,.12);padding:20px 40px 14px;display:flex;flex-direction:column;gap:14px}
   .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
   /* Header band */
   .head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;border-bottom:2px solid #1e1b4b;padding-bottom:8px}
@@ -339,10 +339,15 @@ export default defineEventHandler(async (event) => {
   .kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:2px;font-weight:700}
   .kpi-sub{font-size:11px;color:var(--brand);margin-top:2px;font-weight:600}
   .kpi-sub2{font-size:10px;color:var(--faint);margin-top:1px;font-weight:500;font-variant-numeric:tabular-nums}
-  /* Body grid: two columns */
-  .body{display:grid;grid-template-columns:1.05fr 1fr;gap:26px}
-  .panel h2{margin:0 0 2px;font-size:13.5px;font-weight:800;letter-spacing:-.01em}
-  .panel .desc{margin:0 0 8px;font-size:11px;color:var(--muted)}
+  /* Body grid: two columns. Equal-height cards (stretch) so the two modules
+     read as a tidy pair rather than two ragged blocks of text. */
+  .body{display:grid;grid-template-columns:1.05fr 1fr;gap:16px;align-items:stretch}
+  /* Content modules are bordered CARDS with a filled header band, so Pool
+     composition / Pool recommendation / Committed grants read as three distinct
+     blocks instead of running together on the white slide. */
+  .panel{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:0 15px 14px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+  .panel > h2{margin:0 -15px;padding:8px 15px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);background:#f8fafc;border-bottom:1px solid var(--line);border-radius:11px 11px 0 0}
+  .panel > .desc{margin:9px 0 9px;font-size:11px;color:var(--muted)}
   /* Shared value cell: bold shares, fixed gap, non-bold % — right-aligned so
      every figure lines up across rows. Used in the breakdown, bars, and tables. */
   .sh{font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;text-align:right}
@@ -385,7 +390,7 @@ export default defineEventHandler(async (event) => {
   .pnote.warn{background:#fef2f2;color:#991b1b;border-color:#f87171}
   .pnote.neutral{background:#f8fafc;color:var(--ink-2);border-color:#cbd5e1}
   /* Proposed grants — ALWAYS two narrow side-by-side tables; notes wrap. */
-  .lower{display:grid;grid-template-columns:1fr;gap:10px}
+  .lower{display:grid;grid-template-columns:1fr;gap:14px}
   .two-col{display:grid;grid-template-columns:1fr 1fr;gap:6px 22px;align-items:start}
   table{width:100%;border-collapse:collapse;font-size:11.5px}
   table.prop{table-layout:fixed;font-size:9px;line-height:1.25}
