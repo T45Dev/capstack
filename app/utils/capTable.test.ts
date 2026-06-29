@@ -86,32 +86,35 @@ describe('authorizedPool', () => {
 })
 
 describe('availablePool', () => {
-  it('subtracts outstanding and exercised (forfeit/expire already net out)', () => {
-    expect(availablePool(5_000_000, { outstanding: 1_200_000, exercised: 300_000 })).toBe(3_500_000)
+  it('subtracts outstanding from a NET-of-exercised authorized', () => {
+    // authorized passed in is already net of exercised (4.7M = 5M − 300k)
+    expect(availablePool(4_700_000, { outstanding: 1_200_000 })).toBe(3_500_000)
   })
   it('can go negative when over-allocated', () => {
-    expect(availablePool(1_000_000, { outstanding: 1_200_000, exercised: 100_000 })).toBe(-300_000)
+    expect(availablePool(900_000, { outstanding: 1_200_000 })).toBe(-300_000)
   })
 })
 
 describe('poolEquation', () => {
   const counts = {
-    authorized: 5_000_000,
+    authorized: 5_000_000,          // gross reserve
     outstanding: 1_200_000,
     exercised: 300_000,
     forfeitedOrExpired: 200_000,
     proposed: 400_000,
     ideas: 150_000,
   }
-  it('derives issued, available and future available from the identity', () => {
+  it('removes exercised from Authorized, then derives the identity', () => {
     const f = poolEquation(counts)
-    expect(f.issued).toBe(1_700_000)            // 1.2M + 300k + 200k
-    expect(f.available).toBe(3_500_000)          // 5M − 1.2M − 300k
+    expect(f.authorizedGross).toBe(5_000_000)
+    expect(f.authorized).toBe(4_700_000)         // 5M − 300k exercised (moved to common)
+    expect(f.issued).toBe(1_400_000)             // outstanding 1.2M + forfeited/expired 200k (exercised excluded)
+    expect(f.available).toBe(3_500_000)          // 4.7M − 1.2M
     expect(f.futureAvailable).toBe(2_950_000)    // 3.5M − 400k − 150k (ideas in)
   })
-  it('mirrors availablePool for the available figure', () => {
+  it('mirrors availablePool (net authorized − outstanding) for the available figure', () => {
     const f = poolEquation(counts)
-    expect(f.available).toBe(availablePool(counts.authorized, { outstanding: counts.outstanding, exercised: counts.exercised }))
+    expect(f.available).toBe(availablePool(f.authorized, { outstanding: counts.outstanding }))
   })
   it('excludes ideas from future available when includeIdeas is false', () => {
     const f = poolEquation({ ...counts, includeIdeas: false })

@@ -3,8 +3,10 @@
 // Option Grants pages (and anything else) render the SAME equation — no more
 // re-creating the formula per page and watching it drift.
 //
-//   Authorized − Issued(= Outstanding + Exercised + Forfeited/Expired)
+//   Authorized(net of exercised) − Issued(= Outstanding + Forfeited/Expired)
 //     + Forfeited/Expired = Available − Proposed [− Ideas] = Future Available
+// Exercised options converted to common (FDS, not the pool), so they're removed
+// from Authorized rather than counted as a pool allocation.
 //
 // The arithmetic is computed once by shared/capTableModel.poolEquation(); this
 // component is purely the aligned, collapsible presentation of those figures
@@ -51,9 +53,14 @@ const f = computed(() => props.figures)
 const proposedPlusIdeas = computed(() => f.value.proposed + f.value.ideas)
 
 // Calc-tooltip strings, built from the figures so they always match the cells.
-const fIssued = computed(() => `Outstanding ${fmtShares(f.value.outstanding)} + exercised ${fmtShares(f.value.exercised)} + forfeited/expired ${fmtShares(f.value.forfeitedOrExpired)} = ${fmtShares(f.value.issued)}`)
-const fOutstanding = computed(() => `Issued ${fmtShares(f.value.issued)} − exercised ${fmtShares(f.value.exercised)} − forfeited/expired ${fmtShares(f.value.forfeitedOrExpired)} = ${fmtShares(f.value.outstanding)}`)
-const fAvailable = computed(() => `Authorized ${fmtShares(f.value.authorized)} − outstanding ${fmtShares(f.value.outstanding)} − exercised ${fmtShares(f.value.exercised)} = ${fmtShares(f.value.available)}`)
+// Exercised options converted to common (they're FDS, not the option pool), so
+// they're removed from Authorized — not from Issued or Available.
+const fAuthorized = computed(() => f.value.exercised > 0
+  ? `Reserve ${fmtShares(f.value.authorizedGross)} − exercised ${fmtShares(f.value.exercised)} (→ common) = ${fmtShares(f.value.authorized)}`
+  : `${fmtShares(f.value.authorized)} authorized`)
+const fIssued = computed(() => `Outstanding ${fmtShares(f.value.outstanding)} + forfeited/expired ${fmtShares(f.value.forfeitedOrExpired)} = ${fmtShares(f.value.issued)}`)
+const fOutstanding = computed(() => `Issued ${fmtShares(f.value.issued)} − forfeited/expired ${fmtShares(f.value.forfeitedOrExpired)} = ${fmtShares(f.value.outstanding)}`)
+const fAvailable = computed(() => `Authorized ${fmtShares(f.value.authorized)} − outstanding ${fmtShares(f.value.outstanding)} = ${fmtShares(f.value.available)}`)
 const fProposedIdeas = computed(() => `Committed ${fmtShares(f.value.proposed)} + proposed ${fmtShares(f.value.ideas)} = ${fmtShares(proposedPlusIdeas.value)}`)
 const fFutureAvailable = computed(() => {
   const parts = [`Available ${fmtShares(f.value.available)}`, `− committed ${fmtShares(f.value.proposed)}`]
@@ -65,8 +72,8 @@ const fFutureAvailable = computed(() => {
 <template>
   <div class="flex flex-wrap items-end gap-1.5 text-ink-900 num">
     <div class="flex flex-col items-start rounded-md border border-transparent px-2 py-1">
-      <span class="text-[10px] uppercase tracking-wider text-ink-500">Authorized</span>
-      <span class="text-2xl font-semibold leading-none text-ink-800">{{ fmtShares(f.authorized) }}</span>
+      <span class="text-[10px] uppercase tracking-wider text-ink-500" :title="f.exercised > 0 ? 'Reserve net of exercised options (those converted to common — now FDS, not the pool).' : 'Authorized option pool.'">Authorized</span>
+      <span class="text-2xl font-semibold leading-none text-ink-800"><UiCalcTip :formula="fAuthorized">{{ fmtShares(f.authorized) }}</UiCalcTip></span>
     </div>
     <span class="text-2xl text-ink-400 leading-none border border-transparent py-1">−</span>
     <!-- Issued — collapses to a single figure, or expands into where every
@@ -96,11 +103,6 @@ const fFutureAvailable = computed(() => {
         <div class="flex flex-col items-start">
           <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Options currently held (granted, not yet exercised, forfeited, or expired).">Outstanding</span>
           <span class="text-2xl font-semibold leading-none text-ink-800"><UiCalcTip :formula="fOutstanding">{{ fmtShares(f.outstanding) }}</UiCalcTip></span>
-        </div>
-        <span class="text-2xl text-ink-400 leading-none">+</span>
-        <div class="flex flex-col items-start">
-          <span class="text-[10px] uppercase tracking-wider text-ink-500" title="Exercised options converted to Common stock and permanently left the pool.">Exercised</span>
-          <span class="text-2xl font-semibold leading-none" :class="f.exercised > 0 ? 'text-ink-800' : 'text-ink-400'">{{ fmtShares(f.exercised) }}</span>
         </div>
         <span class="text-2xl text-ink-400 leading-none">+</span>
         <div class="flex flex-col items-start">

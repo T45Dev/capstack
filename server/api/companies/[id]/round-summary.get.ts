@@ -471,9 +471,11 @@ export default defineEventHandler((event) => {
     cumPoolIssued += poolIssued
     cumAttributed += optionPoolAttributed
     cumExercised += optionsExercised
-    // Available = Authorized − Outstanding(attributed) − Exercised, matching the
-    // shared availablePool() helper. Exercised consumed pool, so it reduces this.
-    const availableOptions = cumPoolIssued - cumAttributed - cumExercised
+    // Available = Authorized(net of exercised) − Outstanding(attributed).
+    // Exercised options converted to common — they came OUT of the authorized
+    // option pool (they're FDS/common now), so Authorized is netted down by
+    // exercised here; Total FDS keeps the gross pool (exercised counts there).
+    const availableOptions = cumPoolIssued - cumExercised - cumAttributed
 
     cols.push({
       round_id: r.id,

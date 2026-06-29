@@ -107,6 +107,9 @@ export default defineEventHandler(async (event) => {
     ideas: totalIdeas,
     includeIdeas: false,
   })
+  // Authorized NET of exercised — exercised options moved to common (FDS), so
+  // they're no longer in the option pool. This is what the headline + donut show.
+  const poolAuthorizedNet = pool.authorized
 
   const heldShares = capTable ? (capTable.holdings || []).reduce((a: number, h: any) => a + (h.shares || 0), 0) : 0
   const fdsAnchor = heldShares + totalOutstanding + Math.max(0, pool.available)
@@ -328,11 +331,11 @@ export default defineEventHandler(async (event) => {
     return `<div class="kpi"><div class="kpi-value">${esc(value)}</div><div class="kpi-label">${esc(label)}</div>${sub ? `<div class="kpi-sub">${esc(sub)}</div>` : ''}</div>`
   }
 
-  // Donut segments — Outstanding + Exercised + Proposed + Future Available = Authorized.
+  // Donut segments — Outstanding + Committed + Future Available = Authorized(net).
+  // Exercised is NOT a slice: it moved to common (FDS), out of the option pool.
   const futAvail = pool.futureAvailable
   const donutSegments = [
     { label: 'Outstanding', value: totalOutstanding, color: C.outstanding },
-    { label: 'Exercised', value: totalExercised, color: C.exercised },
     { label: 'Committed', value: totalProposed, color: C.proposed },
     ...(futAvail >= 0
       ? [{ label: 'Available', value: futAvail, color: C.available }]
@@ -443,7 +446,7 @@ export default defineEventHandler(async (event) => {
 
   <section class="kpis">
     ${kpi(fmtShares(postFDS), 'Post-round FDS', 'Fully-diluted shares')}
-    ${kpi(fmtShares(poolAuthorized), 'Options authorized', `${fmtPct(postFDS > 0 ? poolAuthorized / postFDS : 0)} of FDS`)}
+    ${kpi(fmtShares(poolAuthorizedNet), 'Options authorized', `${fmtPct(postFDS > 0 ? poolAuthorizedNet / postFDS : 0)} of FDS`)}
     ${kpi(fmtShares(totalOutstanding), 'Options outstanding', `${numHolders} holder${numHolders === 1 ? '' : 's'}`)}
     ${kpi(fmtShares(pool.available), 'Available now', futAvail < 0 ? 'Over-allocated after committed' : `${fmtShares(futAvail)} after committed`)}
     ${kpi(fmtPct(postFDS > 0 ? totalOutstanding / postFDS : 0), 'Option overhang', 'Outstanding ÷ FDS')}
@@ -454,24 +457,24 @@ export default defineEventHandler(async (event) => {
 
   <section class="card">
     <h2>Option pool health</h2>
-    <p class="desc">How the authorized pool of ${fmtShares(poolAuthorized)} options is allocated today, including draft proposals.</p>
+    <p class="desc">How the authorized pool of ${fmtShares(poolAuthorizedNet)} options (net of exercised, which moved to common) is allocated today, including draft proposals.</p>
     <div class="grid-2 tight">
-      <div style="display:flex;justify-content:center">${donut(donutSegments, fmtShares(poolAuthorized), 'authorized')}</div>
+      <div style="display:flex;justify-content:center">${donut(donutSegments, fmtShares(poolAuthorizedNet), 'authorized')}</div>
       <div>
         ${legend([
-          { label: 'Outstanding (held)', value: `${fmtShares(totalOutstanding)} · ${fmtPct(poolAuthorized > 0 ? totalOutstanding / poolAuthorized : 0)}`, color: C.outstanding },
-          { label: 'Exercised → common', value: `${fmtShares(totalExercised)} · ${fmtPct(poolAuthorized > 0 ? totalExercised / poolAuthorized : 0)}`, color: C.exercised },
-          { label: 'Committed (draft)', value: `${fmtShares(totalProposed)} · ${fmtPct(poolAuthorized > 0 ? totalProposed / poolAuthorized : 0)}`, color: C.proposed },
+          { label: 'Outstanding (held)', value: `${fmtShares(totalOutstanding)} · ${fmtPct(poolAuthorizedNet > 0 ? totalOutstanding / poolAuthorizedNet : 0)}`, color: C.outstanding },
+          { label: 'Committed (draft)', value: `${fmtShares(totalProposed)} · ${fmtPct(poolAuthorizedNet > 0 ? totalProposed / poolAuthorizedNet : 0)}`, color: C.proposed },
           futAvail >= 0
-            ? { label: 'Available after committed', value: `${fmtShares(futAvail)} · ${fmtPct(poolAuthorized > 0 ? futAvail / poolAuthorized : 0)}`, color: C.available }
+            ? { label: 'Available after committed', value: `${fmtShares(futAvail)} · ${fmtPct(poolAuthorizedNet > 0 ? futAvail / poolAuthorizedNet : 0)}`, color: C.available }
             : { label: 'Over-allocated', value: `(${fmtShares(Math.abs(futAvail))})`, color: C.over },
+          { label: 'Exercised → common (FDS, not pool)', value: `${fmtShares(totalExercised)} · ${fmtPct(postFDS > 0 ? totalExercised / postFDS : 0)} of FDS`, color: C.exercised },
         ])}
         <p class="note">
           ${futAvail < 0
             ? `<span class="pill warn">Action needed</span> Committed grants exceed the available pool by ${fmtShares(Math.abs(futAvail))} options — a pool top-up is required before approval.`
-            : futAvail < poolAuthorized * 0.05
-              ? `<span class="pill warn">Running low</span> Only ${fmtPct(poolAuthorized > 0 ? futAvail / poolAuthorized : 0)} of the pool remains after the current proposals.`
-              : `<span class="pill ok">Healthy</span> ${fmtShares(futAvail)} options (${fmtPct(poolAuthorized > 0 ? futAvail / poolAuthorized : 0)} of the pool) remain after the current proposals.`}
+            : futAvail < poolAuthorizedNet * 0.05
+              ? `<span class="pill warn">Running low</span> Only ${fmtPct(poolAuthorizedNet > 0 ? futAvail / poolAuthorizedNet : 0)} of the pool remains after the current proposals.`
+              : `<span class="pill ok">Healthy</span> ${fmtShares(futAvail)} options (${fmtPct(poolAuthorizedNet > 0 ? futAvail / poolAuthorizedNet : 0)} of the pool) remain after the current proposals.`}
           ${totalIdeas > 0 ? ` A further ${fmtShares(totalIdeas)} options sit in "proposed" on the pool-impact timeline.` : ''}
         </p>
       </div>
