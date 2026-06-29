@@ -453,25 +453,15 @@ function migrate(d: Database.Database): void {
   ensureColumn('rounds', 'participation_cap', 'REAL')                       // multiple, e.g. 3.0 = 3x invested cap
   ensureColumn('rounds', 'pref_tier', 'INTEGER NOT NULL DEFAULT 0')         // higher tier = paid first; pari passu within tier
 
-  // Backfill: for any company whose Formation round has option_pool_issued = 0
-  // but whose option_pools table is non-empty, seed Formation with the
-  // imported pool total. New imports run the same path explicitly below; this
-  // covers companies imported before the column existed.
-  const formationsToBackfill = d.prepare(`
-    SELECT r.id,
-      (SELECT COALESCE(SUM(authorized), 0) FROM option_pools WHERE company_id = r.company_id) AS pool_total
-    FROM rounds r
-    WHERE r.kind = 'formation' AND r.option_pool_issued = 0
-  `).all() as Array<{ id: string; pool_total: number }>
-  if (formationsToBackfill.length) {
-    const upd = d.prepare('UPDATE rounds SET option_pool_issued = ? WHERE id = ?')
-    const tx = d.transaction((rows: typeof formationsToBackfill) => {
-      for (const r of rows) {
-        if (r.pool_total > 0) upd.run(r.pool_total, r.id)
-      }
-    })
-    tx(formationsToBackfill)
-  }
+  // NOTE: there used to be a startup backfill here that seeded a Formation
+  // round's option_pool_issued from the option_pools lump whenever it was 0.
+  // It was removed: rounds are user-driven now (Carta no longer seeds rounds),
+  // so the operator OWNS the Formation pool. Because the backfill fired on every
+  // migrate() — and migrate() re-runs whenever the dev server's module state
+  // resets (HMR / restart) — it kept re-clobbering an intentionally-cleared
+  // Formation pool back to the Carta total on each refresh. It only ever wrote
+  // when the value was 0, so dropping it leaves every real value intact and lets
+  // a cleared 0 persist.
 
   // Backfill: classify CN-conversion-only subrounds (cash = 0, debt > 0) and
   // attach them to the nearest preceding cash-driven round as their parent.
