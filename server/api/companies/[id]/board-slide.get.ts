@@ -140,11 +140,6 @@ export default defineEventHandler(async (event) => {
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
   const fmtShares = (n: number | null | undefined) => (n == null || !isFinite(n)) ? '—' : nf0.format(Math.round(n))
   const fmtPct = (frac: number | null | undefined, d = 1) => (frac == null || !isFinite(frac)) ? '—' : `${(frac * 100).toFixed(d)}%`
-  const fmtDate = (s: string | null | undefined) => {
-    if (!s) return '—'
-    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s))
-    return m ? `${m[1]}-${m[2]}-${m[3]}` : String(s)
-  }
   const pctOfPool = (n: number) => poolAuthorized > 0 ? n / poolAuthorized : 0
   const pctOfFds = (n: number) => postFDS > 0 ? n / postFDS : 0
   const YEAR_MS = 365.25 * 86400000
@@ -256,27 +251,26 @@ export default defineEventHandler(async (event) => {
     presets: PRESETS,
   }
 
-  // Proposed grants — list ALL of them, sorted largest first, ALWAYS in two
-  // side-by-side tables. The recipient cell carries the name + a "title · role"
-  // sub-line; award type, vesting start, shares, % FDS, and notes are columns.
-  // Columns are narrow (fixed layout) so two of these fit per page; notes wrap.
+  // Proposed grants — a single compact table sized for the third column: the
+  // recipient cell carries the name + a "title · role" sub-line, then shares and
+  // % of post-round FDS. Award type / vesting / notes live in the board-approval
+  // xlsx; the slide stays at-a-glance. Sorted largest first.
   const proposedSorted = [...proposed].sort((a, b) => (b.quantity || 0) - (a.quantity || 0))
   function proposedRows(list: Grant[]): string {
     return list.map(g => {
       const name = g.recipient_name || g.job_title || 'Unnamed'
       const subBits = [g.recipient_name ? g.job_title : null, g.recipient_type].filter(Boolean)
       const sub = subBits.length ? `<span class="rsub">${esc(subBits.join(' · '))}</span>` : ''
-      return `<tr><td class="name">${esc(name)}${sub}</td><td>${esc(g.award_type || '—')}</td><td>${fmtDate(g.vesting_start)}</td><td class="r sh">${fmtShares(g.quantity)}</td><td class="r pc">${fmtPct(pctOfFds(g.quantity || 0))}</td><td class="notes">${esc(g.notes || '—')}</td></tr>`
+      return `<tr><td class="name">${esc(name)}${sub}</td><td class="r sh">${fmtShares(g.quantity)}</td><td class="r pc">${fmtPct(pctOfFds(g.quantity || 0))}</td></tr>`
     }).join('')
   }
   const proposedTable = (list: Grant[]) =>
-    `<table class="prop"><colgroup><col class="c-rec"/><col class="c-aw"/><col class="c-vest"/><col class="c-sh"/><col class="c-pc"/><col class="c-notes"/></colgroup>`
-    + `<thead><tr><th>Recipient</th><th>Award</th><th>Vesting</th><th class="r">Shares</th><th class="r">% FDS</th><th>Notes</th></tr></thead>`
+    `<table class="prop"><colgroup><col class="c-rec"/><col class="c-sh"/><col class="c-pc"/></colgroup>`
+    + `<thead><tr><th>Recipient</th><th class="r">Shares</th><th class="r">% FDS</th></tr></thead>`
     + `<tbody>${proposedRows(list)}</tbody></table>`
-  const proposedSplit = Math.ceil(proposedSorted.length / 2)
   const proposedHtml = proposedSorted.length === 0
     ? '<div class="empty">No grants are currently committed.</div>'
-    : `<div class="two-col">${proposedTable(proposedSorted.slice(0, proposedSplit))}${proposedSorted.length > proposedSplit ? proposedTable(proposedSorted.slice(proposedSplit)) : ''}</div>`
+    : proposedTable(proposedSorted)
 
   // ---- Actionable callout ----
   let calloutClass = 'ok'
@@ -339,9 +333,10 @@ export default defineEventHandler(async (event) => {
   .kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:2px;font-weight:700}
   .kpi-sub{font-size:11px;color:var(--brand);margin-top:2px;font-weight:600}
   .kpi-sub2{font-size:10px;color:var(--faint);margin-top:1px;font-weight:500;font-variant-numeric:tabular-nums}
-  /* Body grid: two columns. Equal-height cards (stretch) so the two modules
-     read as a tidy pair rather than two ragged blocks of text. */
-  .body{display:grid;grid-template-columns:1.05fr 1fr;gap:16px;align-items:stretch}
+  /* Body grid: THREE equal-height columns — Pool composition | Pool
+     recommendation | Committed grants — each a self-contained card. The middle
+     column is widened because the recommendation table carries five sub-columns. */
+  .body{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:16px;align-items:stretch}
   /* Content modules are bordered CARDS with a filled header band, so Pool
      composition / Pool recommendation / Committed grants read as three distinct
      blocks instead of running together on the white slide. */
@@ -389,18 +384,15 @@ export default defineEventHandler(async (event) => {
   .pnote.ok{background:#ecfdf5;color:#065f46;border-color:#34d399}
   .pnote.warn{background:#fef2f2;color:#991b1b;border-color:#f87171}
   .pnote.neutral{background:#f8fafc;color:var(--ink-2);border-color:#cbd5e1}
-  /* Proposed grants — ALWAYS two narrow side-by-side tables; notes wrap. */
-  .lower{display:grid;grid-template-columns:1fr;gap:14px}
-  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:6px 22px;align-items:start}
+  /* Committed grants — a single compact table that fits the third column:
+     recipient (title · role sub-line), shares, % FDS. Award/vesting/notes live
+     in the board-approval xlsx; the slide stays at-a-glance. */
   table{width:100%;border-collapse:collapse;font-size:11.5px}
-  table.prop{table-layout:fixed;font-size:9px;line-height:1.25}
-  .prop .c-rec{width:27%}
-  .prop .c-aw{width:8%}
-  .prop .c-vest{width:14%}
-  .prop .c-sh{width:14%}
-  .prop .c-pc{width:10%}
-  .prop .c-notes{width:27%}
-  .two-col td,.two-col th{padding:2px 5px;vertical-align:top}
+  table.prop{table-layout:fixed;font-size:10px;line-height:1.3}
+  .prop .c-rec{width:56%}
+  .prop .c-sh{width:25%}
+  .prop .c-pc{width:19%}
+  .prop td,.prop th{padding:3px 6px;vertical-align:top}
   th{text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;padding:4px 9px;border-bottom:1px solid var(--line)}
   td{padding:4px 9px;border-bottom:1px solid #f1f5f9;color:var(--ink-2);font-variant-numeric:tabular-nums}
   td.r,th.r{text-align:right}
@@ -495,17 +487,16 @@ export default defineEventHandler(async (event) => {
         </table>
         <p class="rec-foot">Current pool ${fmtShares(poolAuthorized)} · ${fmtPct(currentPoolPct)} of FDS${defaultFloor > 0 ? '' : ' · no floor set — enter one above or on the Pool Impact page'}</p>
       </div>
-    </section>
 
-    <section class="lower">
       <div class="panel" data-block="proposed">
         <h2>Committed grants</h2>
-        <p class="desc">All ${proposed.length} committed grant${proposed.length === 1 ? '' : 's'} — recipient (title · role), award type, vesting start, shares, % of post-round FDS, and notes.</p>
+        <p class="desc">All ${proposed.length} committed grant${proposed.length === 1 ? '' : 's'} — recipient (title · role), shares, and % of post-round FDS.</p>
         ${proposedHtml}
         ${proposedSorted.length ? `<div class="proposed-total"><span class="tl">Total committed</span>${shpc(totalProposed, pctOfFds(totalProposed))}</div>` : ''}
       </div>
-      <div class="callout ${calloutClass}" data-block="callout">${calloutText}</div>
     </section>
+
+    <div class="callout ${calloutClass}" data-block="callout">${calloutText}</div>
 
     <div class="foot">
       <span>Generated by Pariva, a tool by T45 Labs · ${esc(generatedOn)} · Confidential</span>
