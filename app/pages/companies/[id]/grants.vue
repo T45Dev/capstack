@@ -990,13 +990,12 @@ const fieldLabels: Record<string, string> = {
       </template>
     </PageHeader>
 
-    <!-- Pool identity, every term the same size and labeled. Issued is shown
-         expanded into its components, then Forfeited/Expired is added back
-         because those shares return to the pool (the two F/E terms cancel):
-           Authorized − Issued(Outstanding + Exercised + Forfeited/Expired)
-             + Forfeited/Expired = Available − Proposed [− Ideas] = Future Available
-         Net effect = Authorized − Outstanding − Exercised. Exercised converted
-         to Common and does NOT return. -->
+    <!-- Pool identity, every term the same size and labeled:
+           Authorized − Attributed/Outstanding = Available − Committed [− Proposed]
+             = Future Available
+         Exercised (→ common, FDS) is netted out of Authorized, and forfeited/
+         expired (→ returned to pool) falls back into Available, so neither is
+         a separate equation term. -->
     <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-6 p-4">
       <div class="flex items-end justify-between gap-4 flex-wrap">
         <div v-if="formulaCollapsed" class="flex flex-wrap items-center gap-x-4 gap-y-1 num text-sm">
