@@ -1000,7 +1000,7 @@ const fieldLabels: Record<string, string> = {
     <div class="rounded-lg border border-ink-300 bg-white shadow-card mb-6 p-4">
       <div class="flex items-end justify-between gap-4 flex-wrap">
         <div v-if="formulaCollapsed" class="flex flex-wrap items-center gap-x-4 gap-y-1 num text-sm">
-          <span class="text-ink-700"><span class="text-[10px] uppercase tracking-wider text-ink-500 mr-1">Authorized</span>{{ fmtShares(poolAuthorized) }}</span>
+          <span class="text-ink-700"><span class="text-[10px] uppercase tracking-wider text-ink-500 mr-1">Authorized</span>{{ fmtShares(poolFigures.authorized) }}</span>
           <span><span class="text-[10px] uppercase tracking-wider text-ink-500 mr-1">Available</span><span class="font-medium" :class="availableShares < 0 ? 'text-red-700' : 'text-ok'">{{ fmtShares(availableShares) }}</span></span>
           <span><span class="text-[10px] uppercase tracking-wider text-ink-500 mr-1">Future</span><span class="font-medium" :class="futureAvailable < 0 ? 'text-red-700' : 'text-ok'">{{ fmtShares(futureAvailable) }}</span></span>
         </div>

@@ -122,8 +122,11 @@ export default defineEventHandler(async (event) => {
     ideas: totalIdeas,
     includeIdeas: false,
   })
-  const allocated = allocatedOutstanding + allocatedExercised
-  const available = pool.available                  // unallocated pool = Authorized − allocated
+  // Authorized is NET of exercised (exercised moved to common — FDS, not the
+  // pool). The pool then splits cleanly into Outstanding (held) + Available.
+  const poolAuthorizedNet = pool.authorized         // = poolAuthorized − exercised
+  const allocated = allocatedOutstanding            // options out of the pool that are still options
+  const available = pool.available                  // = net authorized − outstanding
   const unallocated = Math.max(0, available)
   const afterProposed = pool.futureAvailable        // truly-free pool after proposals
 
@@ -147,7 +150,7 @@ export default defineEventHandler(async (event) => {
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
   const fmtShares = (n: number | null | undefined) => (n == null || !isFinite(n)) ? '—' : nf0.format(Math.round(n))
   const fmtPct = (frac: number | null | undefined, d = 3) => (frac == null || !isFinite(frac)) ? '—' : `${(frac * 100).toFixed(d)}%`
-  const pctOfPool = (n: number) => poolAuthorized > 0 ? n / poolAuthorized : 0
+  const pctOfPool = (n: number) => poolAuthorizedNet > 0 ? n / poolAuthorizedNet : 0
   const pctOfFds = (n: number) => postFDS > 0 ? n / postFDS : 0
   const today = new Date()
 
@@ -171,7 +174,7 @@ export default defineEventHandler(async (event) => {
   // the block shows the top-up to reach it, plus a comparison across preset
   // sizes. Sizing is the shared poolTopUpForTarget helper; the client
   // recompute() below mirrors the same formula (the slide is a static page).
-  const currentPoolPct = poolPctOfFds(poolAuthorized, postFDS)
+  const currentPoolPct = poolPctOfFds(poolAuthorizedNet, postFDS)
   const niceCeil = (frac: number) => Math.ceil(Math.max(0, frac) / 0.025) * 0.025
   const defaultTargetPct = niceCeil(Math.max(currentPoolPct, 0.15))
   // Floor lever: the minimum the available pool shouldn't fall below. Seeded
@@ -185,7 +188,7 @@ export default defineEventHandler(async (event) => {
 
   const PRESETS = [0.10, 0.125, 0.15, 0.20]
   const topUpFor = (targetFrac: number) =>
-    Math.round(poolTopUpForTarget({ poolAuthorized, fds: postFDS, targetPctOfFds: targetFrac }))
+    Math.round(poolTopUpForTarget({ poolAuthorized: poolAuthorizedNet, fds: postFDS, targetPctOfFds: targetFrac }))
   // The "Avail. after" cell carries a live ✓/✗ vs the floor, so the table
   // reacts to the floor input (and explains why the note may recommend more).
   function recRowHtml(targetFrac: number, floor: number, custom: boolean): string {
@@ -194,7 +197,7 @@ export default defineEventHandler(async (event) => {
     const flag = floor > 0 ? (availAfter >= floor ? '<span class="ok-dot">✓</span>' : '<span class="bad-dot">✗</span>') : ''
     const cls = `${custom ? 'rec-custom' : ''}${topUp <= 0 ? ' rec-met' : ''}`.trim()
     return `<tr class="${cls}"><td>${fmtPct(targetFrac)}</td><td>${topUp > 0 ? fmtShares(topUp) : '—'}</td>`
-      + `<td>${fmtShares(poolAuthorized + topUp)}</td><td>${fmtShares(availAfter)}${flag}</td></tr>`
+      + `<td>${fmtShares(poolAuthorizedNet + topUp)}</td><td>${fmtShares(availAfter)}${flag}</td></tr>`
   }
   const recRowFracs = Array.from(new Set([
     ...PRESETS.filter(p => Math.abs(p - defaultTargetPct) > 0.001),
@@ -211,7 +214,7 @@ export default defineEventHandler(async (event) => {
     const availAfter = afterProposed + recTopUp
     let html: string
     if (recTopUp > 0) {
-      html = `Top up ≈ <b>${fmtShares(recTopUp)}</b> options → ${fmtShares(poolAuthorized + recTopUp)} (${fmtPct(poolPctOfFds(poolAuthorized, postFDS, recTopUp))} of FDS), leaving ${fmtShares(availAfter)} available`
+      html = `Top up ≈ <b>${fmtShares(recTopUp)}</b> options → ${fmtShares(poolAuthorizedNet + recTopUp)} (${fmtPct(poolPctOfFds(poolAuthorizedNet, postFDS, recTopUp))} of FDS), leaving ${fmtShares(availAfter)} available`
         + (floor > 0 ? ` — clears the ${fmtShares(floor)} floor.` : ` to reach the ${fmtPct(targetFrac)} target.`)
     } else {
       html = `No top-up needed — the pool is <b>${fmtPct(currentPoolPct)}</b> of FDS, ${fmtShares(afterProposed)} available after proposed grants`
@@ -224,7 +227,7 @@ export default defineEventHandler(async (event) => {
   // Canonical figures the client recompute() reuses (so the live math can't
   // drift from the headline — it only varies the target % input).
   const recData = {
-    poolAuthorized,
+    poolAuthorized: poolAuthorizedNet,
     afterProposed,          // future-available: available − proposed grants
     postFDS,
     floor: defaultFloor,
@@ -284,7 +287,7 @@ export default defineEventHandler(async (event) => {
   } else if (afterProposed < 0) {
     calloutClass = 'warn'; healthLabel = 'Action needed'
     calloutText = `The ${fmtShares(totalProposed)} options committed exceed the unallocated pool by ${fmtShares(overBy)}. Approving them requires a pool top-up of at least that much.`
-  } else if (afterProposed < poolAuthorized * 0.05) {
+  } else if (afterProposed < poolAuthorizedNet * 0.05) {
     calloutClass = 'warn'; healthLabel = 'Running low'
     calloutText = `Approving the ${fmtShares(totalProposed)} committed options leaves only ${fmtShares(afterProposed)} (${fmtPct(pctOfPool(afterProposed))} of the pool). Plan a top-up for future hires.`
   } else {
@@ -467,7 +470,7 @@ export default defineEventHandler(async (event) => {
     </header>
 
     <section class="kpis" data-block="kpis">
-      ${kpi(fmtShares(poolAuthorized), 'Total option pool', `${fmtPct(pctOfFds(poolAuthorized))} of FDS (${fmtShares(postFDS)})`)}
+      ${kpi(fmtShares(poolAuthorizedNet), 'Total option pool', `${fmtPct(pctOfFds(poolAuthorizedNet))} of FDS (${fmtShares(postFDS)})`)}
       ${kpi(fmtShares(allocated), 'Allocated', `${fmtPct(pctOfPool(allocated))} of pool`)}
       ${kpi(fmtShares(unallocated), 'Unallocated', `${fmtPct(pctOfPool(unallocated))} of pool`)}
       ${kpi(fmtShares(totalProposed), committedSorted.length ? 'Committed + proposed' : 'Proposed grants', `${fmtPct(pctOfFds(totalProposed))} of FDS · ${proposed.length} proposed grant${proposed.length === 1 ? '' : 's'}`)}
@@ -480,13 +483,12 @@ export default defineEventHandler(async (event) => {
       <div class="col-stack">
         <div class="panel" id="p-comp-full">
           <h2>Pool composition</h2>
-          <p class="desc">How the ${fmtShares(poolAuthorized)}-option pool breaks down. Allocated = outstanding + exercised; % is of the pool.</p>
+          <p class="desc">How the ${fmtShares(poolAuthorizedNet)}-option pool breaks down (net of exercised, which moved to common). % is of the pool.</p>
           <div class="breakdown">
-            <div class="brow head"><span class="lbl">Allocated</span>${shpc(allocated, pctOfPool(allocated))}</div>
-            <div class="brow sub"><span class="lbl">Outstanding (held)</span>${shpc(allocatedOutstanding, pctOfPool(allocatedOutstanding))}</div>
-            <div class="brow sub"><span class="lbl">Exercised</span>${shpc(allocatedExercised, pctOfPool(allocatedExercised))}</div>
+            <div class="brow head"><span class="lbl">Outstanding (held)</span>${shpc(allocatedOutstanding, pctOfPool(allocatedOutstanding))}</div>
             <div class="brow head"><span class="lbl">Available</span>${shpc(unallocated, pctOfPool(unallocated))}</div>
             <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After committed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
+            <div class="brow minor"><span class="lbl">Exercised<span class="ret"> · → common (FDS)</span></span>${shpc(allocatedExercised, pctOfFds(allocatedExercised))}</div>
             <div class="brow minor"><span class="lbl">Forfeited / Expired<span class="ret"> · returned to pool</span></span>${shpc(totalForfeitedOrExpired, pctOfPool(totalForfeitedOrExpired))}</div>
           </div>
         </div>
@@ -528,7 +530,7 @@ export default defineEventHandler(async (event) => {
           <thead><tr><th>Target % FDS</th><th>Top-up</th><th>New pool</th><th>Avail. after</th></tr></thead>
           <tbody id="rec-rows">${recRowsHtml}</tbody>
         </table>
-        <p class="rec-foot">Current pool ${fmtShares(poolAuthorized)} · ${fmtPct(currentPoolPct)} of FDS</p>
+        <p class="rec-foot">Current pool ${fmtShares(poolAuthorizedNet)} · ${fmtPct(currentPoolPct)} of FDS</p>
       </div>
     </section>
 
@@ -539,7 +541,7 @@ export default defineEventHandler(async (event) => {
       <div class="panel" id="p-comp-summary">
         <h2>Pool composition</h2>
         <div class="breakdown">
-          <div class="brow head"><span class="lbl">Allocated</span>${shpc(allocated, pctOfPool(allocated))}</div>
+          <div class="brow head"><span class="lbl">Outstanding (held)</span>${shpc(allocatedOutstanding, pctOfPool(allocatedOutstanding))}</div>
           <div class="brow head"><span class="lbl">Available</span>${shpc(unallocated, pctOfPool(unallocated))}</div>
           <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After committed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
         </div>
@@ -547,7 +549,7 @@ export default defineEventHandler(async (event) => {
       <div class="panel" id="p-rec-summary">
         <h2>Pool recommendation</h2>
         <p class="pnote ${initialNote.cls}">${initialNote.html}</p>
-        <p class="rec-foot">Current pool ${fmtShares(poolAuthorized)} · ${fmtPct(currentPoolPct)} of FDS · target ${fmtPct(defaultTargetPct)}${defaultFloor > 0 ? ` · floor ${fmtShares(defaultFloor)}` : ''}</p>
+        <p class="rec-foot">Current pool ${fmtShares(poolAuthorizedNet)} · ${fmtPct(currentPoolPct)} of FDS · target ${fmtPct(defaultTargetPct)}${defaultFloor > 0 ? ` · floor ${fmtShares(defaultFloor)}` : ''}</p>
       </div>
     </div>
 

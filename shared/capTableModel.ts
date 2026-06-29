@@ -99,16 +99,18 @@ export function authorizedPool(p: PoolInputs): number {
 }
 
 /**
- * Available pool = authorized − outstanding − exercised. Outstanding is the
- * current held (issued net of exercised/forfeited/expired); exercised shares
- * converted to common and don't return; forfeited/expired already net out of
- * outstanding, so they're not subtracted again here.
+ * Available pool = authorized − outstanding, where `authorized` is already NET
+ * of exercised (see poolEquation: exercised options converted to common, so
+ * they come out of Authorized, not out of Available as a separate line).
+ * Forfeited/expired already net out of outstanding (they returned to the pool),
+ * so they aren't subtracted either. (`exercised` is accepted for call-site
+ * compatibility but ignored — net it out of `authorized` before calling.)
  */
 export function availablePool(
   authorized: number,
-  used: { outstanding: number; exercised: number },
+  used: { outstanding: number; exercised?: number },
 ): number {
-  return authorized - (used.outstanding || 0) - (used.exercised || 0)
+  return authorized - (used.outstanding || 0)
 }
 
 export interface PoolEquationCounts {
@@ -129,13 +131,19 @@ export interface PoolEquationCounts {
 }
 
 export interface PoolEquationFigures {
+  /** Authorized NET of exercised — exercised options moved to common, so they
+   *  come out of the authorized option pool. This is what callers display. */
   authorized: number
-  /** Issued = outstanding + exercised + forfeited/expired. */
+  /** Authorized BEFORE removing exercised (the raw reserve), for reference. */
+  authorizedGross: number
+  /** Issued (pool allocations) = outstanding + forfeited/expired. Exercised is
+   *  excluded — it left the pool to common (FDS). */
   issued: number
   outstanding: number
+  /** Exercised → common (part of FDS, removed from Authorized; not in the pool). */
   exercised: number
   forfeitedOrExpired: number
-  /** Available = authorized − outstanding − exercised. */
+  /** Available = authorized(net) − outstanding. */
   available: number
   proposed: number
   ideas: number
@@ -147,25 +155,30 @@ export interface PoolEquationFigures {
  * The Option-Pool identity, in ONE place so the Pool Impact and Option Grants
  * pages (and anything else that shows it) can never disagree on the arithmetic:
  *
- *   Issued          = Outstanding + Exercised + Forfeited/Expired
- *   Available        = Authorized − Outstanding − Exercised
+ *   Authorized       = AuthorizedGross − Exercised   (exercised moved to common)
+ *   Issued           = Outstanding + Forfeited/Expired   (pool allocations)
+ *   Available        = Authorized − Outstanding
  *   Future Available = Available − Proposed − Ideas(when included)
  *
- * Forfeited/Expired is part of Issued but returns to the pool, so it cancels
- * out of Available; Exercised converted to common and does NOT return.
+ * Exercised options convert to common — they're part of FDS, NOT the option
+ * pool — so they're REMOVED FROM AUTHORIZED (not subtracted from Available as a
+ * separate line). The net Available is identical either way; this just attributes
+ * the reduction to where the shares went. Forfeited/Expired returned to the
+ * pool, so they cancel out of Available.
  */
 export function poolEquation(c: PoolEquationCounts): PoolEquationFigures {
-  const authorized = c.authorized || 0
+  const authorizedGross = c.authorized || 0
   const outstanding = c.outstanding || 0
   const exercised = c.exercised || 0
   const forfeitedOrExpired = c.forfeitedOrExpired || 0
   const proposed = c.proposed || 0
   const ideas = c.ideas || 0
-  const issued = outstanding + exercised + forfeitedOrExpired
-  const available = availablePool(authorized, { outstanding, exercised })
+  const authorized = Math.max(0, authorizedGross - exercised)
+  const issued = outstanding + forfeitedOrExpired
+  const available = availablePool(authorized, { outstanding })
   const ideasDeducted = (c.includeIdeas ?? true) ? ideas : 0
   const futureAvailable = available - proposed - ideasDeducted
-  return { authorized, issued, outstanding, exercised, forfeitedOrExpired, available, proposed, ideas, futureAvailable }
+  return { authorized, authorizedGross, issued, outstanding, exercised, forfeitedOrExpired, available, proposed, ideas, futureAvailable }
 }
 
 export interface PoolTopUpInputs {
