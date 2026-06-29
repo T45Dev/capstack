@@ -472,8 +472,8 @@ export default defineEventHandler(async (event) => {
     <section class="kpis" data-block="kpis">
       ${kpi(fmtShares(poolAuthorizedNet), 'Total option pool', `${fmtPct(pctOfFds(poolAuthorizedNet))} of FDS (${fmtShares(postFDS)})`)}
       ${kpi(fmtShares(allocated), 'Allocated', `${fmtPct(pctOfPool(allocated))} of pool`)}
-      ${kpi(fmtShares(unallocated), 'Unallocated', `${fmtPct(pctOfPool(unallocated))} of pool`)}
       ${kpi(fmtShares(totalProposed), committedSorted.length ? 'Committed + proposed' : 'Proposed grants', `${fmtPct(pctOfFds(totalProposed))} of FDS · ${proposed.length} proposed grant${proposed.length === 1 ? '' : 's'}`)}
+      ${kpi(fmtShares(unallocated), 'Unallocated', `${fmtPct(pctOfPool(unallocated))} of pool`)}
       ${kpi(fmtShares(afterProposed), 'Projected available', afterProposed >= 0 ? `${fmtPct(pctOfPool(afterProposed))} of pool after proposed` : `over-allocated by ${fmtShares(overBy)}`)}
     </section>
 
