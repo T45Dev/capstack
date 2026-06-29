@@ -36,7 +36,7 @@ interface RoundColumn {
   option_pool_issued: number
   option_pool_attributed: number   // options granted in this round's era (by grant issue date)
   available_options: number        // running pool issued − cumulative attributed
-  options_exercised: number        // options exercised in this round's era (by last_exercised_date) → out of the pool, into common; netted from Total FDS
+  options_exercised: number        // options exercised in this round's era (by last_exercised_date) → out of the pool, into common; reduces Available pool, NOT Total FDS
   // Cumulative totals through and including this round:
   total_shares_fds: number
   total_shares_fds_override: number | null  // Formation-snapshot override; null = derive cumulatively
@@ -289,12 +289,13 @@ export default defineEventHandler((event) => {
     if (target) attributedByRoundId.set(target.id, (attributedByRoundId.get(target.id) || 0) + (g.q || 0))
   }
 
-  // Exercised options have CONVERTED TO COMMON (they're already in the common /
-  // holdings counts), but option_pool_issued counts the full authorized reserve
-  // — so exercised shares would otherwise land in FDS twice. Net them out in
-  // the era they were exercised (last_exercised_date, falling back to the
-  // grant's issue date). This makes Total FDS use an outstanding+available pool
-  // basis, matching Carta. (Pinned rounds keep their override untouched.)
+  // Exercised options reduce the OPTION POOL (they consumed a grant out of the
+  // authorized reserve), but they do NOT reduce Total FDS — an exercised option
+  // is still a fully-diluted share, it has merely converted from an option into
+  // common. So we attribute exercised counts to the era they were exercised in
+  // (last_exercised_date, falling back to the grant's issue date) and net them
+  // out of the pool's Available row only — never out of Total FDS. This mirrors
+  // the shared availablePool() helper (Authorized − Outstanding − Exercised).
   const exRows = db().prepare(
     `SELECT quantity_exercised AS ex, last_exercised_date AS ed, issue_date AS d FROM grants WHERE company_id = ? AND quantity_exercised > 0`,
   ).all(id) as Array<{ ex: number; ed: string | null; d: string | null }>
@@ -344,6 +345,7 @@ export default defineEventHandler((event) => {
 
   let cumPoolIssued = 0
   let cumAttributed = 0
+  let cumExercised = 0
   let prevPostMoney: number | null = null   // prior round's post-money → next round's derived pre-money
 
   for (let i = 0; i < rounds.length; i++) {
@@ -458,15 +460,20 @@ export default defineEventHandler((event) => {
     if (r.total_shares_fds_override != null) {
       cumulativeFDS = Number(r.total_shares_fds_override)
     } else {
-      // Pool contributes NET of exercised — those shares already sit in common.
-      cumulativeFDS += common + preferredIssued + poolIssued + notesConverted - optionsExercised
+      // Exercised options are NOT subtracted — an exercised option is still a
+      // fully-diluted share (now common instead of an option). Exercised only
+      // reduces the Available option pool below, never Total FDS.
+      cumulativeFDS += common + preferredIssued + poolIssued + notesConverted
     }
     cumulativeFinancing += newMoney + notesFinancing
 
     const optionPoolAttributed = attributedByRoundId.get(r.id) || 0
     cumPoolIssued += poolIssued
     cumAttributed += optionPoolAttributed
-    const availableOptions = cumPoolIssued - cumAttributed
+    cumExercised += optionsExercised
+    // Available = Authorized − Outstanding(attributed) − Exercised, matching the
+    // shared availablePool() helper. Exercised consumed pool, so it reduces this.
+    const availableOptions = cumPoolIssued - cumAttributed - cumExercised
 
     cols.push({
       round_id: r.id,
