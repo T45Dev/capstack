@@ -251,26 +251,23 @@ export default defineEventHandler(async (event) => {
     presets: PRESETS,
   }
 
-  // Proposed grants — a single compact table sized for the third column: the
-  // recipient cell carries the name + a "title · role" sub-line, then shares and
-  // % of post-round FDS. Award type / vesting / notes live in the board-approval
-  // xlsx; the slide stays at-a-glance. Sorted largest first.
+  // Proposed grants — a responsive grid of compact rows: recipient (with a
+  // "title · role" sub-line), shares, and % of post-round FDS. The grid flows
+  // into more columns as the card widens, so freed space (when other cards are
+  // toggled off) fills with grants. Award type / vesting / notes live in the
+  // board-approval xlsx; the slide stays at-a-glance. Sorted largest first.
   const proposedSorted = [...proposed].sort((a, b) => (b.quantity || 0) - (a.quantity || 0))
-  function proposedRows(list: Grant[]): string {
+  function proposedItems(list: Grant[]): string {
     return list.map(g => {
       const name = g.recipient_name || g.job_title || 'Unnamed'
       const subBits = [g.recipient_name ? g.job_title : null, g.recipient_type].filter(Boolean)
-      const sub = subBits.length ? `<span class="rsub">${esc(subBits.join(' · '))}</span>` : ''
-      return `<tr><td class="name">${esc(name)}${sub}</td><td class="r sh">${fmtShares(g.quantity)}</td><td class="r pc">${fmtPct(pctOfFds(g.quantity || 0))}</td></tr>`
+      const sub = subBits.length ? `<span class="grole">${esc(subBits.join(' · '))}</span>` : ''
+      return `<div class="grant"><span class="gname">${esc(name)}${sub}</span><span class="gval"><span class="gsh">${fmtShares(g.quantity)}</span><span class="gpc">${fmtPct(pctOfFds(g.quantity || 0))}</span></span></div>`
     }).join('')
   }
-  const proposedTable = (list: Grant[]) =>
-    `<table class="prop"><colgroup><col class="c-rec"/><col class="c-sh"/><col class="c-pc"/></colgroup>`
-    + `<thead><tr><th>Recipient</th><th class="r">Shares</th><th class="r">% FDS</th></tr></thead>`
-    + `<tbody>${proposedRows(list)}</tbody></table>`
   const proposedHtml = proposedSorted.length === 0
     ? '<div class="empty">No grants are currently committed.</div>'
-    : proposedTable(proposedSorted)
+    : `<div class="grant-grid">${proposedItems(proposedSorted)}</div>`
 
   // ---- Actionable callout ----
   let calloutClass = 'ok'
@@ -315,8 +312,9 @@ export default defineEventHandler(async (event) => {
   .opts label{display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap}
   .opts input{cursor:pointer;margin:0}
   .print-btn{cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:var(--ink);font-size:12.5px;font-weight:600;padding:9px 14px;border-radius:10px;white-space:nowrap}
-  /* An excluded block is left blank but keeps its space, so the layout is stable. */
-  .blank{visibility:hidden}
+  /* An excluded block is removed from the flow entirely, so the space it freed
+     is reflowed to the remaining cards (the grants card grows to take it). */
+  .blank{display:none}
   .print-btn:hover{background:#f8fafc}
   /* The slide: one landscape page. */
   .slide{max-width:1360px;margin:18px auto 48px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 34px rgba(15,23,42,.12);padding:20px 40px 14px;display:flex;flex-direction:column;gap:14px}
@@ -333,10 +331,14 @@ export default defineEventHandler(async (event) => {
   .kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:2px;font-weight:700}
   .kpi-sub{font-size:11px;color:var(--brand);margin-top:2px;font-weight:600}
   .kpi-sub2{font-size:10px;color:var(--faint);margin-top:1px;font-weight:500;font-variant-numeric:tabular-nums}
-  /* Body grid: THREE equal-height columns — Pool composition | Pool
-     recommendation | Committed grants — each a self-contained card. The middle
-     column is widened because the recommendation table carries five sub-columns. */
-  .body{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:16px;align-items:stretch}
+  /* Body: three equal-height column cards — Pool composition (with the health
+     indicator under it) | Committed grants | Pool recommendation. A FLEX row
+     (not a fixed grid) so that when a card is toggled off, the space it freed
+     reflows to the survivors — and the Committed-grants card is weighted to grow
+     into it (flex:2), since committed/proposed grants are the priority content. */
+  .body{display:flex;flex-wrap:wrap;gap:16px;align-items:stretch}
+  .body > .panel{flex:1 1 0;min-width:255px}
+  .body > .panel[data-block="proposed"]{flex:2 1 0}
   /* Content modules are bordered CARDS with a filled header band, so Pool
      composition / Pool recommendation / Committed grants read as three distinct
      blocks instead of running together on the white slide. */
@@ -384,35 +386,29 @@ export default defineEventHandler(async (event) => {
   .pnote.ok{background:#ecfdf5;color:#065f46;border-color:#34d399}
   .pnote.warn{background:#fef2f2;color:#991b1b;border-color:#f87171}
   .pnote.neutral{background:#f8fafc;color:var(--ink-2);border-color:#cbd5e1}
-  /* Committed grants — a single compact table that fits the third column:
-     recipient (title · role sub-line), shares, % FDS. Award/vesting/notes live
-     in the board-approval xlsx; the slide stays at-a-glance. */
-  table{width:100%;border-collapse:collapse;font-size:11.5px}
-  table.prop{table-layout:fixed;font-size:10px;line-height:1.3}
-  .prop .c-rec{width:56%}
-  .prop .c-sh{width:25%}
-  .prop .c-pc{width:19%}
-  .prop td,.prop th{padding:3px 6px;vertical-align:top}
-  th{text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;padding:4px 9px;border-bottom:1px solid var(--line)}
-  td{padding:4px 9px;border-bottom:1px solid #f1f5f9;color:var(--ink-2);font-variant-numeric:tabular-nums}
-  td.r,th.r{text-align:right}
-  td.sh{font-weight:700;color:var(--ink)}
-  td.pc{font-weight:400;color:var(--muted)}
-  td.notes{white-space:normal;overflow-wrap:anywhere;color:var(--muted);font-weight:400;font-variant-numeric:normal}
-  tr:last-child td{border-bottom:none}
-  tbody .name{font-weight:600;color:var(--ink);overflow-wrap:anywhere}
-  .rsub{display:block;font-size:8px;color:var(--faint);font-weight:400;margin-top:0}
-  .proposed-total{display:flex;align-items:baseline;gap:10px;border-top:2px solid var(--line);padding-top:7px;font-size:12px}
+  /* Committed grants — a responsive grid of compact rows (recipient with a
+     title · role sub-line, then shares + % FDS). It flows into MORE columns as
+     the card widens, so when other cards are toggled off the freed space fills
+     with grants rather than whitespace. Award/vesting/notes live in the
+     board-approval xlsx; the slide stays at-a-glance. */
+  .grant-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(195px,1fr));gap:0 20px}
+  .grant{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:5px 0;border-bottom:1px solid #f1f5f9;font-size:11px}
+  .grant .gname{font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis}
+  .grant .grole{display:block;font-size:8.5px;color:var(--faint);font-weight:400}
+  .grant .gval{white-space:nowrap;text-align:right;flex:none}
+  .grant .gsh{font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+  .grant .gpc{color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums;margin-left:7px}
+  .proposed-total{display:flex;align-items:baseline;gap:10px;border-top:2px solid var(--line);padding-top:7px;margin-top:7px;font-size:12px}
   .proposed-total .tl{font-weight:800;color:var(--ink);margin-right:auto}
   .empty{font-size:12px;color:var(--faint);padding:8px 0;font-style:italic}
-  /* Callout */
-  .callout{font-size:12px;border-radius:10px;padding:8px 13px;line-height:1.3}
+  /* Pool health indicator — sits at the foot of the Pool composition card. */
+  .callout{font-size:11.5px;border-radius:8px;padding:7px 11px;line-height:1.32;margin-top:11px}
   .callout.ok{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}
   .callout.warn{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
   .callout.neutral{background:#f8fafc;color:var(--ink-2);border:1px solid var(--line)}
   .callout b{font-weight:800}
   .foot{display:flex;justify-content:space-between;color:var(--faint);font-size:10px;border-top:1px solid var(--line);padding-top:6px;margin-top:0}
-  @media (max-width:880px){ .kpis{grid-template-columns:repeat(2,1fr)} .body{grid-template-columns:1fr} }
+  @media (max-width:880px){ .kpis{grid-template-columns:repeat(2,1fr)} .body > .panel{flex:1 1 100%} }
   @page{ size:landscape; margin:4mm 5mm }
   @media print{
     body{background:#fff}
@@ -462,10 +458,18 @@ export default defineEventHandler(async (event) => {
           <div class="brow head"><span class="lbl">Allocated</span>${shpc(allocated, pctOfPool(allocated))}</div>
           <div class="brow sub"><span class="lbl">Outstanding (held)</span>${shpc(allocatedOutstanding, pctOfPool(allocatedOutstanding))}</div>
           <div class="brow sub"><span class="lbl">Exercised</span>${shpc(allocatedExercised, pctOfPool(allocatedExercised))}</div>
-          <div class="brow head"><span class="lbl">Available (unallocated)</span>${shpc(unallocated, pctOfPool(unallocated))}</div>
+          <div class="brow head"><span class="lbl">Available</span>${shpc(unallocated, pctOfPool(unallocated))}</div>
           <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After committed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
           <div class="brow minor"><span class="lbl">Forfeited / Expired<span class="ret"> · returned to pool</span></span>${shpc(totalForfeitedOrExpired, pctOfPool(totalForfeitedOrExpired))}</div>
         </div>
+        <div class="callout ${calloutClass}" data-block="callout">${calloutText}</div>
+      </div>
+
+      <div class="panel" data-block="proposed">
+        <h2>Committed grants</h2>
+        <p class="desc">All ${proposed.length} committed grant${proposed.length === 1 ? '' : 's'} — recipient (title · role), shares, and % of post-round FDS.</p>
+        ${proposedHtml}
+        ${proposedSorted.length ? `<div class="proposed-total"><span class="tl">Total committed</span>${shpc(totalProposed, pctOfFds(totalProposed))}</div>` : ''}
       </div>
 
       <div class="panel" data-block="poolrec">
@@ -475,7 +479,7 @@ export default defineEventHandler(async (event) => {
           <label class="rec-ctl">Target pool
             <span class="rec-inwrap"><input id="rec-target" type="number" min="0" max="60" step="0.5" value="${(defaultTargetPct * 100).toFixed(1)}"><span class="rec-unit">% of FDS</span></span>
           </label>
-          <label class="rec-ctl">Floor · keep avail ≥
+          <label class="rec-ctl">Floor
             <span class="rec-inwrap"><input id="rec-floor" type="number" min="0" step="1000" value="${Math.round(defaultFloor)}"><span class="rec-unit">options</span></span>
           </label>
         </div>
@@ -487,16 +491,7 @@ export default defineEventHandler(async (event) => {
         </table>
         <p class="rec-foot">Current pool ${fmtShares(poolAuthorized)} · ${fmtPct(currentPoolPct)} of FDS${defaultFloor > 0 ? '' : ' · no floor set — enter one above or on the Pool Impact page'}</p>
       </div>
-
-      <div class="panel" data-block="proposed">
-        <h2>Committed grants</h2>
-        <p class="desc">All ${proposed.length} committed grant${proposed.length === 1 ? '' : 's'} — recipient (title · role), shares, and % of post-round FDS.</p>
-        ${proposedHtml}
-        ${proposedSorted.length ? `<div class="proposed-total"><span class="tl">Total committed</span>${shpc(totalProposed, pctOfFds(totalProposed))}</div>` : ''}
-      </div>
     </section>
-
-    <div class="callout ${calloutClass}" data-block="callout">${calloutText}</div>
 
     <div class="foot">
       <span>Generated by Pariva, a tool by T45 Labs · ${esc(generatedOn)} · Confidential</span>
