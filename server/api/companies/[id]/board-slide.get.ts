@@ -420,9 +420,16 @@ export default defineEventHandler(async (event) => {
   @media (max-width:880px){ .kpis{grid-template-columns:repeat(2,1fr)} .body{grid-template-columns:1fr} }
   @page{ size:landscape; margin:4mm 5mm }
   @media print{
-    body{background:#fff}
+    html,body{background:#fff}
     .toolbar{display:none}
-    .slide{max-width:none;margin:0;border:none;box-shadow:none;border-radius:0;padding:4px 14px;gap:9px}
+    /* Print as normal block flow, NOT a flex column: Chrome fails to paginate a
+       tall CSS-grid (.body) nested in a flex container and emits blank pages.
+       Block flow + per-card break-inside:avoid prints reliably (one page when it
+       fits; otherwise cards reflow to the next page intact). */
+    .slide{max-width:none;margin:0;border:none;box-shadow:none;border-radius:0;padding:6px 12px;display:block}
+    .slide > *{margin-bottom:10px}
+    .kpi,.panel{break-inside:avoid}
+    .pgroup,.pgrant,.brow,.rec-table tr{break-inside:avoid}
     /* The ad-hoc inputs print as their chosen values, not editable chrome. */
     .rec-inwrap{border-color:transparent;padding:0}
     .rec-inwrap input{color:var(--ink)}
