@@ -1,5 +1,5 @@
 import { db } from '~~/server/utils/db'
-import { authorizedPool, newSharesIssued, grantOutstanding, poolEquation, poolTopUpForTarget, poolPctOfFds } from '~~/shared/capTableModel'
+import { authorizedPool, grantOutstanding, poolEquation, poolTopUpForTarget, poolPctOfFds } from '~~/shared/capTableModel'
 
 // Board slide — a one-page, print-ready visual on the OPTION POOL, sized to drop
 // straight into a board deck (landscape, single page, "Print / Save as PDF").
@@ -49,6 +49,7 @@ interface RoundCol {
   share_price: number | null
   option_pool_issued: number
   notes_converted: number
+  total_shares_fds: number   // canonical cumulative FDS from round-summary
 }
 
 export default defineEventHandler(async (event) => {
@@ -119,14 +120,17 @@ export default defineEventHandler(async (event) => {
   const unallocated = Math.max(0, available)
   const afterProposed = pool.futureAvailable        // truly-free pool after proposals
 
-  // ---- FDS basis (canonical; mirrors ceo-report / the Grants page) ----
+  // ---- FDS basis (CANON — straight from the Rounds page) ----
+  // Post-round FDS is the current round's own cumulative Total FDS as computed
+  // by round-summary; we no longer re-derive it here (base + new + pool + notes)
+  // because that path floored shares and skipped exercised-option netting, so
+  // the slide read a different FDS than the Rounds table. One source of truth.
+  // Falls back to a holdings-derived anchor only when there are no rounds yet.
   const heldShares = capTable ? (capTable.holdings || []).reduce((a: number, h: any) => a + (h.shares || 0), 0) : 0
   const fdsAnchor = heldShares + allocatedOutstanding + unallocated
-  const preFDS = base > 0 ? base : fdsAnchor
-  const issuedNew = currentRound ? newSharesIssued(currentRound.new_money, currentRound.share_price) : 0
-  const postFDS = base > 0
-    ? base + issuedNew + (currentRound?.option_pool_issued || 0) + (currentRound?.notes_converted || 0)
-    : preFDS
+  const postFDS = currentRound?.total_shares_fds && currentRound.total_shares_fds > 0
+    ? currentRound.total_shares_fds
+    : (base > 0 ? base : fdsAnchor)
 
   // =====================================================================
   //  Formatting + chart helpers (shared shape with ceo-report)

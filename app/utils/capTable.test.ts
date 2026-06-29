@@ -3,12 +3,12 @@
 import { describe, it, expect } from 'vitest'
 // Import the canonical shared module directly (vitest resolves the relative
 // path without the Nuxt `~~` alias that the re-export in ./capTable uses).
-import { newSharesIssued, openRoundPostFds, authorizedPool, availablePool, poolEquation, poolTopUpForTarget, poolPctOfFds, grantIssued, grantOutstanding, vestedFraction, vestedShares } from '../../shared/capTableModel'
+import { newSharesIssued, derivedSharePrice, openRoundPostFds, authorizedPool, availablePool, poolEquation, poolTopUpForTarget, poolPctOfFds, grantIssued, grantOutstanding, vestedFraction, vestedShares } from '../../shared/capTableModel'
 
 describe('newSharesIssued', () => {
-  it('floors new money ÷ share price', () => {
+  it('divides new money ÷ share price WITHOUT flooring (fractional shares, matching the board workbook)', () => {
     expect(newSharesIssued(5_000_000, 2.5)).toBe(2_000_000)
-    expect(newSharesIssued(1000, 3)).toBe(333) // 333.33 → floored
+    expect(newSharesIssued(1000, 3)).toBeCloseTo(333.3333, 4) // NOT floored to 333
   })
   it('returns 0 when an input is missing or zero', () => {
     expect(newSharesIssued(null, 2.5)).toBe(0)
@@ -16,6 +16,20 @@ describe('newSharesIssued', () => {
     expect(newSharesIssued(0, 2.5)).toBe(0)
     expect(newSharesIssued(5_000_000, 0)).toBe(0)
     expect(newSharesIssued(undefined, undefined)).toBe(0)
+  })
+})
+
+describe('derivedSharePrice', () => {
+  it('PPS = pre-money ÷ prior-round FDS (the board workbook formula)', () => {
+    // Sheet: F13 = ROUND(F10/E17,5) = 15,500,000 / 10,379,611 ≈ 1.49331
+    expect(derivedSharePrice(15_500_000, 10_379_611)).toBeCloseTo(1.49331, 4)
+  })
+  it('returns 0 when pre-money or pre-round FDS is missing/non-positive', () => {
+    expect(derivedSharePrice(null, 1000)).toBe(0)
+    expect(derivedSharePrice(1_000_000, null)).toBe(0)
+    expect(derivedSharePrice(0, 1000)).toBe(0)
+    expect(derivedSharePrice(1_000_000, 0)).toBe(0)
+    expect(derivedSharePrice(-5, 1000)).toBe(0)
   })
 })
 

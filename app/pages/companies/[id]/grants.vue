@@ -2,7 +2,7 @@
 import { Plus, Trash2, Edit3, ChevronUp, ChevronDown, FileDown, ArrowUpCircle, ArrowDownCircle, UploadCloud, AlertTriangle, CheckCircle2, X, Award, Lightbulb, BarChart3, Presentation } from 'lucide-vue-next'
 import { fmtShares, fmtPct, fmtDate, fmtPricePerShare, normalizeDate } from '~/utils/format'
 import { calcSum, calcPct, calcValueUSD } from '~/utils/calc'
-import { authorizedPool, poolEquation, grantIssued, grantOutstanding } from '~/utils/capTable'
+import { authorizedPool, poolEquation, grantIssued, grantOutstanding, newSharesIssued } from '~/utils/capTable'
 
 const route = useRoute()
 const id = computed(() => route.params.id as string)
@@ -184,7 +184,9 @@ const postFDS = computed(() => {
   if (base == null || base <= 0) return preFDS.value
   const r = currentRound.value as any
   if (!r) return base
-  const issued = (r.new_money && r.share_price) ? Math.floor(r.new_money / r.share_price) : 0
+  // share_price here is round-summary's EFFECTIVE price; newSharesIssued no
+  // longer floors, so this matches the canonical Total FDS to the decimal.
+  const issued = newSharesIssued(r.new_money, r.share_price)
   const pool = r.option_pool_issued || 0
   const notes = r.notes_converted || 0
   return base + issued + pool + notes
