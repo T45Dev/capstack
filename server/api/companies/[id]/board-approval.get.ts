@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs'
 import { db } from '~~/server/utils/db'
-import { grantIssued, authorizedPool } from '~~/shared/capTableModel'
+import { grantIssued, authorizedPool, poolEquation } from '~~/shared/capTableModel'
 
 // Generates a board-approval xlsx that follows the S3VC Option Grants
 // Workbook template (tab 3, "Board Option Grant Approval"). Returned as a
@@ -124,14 +124,35 @@ export default defineEventHandler(async (event) => {
   // slide use (timeline total + the open round's own issued, else Σ typed pool,
   // else the option_pools lump). The raw option_pools sum ignored pool shares
   // the operator typed onto rounds, so it read stale.
-  const poolAuthorized = authorizedPool({
+  const poolAuthorizedGross = authorizedPool({
     hasTimeline: !!aggregate?.derived_from_history,
     timelinePoolTotal: aggregate?.option_pool_total || 0,
     openRoundPoolIssued: openRound?.option_pool_issued || 0,
     allRoundsPoolIssued: sumRounds.reduce((a, r) => a + (r.option_pool_issued || 0), 0),
     poolsLump: pools.reduce((a, p) => a + (p.authorized || 0), 0),
   })
-  const optionsAvailable = Math.max(0, poolAuthorized - outstandingTotal - proposedTotal)
+  // Exercised / forfeited / expired off the SAME outstanding-grant set the board
+  // slide aggregates, then run the SHARED poolEquation so Authorized is net of
+  // exercised (those options converted to common — FDS, not the pool) exactly
+  // like the slide, Grants page, and round-summary. Exercised stays visible in
+  // section 3 as an informational column, but it is NOT pool-allocated.
+  const exercisedTotal = allGrants
+    .filter(g => g.status === 'outstanding')
+    .reduce((a, g) => a + (g.quantity_exercised || 0), 0)
+  const forfeitedOrExpiredTotal = allGrants
+    .filter(g => g.status === 'outstanding')
+    .reduce((a, g) => a + (g.quantity_forfeited || 0) + (g.quantity_expired || 0), 0)
+  const poolEq = poolEquation({
+    authorized: poolAuthorizedGross,
+    outstanding: outstandingTotal,
+    exercised: exercisedTotal,
+    forfeitedOrExpired: forfeitedOrExpiredTotal,
+    proposed: proposedTotal,
+    ideas: 0,
+    includeIdeas: false,
+  })
+  const poolAuthorized = poolEq.authorized            // = gross − exercised (canon net)
+  const optionsAvailable = Math.max(0, poolEq.futureAvailable) // net − outstanding − proposed
   const fdsFromCapTable = holdingsTotal + outstandingTotal + optionsAvailable + (assumptions?.pool_top_up_shares || 0)
 
   // postFDS = the current round's cumulative Total FDS (the denominator every
@@ -508,7 +529,7 @@ export default defineEventHandler(async (event) => {
 
   setColHeader(r, [
     'Category', 'Prior Grants', 'New Grants', 'Forfeited Grants',
-    'Outstanding Options', 'Exercised Options', 'Outstanding + Exercised + New', pctPostHeader,
+    'Outstanding Options', 'Exercised (→ Common)', 'Outstanding + New', pctPostHeader,
   ])
   r++
 
@@ -527,8 +548,10 @@ export default defineEventHandler(async (event) => {
   //   issued (Prior) = quantity_issued ?? quantity
   //   forfExp        = forfeited + expired (both return to the pool)
   //   outstanding    = issued − exercised − forfExp
-  //   Total          = outstanding + exercised + new (forfeited returned to the
-  //                    pool, so it's informational only — not part of allocated)
+  //   Total          = outstanding + new. Exercised converted to common (FDS,
+  //                    not the pool) so it's netted out of Authorized above and
+  //                    shown here only as an informational column — like
+  //                    forfeited/expired, it is NOT pool-allocated.
   const agg: Record<Cat, { issued: number; exercised: number; forfExp: number; outstanding: number; newG: number }> = {
     'Employees':      { issued: 0, exercised: 0, forfExp: 0, outstanding: 0, newG: 0 },
     'BoD / Advisors': { issued: 0, exercised: 0, forfExp: 0, outstanding: 0, newG: 0 },
@@ -553,11 +576,11 @@ export default defineEventHandler(async (event) => {
     const a = agg[label]
     const prior = a.issued
     const forf = -a.forfExp
-    // Total = Outstanding + Exercised + New (the header). Forfeited shares
-    // returned to the pool, so they're NOT allocated — they fall into
-    // Remaining. Subtracting them here understated Allocated and overstated
-    // "Options Remaining" by the forfeited amount.
-    const total = a.outstanding + a.exercised + a.newG
+    // Total (allocated from pool) = Outstanding + New. Exercised converted to
+    // common (FDS, not the pool) and forfeited/expired returned to the pool, so
+    // neither is allocated — both are informational columns. Authorized is net
+    // of exercised above, so Remaining = Authorized(net) − (Outstanding + New).
+    const total = a.outstanding + a.newG
 
     ws.getCell(r, 1).value = label
     ws.getCell(r, 2).value = prior
@@ -566,8 +589,8 @@ export default defineEventHandler(async (event) => {
     // Outstanding = Prior(issued) + Forfeited(stored negative) − Exercised.
     setFormula(r, 5, `${cellAddr(2, r)}+${cellAddr(4, r)}-${cellAddr(6, r)}`, a.outstanding)
     ws.getCell(r, 6).value = a.exercised
-    // Total = Outstanding + Exercised + New.
-    setFormula(r, 7, `${cellAddr(5, r)}+${cellAddr(6, r)}+${cellAddr(3, r)}`, total)
+    // Total = Outstanding + New (exercised excluded — it's common now, not pool).
+    setFormula(r, 7, `${cellAddr(5, r)}+${cellAddr(3, r)}`, total)
     for (let c = 2; c <= 7; c++) ws.getCell(r, c).numFmt = '#,##0;(#,##0)'
     ws.getCell(r, 8).numFmt = '0.000%'
     setPct(r, 8, cellAddr(7, r), postFDS > 0 ? total / postFDS : 0)
@@ -615,8 +638,10 @@ export default defineEventHandler(async (event) => {
     return r++
   }
 
-  // TOTAL OPTIONS AUTHORIZED — input
-  const authRow = labelRow('TOTAL OPTIONS AUTHORIZED')
+  // TOTAL OPTIONS AUTHORIZED — net of exercised (those converted to common —
+  // FDS, not the pool), matching the live reserve shown on the Grants / Pool
+  // Impact pages and the board slide.
+  const authRow = labelRow('TOTAL OPTIONS AUTHORIZED (NET OF EXERCISED)')
   ws.getCell(authRow, 7).value = poolAuthorized
   ws.getCell(authRow, 7).numFmt = '#,##0'
   ws.getCell(authRow, 7).font = blackBold
@@ -667,9 +692,9 @@ export default defineEventHandler(async (event) => {
   const definitions = [
     'Outstanding Securities = Common Shares + Preferred Shares + Warrants + Options Outstanding + other securities',
     'Fully Diluted Securities = Outstanding Securities + Options Authorized but Unissued*',
-    'Options Authorized* = Granted Options – Forfeited Options + Unissued Options',
-    'Granted Options = Options Outstanding + Options Exercised',
+    'Options Authorized (net)* = Authorized Reserve − Exercised Options (which convert to Common and count in FDS, not the pool)',
     'Options Outstanding = Vested & Unvested Options that have been Granted and neither Exercised nor Forfeited',
+    'Options Remaining = Options Authorized (net) − (Options Outstanding + New Grants); forfeited/expired return to the pool',
     '',
     '* under Equity Incentive Plan',
   ]
