@@ -11,9 +11,9 @@ import { authorizedPool, grantOutstanding, poolEquation, poolTopUpForTarget, poo
 //   3. How was the allocated pool spread across funding stages
 //      (Founders / Seed / Series)?
 //   4. What's PROPOSED right now (shares + % of FDS), and does it fit?
-//   5. Should the pool be TOPPED UP — to clear a floor, or to hit a target
-//      % of FDS? The Pool-recommendation block sizes that top-up and lets the
-//      operator compare target sizes ad hoc on the preview (recomputed live).
+//   5. Should the pool be TOPPED UP to hit a target % of FDS? The Pool-
+//      recommendation block sizes that top-up and lets the operator compare
+//      target sizes ad hoc on the preview (recomputed live).
 //
 // Every pool/FDS figure is sourced from the SAME canonical places the Option
 // Grants page reads — the shared capTableModel helper for the authorized pool,
@@ -142,13 +142,6 @@ export default defineEventHandler(async (event) => {
   const fmtPct = (frac: number | null | undefined, d = 1) => (frac == null || !isFinite(frac)) ? '—' : `${(frac * 100).toFixed(d)}%`
   const pctOfPool = (n: number) => poolAuthorized > 0 ? n / poolAuthorized : 0
   const pctOfFds = (n: number) => postFDS > 0 ? n / postFDS : 0
-  const YEAR_MS = 365.25 * 86400000
-  const parseISO = (s: string | null | undefined): number | null => {
-    if (!s) return null
-    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s))
-    return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null
-  }
-  const fmtMY = (ms: number | null) => ms == null ? '—' : new Date(ms).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
   const today = new Date()
 
   // Consistent value cell used everywhere a figure is shown: bold shares, then a
@@ -164,110 +157,79 @@ export default defineEventHandler(async (event) => {
   const overBy = afterProposed < 0 ? Math.abs(afterProposed) : 0
 
   // =====================================================================
-  //  Pool recommendation — floor + target-% top-up
+  //  Pool recommendation — target option-pool size as a % of FDS
   // =====================================================================
-  // Floor = the minimum the AVAILABLE pool should not fall below: a buffer the
-  // operator sets as a "floor" idea on the Pool Impact page (highest one wins),
-  // overridable ad hoc on this preview. Burn rate = lifetime average grant pace
-  // over the dated granting span — used only to estimate WHEN the floor is hit.
-  const todayMs = today.getTime()
-  const floorShares = (poolEventsRaw || [])
-    .filter((e: any) => e.type === 'floor')
-    .reduce((a: number, e: any) => Math.max(a, e.shares || 0), 0)
-  const grantEvents = outstanding
-    .filter(g => parseISO(g.issue_date) != null)
-    .map(g => ({ t: parseISO(g.issue_date) as number, allocated: grantOutstanding(g) + (g.quantity_exercised || 0) }))
-  const allocatedDated = grantEvents.reduce((a, e) => a + e.allocated, 0)
-  const firstGrantMs = grantEvents.length ? Math.min(...grantEvents.map(e => e.t)) : todayMs
-  const spanYears = Math.max(0.75, (todayMs - firstGrantMs) / YEAR_MS)
-  const burnPerYear = allocatedDated > 0 ? allocatedDated / spanYears : 0
-  const burnRounded = burnPerYear > 0 ? Math.round(burnPerYear / 1000) * 1000 : 0
-
-  // Seed the ad-hoc inputs. Target → a "nice" pool size at/above today's % (the
-  // 15% industry default), so the comparison always shows a real spread. Floor
-  // → the DB floor if set, else ~one year of grants as a starting buffer.
+  // One lever: the operator sets a target pool size (% of post-round FDS) and
+  // the block shows the top-up to reach it, plus a comparison across preset
+  // sizes. Sizing is the shared poolTopUpForTarget helper; the client
+  // recompute() below mirrors the same formula (the slide is a static page).
   const currentPoolPct = poolPctOfFds(poolAuthorized, postFDS)
   const niceCeil = (frac: number) => Math.ceil(Math.max(0, frac) / 0.025) * 0.025
   const defaultTargetPct = niceCeil(Math.max(currentPoolPct, 0.15))
-  const defaultFloor = floorShares > 0 ? floorShares : burnRounded
 
-  // The recommendation math, kept in lockstep with the client recompute() below
-  // (the slide is a static page, so the live version is mirrored in JS); the
-  // target sizing itself is the shared poolTopUpForTarget helper.
   const PRESETS = [0.10, 0.125, 0.15, 0.20]
   const topUpFor = (targetFrac: number) =>
     Math.round(poolTopUpForTarget({ poolAuthorized, fds: postFDS, targetPctOfFds: targetFrac }))
-  function recRowHtml(targetFrac: number, floor: number, custom: boolean): string {
+  function recRowHtml(targetFrac: number, custom: boolean): string {
     const topUp = topUpFor(targetFrac)
     const availAfter = afterProposed + topUp
-    const meets = floor > 0 ? availAfter >= floor : null
-    const flag = meets == null ? '' : (meets ? '<span class="ok-dot">✓</span>' : '<span class="bad-dot">✗</span>')
     const cls = `${custom ? 'rec-custom' : ''}${topUp <= 0 ? ' rec-met' : ''}`.trim()
     return `<tr class="${cls}"><td>${fmtPct(targetFrac)}</td><td>${topUp > 0 ? fmtShares(topUp) : '—'}</td>`
-      + `<td>${fmtShares(poolAuthorized + topUp)}</td><td>${fmtShares(availAfter)}</td><td class="floor-cell">${flag}</td></tr>`
+      + `<td>${fmtShares(poolAuthorized + topUp)}</td><td>${fmtShares(availAfter)}</td></tr>`
   }
   const recRowFracs = Array.from(new Set([
     ...PRESETS.filter(p => Math.abs(p - defaultTargetPct) > 0.001),
     defaultTargetPct,
   ])).sort((a, b) => a - b)
-  const recRowsHtml = recRowFracs.map(f => recRowHtml(f, defaultFloor, Math.abs(f - defaultTargetPct) < 1e-9)).join('')
+  const recRowsHtml = recRowFracs.map(f => recRowHtml(f, Math.abs(f - defaultTargetPct) < 1e-9)).join('')
 
-  // Headline note: the recommended top-up is the LARGER of what the floor needs
-  // and what the target asks — so it both clears the buffer and reaches the size.
-  function recNote(targetFrac: number, floor: number): { cls: string; html: string } {
-    const floorTopUp = floor > 0 ? Math.max(0, floor - afterProposed) : 0
-    const recTopUp = Math.round(Math.max(floorTopUp, topUpFor(targetFrac)))
-    const availAfter = afterProposed + recTopUp
-    const status = (floor > 0 && afterProposed < floor) ? 'below'
-      : (floor > 0 && afterProposed < floor * 1.2) ? 'near' : 'ok'
-    const lead = status === 'below' ? 'Below floor — ' : status === 'near' ? 'Approaching floor — ' : 'Healthy — '
-    let body: string
-    if (recTopUp > 0) {
-      body = `recommended top-up ≈ <b>${fmtShares(recTopUp)}</b> options → pool at <b>${fmtPct(poolPctOfFds(poolAuthorized, postFDS, recTopUp))}</b> of FDS, leaving ${fmtShares(availAfter)} available after committed`
-        + (floor > 0 ? ` (floor ${fmtShares(floor)}).` : '.')
+  // Headline note: the top-up to reach the target, and what's left for grants.
+  function recNote(targetFrac: number): { cls: string; html: string } {
+    const topUp = topUpFor(targetFrac)
+    const availAfter = afterProposed + topUp
+    let html: string
+    if (topUp > 0) {
+      html = `To reach a <b>${fmtPct(targetFrac)}</b> pool, top up ≈ <b>${fmtShares(topUp)}</b> options → ${fmtShares(poolAuthorized + topUp)} (${fmtPct(poolPctOfFds(poolAuthorized, postFDS, topUp))} of FDS), `
+        + (availAfter >= 0
+          ? `leaving ${fmtShares(availAfter)} available after committed grants.`
+          : `still ${fmtShares(Math.abs(availAfter))} short of covering committed grants.`)
     } else {
-      body = `no top-up needed — ${fmtShares(afterProposed)} available after committed`
-        + (floor > 0 ? ` clears your ${fmtShares(floor)} floor` : '')
-        + ` and meets the ${fmtPct(targetFrac)} target.`
+      html = `No top-up needed — the pool is already <b>${fmtPct(currentPoolPct)}</b> of FDS, at or above the ${fmtPct(targetFrac)} target. `
+        + (afterProposed >= 0
+          ? `${fmtShares(afterProposed)} available after committed grants.`
+          : `Committed grants exceed the unallocated pool by ${fmtShares(overBy)}.`)
     }
-    let tail = ''
-    if (floor > 0 && burnPerYear > 0) {
-      const yearsToFloor = (afterProposed - floor) / burnPerYear
-      if (yearsToFloor > 0) tail = ` At ~${fmtShares(burnRounded)}/yr the floor is reached ~${fmtMY(todayMs + yearsToFloor * YEAR_MS)}.`
-    }
-    return { cls: status === 'ok' ? 'ok' : 'warn', html: lead + body + tail }
+    return { cls: availAfter >= 0 ? 'ok' : 'warn', html }
   }
-  const initialNote = recNote(defaultTargetPct, defaultFloor)
+  const initialNote = recNote(defaultTargetPct)
 
   // Canonical figures the client recompute() reuses (so the live math can't
-  // drift from the headline — it only varies the target % and floor inputs).
+  // drift from the headline — it only varies the target % input).
   const recData = {
     poolAuthorized,
-    afterProposed,          // future-available: available − proposed (ideas excluded)
+    afterProposed,          // future-available: available − committed (ideas excluded)
     postFDS,
-    burnPerYear,
-    burnRounded,
-    todayMs,
     presets: PRESETS,
   }
 
-  // Proposed grants — a responsive grid of compact rows: recipient (with a
-  // "title · role" sub-line), shares, and % of post-round FDS. The grid flows
-  // into more columns as the card widens, so freed space (when other cards are
-  // toggled off) fills with grants. Award type / vesting / notes live in the
-  // board-approval xlsx; the slide stays at-a-glance. Sorted largest first.
+  // Committed grants (for board approval) — listed largest first as a compact
+  // Recipient / Shares / % FDS table for the right-hand column. The recipient
+  // cell carries the name + an "award · title · role" sub-line; vesting and
+  // notes live in the board-approval export, not on this summary.
   const proposedSorted = [...proposed].sort((a, b) => (b.quantity || 0) - (a.quantity || 0))
-  function proposedItems(list: Grant[]): string {
+  function approveRows(list: Grant[]): string {
     return list.map(g => {
       const name = g.recipient_name || g.job_title || 'Unnamed'
-      const subBits = [g.recipient_name ? g.job_title : null, g.recipient_type].filter(Boolean)
-      const sub = subBits.length ? `<span class="grole">${esc(subBits.join(' · '))}</span>` : ''
-      return `<div class="grant"><span class="gname">${esc(name)}${sub}</span><span class="gval"><span class="gsh">${fmtShares(g.quantity)}</span><span class="gpc">${fmtPct(pctOfFds(g.quantity || 0))}</span></span></div>`
+      const subBits = [g.award_type, g.recipient_name ? g.job_title : null, g.recipient_type].filter(Boolean)
+      const sub = subBits.length ? `<span class="rsub">${esc(subBits.join(' · '))}</span>` : ''
+      return `<tr><td class="name">${esc(name)}${sub}</td><td class="r sh">${fmtShares(g.quantity)}</td><td class="r pc">${fmtPct(pctOfFds(g.quantity || 0))}</td></tr>`
     }).join('')
   }
   const proposedHtml = proposedSorted.length === 0
     ? '<div class="empty">No grants are currently committed.</div>'
-    : `<div class="grant-grid">${proposedItems(proposedSorted)}</div>`
+    : `<table class="approve"><colgroup><col class="a-rec"/><col class="a-sh"/><col class="a-pc"/></colgroup>`
+      + `<thead><tr><th>Recipient</th><th class="r">Shares</th><th class="r">% FDS</th></tr></thead>`
+      + `<tbody>${approveRows(proposedSorted)}</tbody></table>`
 
   // ---- Actionable callout ----
   let calloutClass = 'ok'
@@ -312,12 +274,11 @@ export default defineEventHandler(async (event) => {
   .opts label{display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap}
   .opts input{cursor:pointer;margin:0}
   .print-btn{cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:var(--ink);font-size:12.5px;font-weight:600;padding:9px 14px;border-radius:10px;white-space:nowrap}
-  /* An excluded block is removed from the flow entirely, so the space it freed
-     is reflowed to the remaining cards (the grants card grows to take it). */
-  .blank{display:none}
+  /* An excluded block is left blank but keeps its space, so the layout is stable. */
+  .blank{visibility:hidden}
   .print-btn:hover{background:#f8fafc}
   /* The slide: one landscape page. */
-  .slide{max-width:1360px;margin:18px auto 48px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 34px rgba(15,23,42,.12);padding:20px 40px 14px;display:flex;flex-direction:column;gap:14px}
+  .slide{max-width:1360px;margin:18px auto 48px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 34px rgba(15,23,42,.12);padding:20px 40px 12px;display:flex;flex-direction:column;gap:9px}
   .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
   /* Header band */
   .head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;border-bottom:2px solid #1e1b4b;padding-bottom:8px}
@@ -331,20 +292,12 @@ export default defineEventHandler(async (event) => {
   .kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:2px;font-weight:700}
   .kpi-sub{font-size:11px;color:var(--brand);margin-top:2px;font-weight:600}
   .kpi-sub2{font-size:10px;color:var(--faint);margin-top:1px;font-weight:500;font-variant-numeric:tabular-nums}
-  /* Body: three equal-height column cards — Pool composition (with the health
-     indicator under it) | Committed grants | Pool recommendation. A FLEX row
-     (not a fixed grid) so that when a card is toggled off, the space it freed
-     reflows to the survivors — and the Committed-grants card is weighted to grow
-     into it (flex:2), since committed/proposed grants are the priority content. */
-  .body{display:flex;flex-wrap:wrap;gap:16px;align-items:stretch}
-  .body > .panel{flex:1 1 0;min-width:255px}
-  .body > .panel[data-block="proposed"]{flex:2 1 0}
-  /* Content modules are bordered CARDS with a filled header band, so Pool
-     composition / Pool recommendation / Committed grants read as three distinct
-     blocks instead of running together on the white slide. */
-  .panel{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:0 15px 14px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
-  .panel > h2{margin:0 -15px;padding:8px 15px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);background:#f8fafc;border-bottom:1px solid var(--line);border-radius:11px 11px 0 0}
-  .panel > .desc{margin:9px 0 9px;font-size:11px;color:var(--muted)}
+  /* Body grid: two columns */
+  .body{display:grid;grid-template-columns:1fr 1.1fr 1.15fr;gap:18px;align-items:start}
+  /* Left column stacks composition + health check; the grants list gets its own column. */
+  .col-stack{display:flex;flex-direction:column;gap:18px;min-width:0}
+  .panel h2{margin:0 0 2px;font-size:13.5px;font-weight:800;letter-spacing:-.01em}
+  .panel .desc{margin:0 0 8px;font-size:11px;color:var(--muted)}
   /* Shared value cell: bold shares, fixed gap, non-bold % — right-aligned so
      every figure lines up across rows. Used in the breakdown, bars, and tables. */
   .sh{font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;text-align:right}
@@ -365,7 +318,6 @@ export default defineEventHandler(async (event) => {
   .rec-inwrap{display:inline-flex;align-items:baseline;gap:4px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:3px 8px}
   .rec-inwrap input{border:none;outline:none;font-size:13px;font-weight:800;color:var(--brand);text-align:right;font-variant-numeric:tabular-nums;background:transparent;padding:0}
   .rec-inwrap input#rec-target{width:58px}
-  .rec-inwrap input#rec-floor{width:104px}
   .rec-inwrap input::-webkit-outer-spin-button,.rec-inwrap input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
   .rec-inwrap input[type=number]{-moz-appearance:textfield;appearance:textfield}
   .rec-unit{font-size:10px;font-weight:600;color:var(--faint);text-transform:none;letter-spacing:0}
@@ -377,38 +329,38 @@ export default defineEventHandler(async (event) => {
   .rec-table tr.rec-met td{color:var(--faint)}
   .rec-table tr.rec-met td:first-child{color:var(--muted)}
   .rec-table tr.rec-custom td{background:#eef2ff;font-weight:800;color:var(--brand)}
-  .floor-cell{font-weight:800}
-  .ok-dot{color:#059669}
-  .bad-dot{color:#dc2626}
   .rec-foot{margin:6px 0 0;font-size:10px;color:var(--faint);font-variant-numeric:tabular-nums}
   /* Recommendation note (shared with the runway-style callout chrome) */
   .pnote{margin:7px 0 0;font-size:11px;line-height:1.32;padding:6px 9px;border-radius:8px;border-left:3px solid}
   .pnote.ok{background:#ecfdf5;color:#065f46;border-color:#34d399}
   .pnote.warn{background:#fef2f2;color:#991b1b;border-color:#f87171}
   .pnote.neutral{background:#f8fafc;color:var(--ink-2);border-color:#cbd5e1}
-  /* Committed grants — a responsive grid of compact rows (recipient with a
-     title · role sub-line, then shares + % FDS). It flows into MORE columns as
-     the card widens, so when other cards are toggled off the freed space fills
-     with grants rather than whitespace. Award/vesting/notes live in the
-     board-approval xlsx; the slide stays at-a-glance. */
-  .grant-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(195px,1fr));gap:0 20px}
-  .grant{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:5px 0;border-bottom:1px solid #f1f5f9;font-size:11px}
-  .grant .gname{font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis}
-  .grant .grole{display:block;font-size:8.5px;color:var(--faint);font-weight:400}
-  .grant .gval{white-space:nowrap;text-align:right;flex:none}
-  .grant .gsh{font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
-  .grant .gpc{color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums;margin-left:7px}
-  .proposed-total{display:flex;align-items:baseline;gap:10px;border-top:2px solid var(--line);padding-top:7px;margin-top:7px;font-size:12px}
+  /* Committed-grants approval list — compact, single column. */
+  table{width:100%;border-collapse:collapse;font-size:11.5px}
+  table.approve{table-layout:fixed;font-size:10px;line-height:1.3}
+  .approve .a-rec{width:54%}
+  .approve .a-sh{width:28%}
+  .approve .a-pc{width:18%}
+  .approve td,.approve th{padding:3px 6px}
+  th{text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;padding:4px 9px;border-bottom:1px solid var(--line)}
+  td{padding:4px 9px;border-bottom:1px solid #f1f5f9;color:var(--ink-2);font-variant-numeric:tabular-nums}
+  td.r,th.r{text-align:right}
+  td.sh{font-weight:700;color:var(--ink)}
+  td.pc{font-weight:400;color:var(--muted)}
+  tr:last-child td{border-bottom:none}
+  tbody .name{font-weight:600;color:var(--ink);overflow-wrap:anywhere}
+  .rsub{display:block;font-size:8px;color:var(--faint);font-weight:400;margin-top:0}
+  .proposed-total{display:flex;align-items:baseline;gap:10px;border-top:2px solid var(--line);padding-top:7px;font-size:12px}
   .proposed-total .tl{font-weight:800;color:var(--ink);margin-right:auto}
   .empty{font-size:12px;color:var(--faint);padding:8px 0;font-style:italic}
-  /* Pool health indicator — sits at the foot of the Pool composition card. */
-  .callout{font-size:11.5px;border-radius:8px;padding:7px 11px;line-height:1.32;margin-top:11px}
+  /* Callout */
+  .callout{font-size:12px;border-radius:10px;padding:8px 13px;line-height:1.3}
   .callout.ok{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}
   .callout.warn{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
   .callout.neutral{background:#f8fafc;color:var(--ink-2);border:1px solid var(--line)}
   .callout b{font-weight:800}
   .foot{display:flex;justify-content:space-between;color:var(--faint);font-size:10px;border-top:1px solid var(--line);padding-top:6px;margin-top:0}
-  @media (max-width:880px){ .kpis{grid-template-columns:repeat(2,1fr)} .body > .panel{flex:1 1 100%} }
+  @media (max-width:880px){ .kpis{grid-template-columns:repeat(2,1fr)} .body{grid-template-columns:1fr} }
   @page{ size:landscape; margin:4mm 5mm }
   @media print{
     body{background:#fff}
@@ -427,8 +379,8 @@ export default defineEventHandler(async (event) => {
       <label><input type="checkbox" data-block="kpis" checked> Headline KPIs</label>
       <label><input type="checkbox" data-block="composition" checked> Pool composition</label>
       <label><input type="checkbox" data-block="poolrec" checked> Pool recommendation</label>
+      <label><input type="checkbox" data-block="health" checked> Health check</label>
       <label><input type="checkbox" data-block="proposed" checked> Committed grants</label>
-      <label><input type="checkbox" data-block="callout" checked> Recommendation</label>
     </div>
     <button class="print-btn" onclick="window.print()">⎙ Print / Save as PDF</button>
   </div>
@@ -451,45 +403,49 @@ export default defineEventHandler(async (event) => {
     </section>
 
     <section class="body">
-      <div class="panel" data-block="composition">
-        <h2>Pool composition</h2>
-        <p class="desc">How the ${fmtShares(poolAuthorized)}-option pool breaks down. Allocated = outstanding + exercised; % is of the pool.</p>
-        <div class="breakdown">
-          <div class="brow head"><span class="lbl">Allocated</span>${shpc(allocated, pctOfPool(allocated))}</div>
-          <div class="brow sub"><span class="lbl">Outstanding (held)</span>${shpc(allocatedOutstanding, pctOfPool(allocatedOutstanding))}</div>
-          <div class="brow sub"><span class="lbl">Exercised</span>${shpc(allocatedExercised, pctOfPool(allocatedExercised))}</div>
-          <div class="brow head"><span class="lbl">Available</span>${shpc(unallocated, pctOfPool(unallocated))}</div>
-          <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After committed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
-          <div class="brow minor"><span class="lbl">Forfeited / Expired<span class="ret"> · returned to pool</span></span>${shpc(totalForfeitedOrExpired, pctOfPool(totalForfeitedOrExpired))}</div>
+      <div class="col-stack">
+        <div class="panel" data-block="composition">
+          <h2>Pool composition</h2>
+          <p class="desc">How the ${fmtShares(poolAuthorized)}-option pool breaks down. Allocated = outstanding + exercised; % is of the pool.</p>
+          <div class="breakdown">
+            <div class="brow head"><span class="lbl">Allocated</span>${shpc(allocated, pctOfPool(allocated))}</div>
+            <div class="brow sub"><span class="lbl">Outstanding (held)</span>${shpc(allocatedOutstanding, pctOfPool(allocatedOutstanding))}</div>
+            <div class="brow sub"><span class="lbl">Exercised</span>${shpc(allocatedExercised, pctOfPool(allocatedExercised))}</div>
+            <div class="brow head"><span class="lbl">Available (unallocated)</span>${shpc(unallocated, pctOfPool(unallocated))}</div>
+            <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After committed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
+            <div class="brow minor"><span class="lbl">Forfeited / Expired<span class="ret"> · returned to pool</span></span>${shpc(totalForfeitedOrExpired, pctOfPool(totalForfeitedOrExpired))}</div>
+          </div>
         </div>
-        <div class="callout ${calloutClass}" data-block="callout">${calloutText}</div>
-      </div>
 
-      <div class="panel" data-block="proposed">
-        <h2>Committed grants</h2>
-        <p class="desc">All ${proposed.length} committed grant${proposed.length === 1 ? '' : 's'} — recipient (title · role), shares, and % of post-round FDS.</p>
-        ${proposedHtml}
-        ${proposedSorted.length ? `<div class="proposed-total"><span class="tl">Total committed</span>${shpc(totalProposed, pctOfFds(totalProposed))}</div>` : ''}
+        <div class="panel" data-block="health">
+          <h2>Option pool health check</h2>
+          <p class="desc">Whether the committed grants fit the pool, and what's left for future hires.</p>
+          <div class="callout ${calloutClass}">${calloutText}</div>
+        </div>
       </div>
 
       <div class="panel" data-block="poolrec">
         <h2>Pool recommendation</h2>
-        <p class="desc">Top-up to keep the pool above its floor and to hit a target size — set both below and the figures recompute live. "Avail. after" is the unallocated pool after committed grants and the top-up; targets and pool % are measured against post-round FDS.</p>
+        <p class="desc">Set a target option-pool size as a % of FDS and the top-up recomputes live. "Avail. after" is the unallocated pool after committed grants and the top-up; targets and pool % are measured against post-round FDS.</p>
         <div class="rec-controls">
           <label class="rec-ctl">Target pool
             <span class="rec-inwrap"><input id="rec-target" type="number" min="0" max="60" step="0.5" value="${(defaultTargetPct * 100).toFixed(1)}"><span class="rec-unit">% of FDS</span></span>
           </label>
-          <label class="rec-ctl">Floor
-            <span class="rec-inwrap"><input id="rec-floor" type="number" min="0" step="1000" value="${Math.round(defaultFloor)}"><span class="rec-unit">options</span></span>
-          </label>
         </div>
         <p class="pnote ${initialNote.cls}" id="rec-note">${initialNote.html}</p>
         <table class="rec-table">
-          <colgroup><col style="width:22%"/><col style="width:21%"/><col style="width:22%"/><col style="width:22%"/><col style="width:13%"/></colgroup>
-          <thead><tr><th>Target % FDS</th><th>Top-up</th><th>New pool</th><th>Avail. after</th><th>Floor</th></tr></thead>
+          <colgroup><col style="width:22%"/><col style="width:26%"/><col style="width:26%"/><col style="width:26%"/></colgroup>
+          <thead><tr><th>Target % FDS</th><th>Top-up</th><th>New pool</th><th>Avail. after</th></tr></thead>
           <tbody id="rec-rows">${recRowsHtml}</tbody>
         </table>
-        <p class="rec-foot">Current pool ${fmtShares(poolAuthorized)} · ${fmtPct(currentPoolPct)} of FDS${defaultFloor > 0 ? '' : ' · no floor set — enter one above or on the Pool Impact page'}</p>
+        <p class="rec-foot">Current pool ${fmtShares(poolAuthorized)} · ${fmtPct(currentPoolPct)} of FDS</p>
+      </div>
+
+      <div class="panel" data-block="proposed">
+        <h2>Committed grants</h2>
+        <p class="desc">All ${proposed.length} committed grant${proposed.length === 1 ? '' : 's'} for board approval — shares and % of post-round FDS.</p>
+        ${proposedHtml}
+        ${proposedSorted.length ? `<div class="proposed-total"><span class="tl">Total committed</span>${shpc(totalProposed, pctOfFds(totalProposed))}</div>` : ''}
       </div>
     </section>
 
@@ -520,27 +476,23 @@ export default defineEventHandler(async (event) => {
     })();
 
     // Pool recommendation — live recompute of the note + comparison table as the
-    // operator edits the target % / floor (persisted ad hoc to localStorage).
-    // The top-up formula mirrors poolTopUpForTarget() in shared/capTableModel.ts;
-    // keep the two in lockstep. Every other figure comes pre-computed in REC.
+    // operator edits the target % (persisted ad hoc to localStorage). The top-up
+    // formula mirrors poolTopUpForTarget() in shared/capTableModel.ts; keep the
+    // two in lockstep. Every other figure comes pre-computed in REC.
     (function () {
       var elT = document.getElementById('rec-target');
-      var elF = document.getElementById('rec-floor');
       var elNote = document.getElementById('rec-note');
       var elRows = document.getElementById('rec-rows');
-      if (!elT || !elF || !elNote || !elRows) return;
+      if (!elT || !elNote || !elRows) return;
       var REC = ${JSON.stringify(recData)};
-      var YEAR_MS = 365.25 * 86400000;
       var KEY = 'pariva-board-slide-rec';
       try {
         var saved = JSON.parse(localStorage.getItem(KEY) || '{}');
         if (saved && typeof saved.target === 'number') elT.value = saved.target;
-        if (saved && typeof saved.floor === 'number') elF.value = saved.floor;
       } catch (e) {}
 
       function fShares(n) { return (n == null || !isFinite(n)) ? '—' : Math.round(n).toLocaleString('en-US'); }
       function fPct(frac) { return (frac == null || !isFinite(frac)) ? '—' : (frac * 100).toFixed(1) + '%'; }
-      function fMY(ms) { return new Date(ms).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }); }
       // T = t·fds − pool, floored at 0 (straight % of post-round FDS, NOT
       // grossed up) — see poolTopUpForTarget().
       function topUpFor(t) {
@@ -552,19 +504,15 @@ export default defineEventHandler(async (event) => {
         // Fixed denominator: the top-up adds to the pool, FDS stays post-round.
         return REC.postFDS > 0 ? (REC.poolAuthorized + topUp) / REC.postFDS : 0;
       }
-      function rowHtml(targetFrac, floor, custom) {
+      function rowHtml(targetFrac, custom) {
         var topUp = topUpFor(targetFrac);
         var availAfter = REC.afterProposed + topUp;
-        var meets = floor > 0 ? (availAfter >= floor) : null;
-        var flag = meets == null ? '' : (meets ? '<span class="ok-dot">✓</span>' : '<span class="bad-dot">✗</span>');
         var cls = ((custom ? 'rec-custom' : '') + (topUp <= 0 ? ' rec-met' : '')).trim();
         return '<tr class="' + cls + '"><td>' + fPct(targetFrac) + '</td><td>' + (topUp > 0 ? fShares(topUp) : '—')
-          + '</td><td>' + fShares(REC.poolAuthorized + topUp) + '</td><td>' + fShares(availAfter)
-          + '</td><td class="floor-cell">' + flag + '</td></tr>';
+          + '</td><td>' + fShares(REC.poolAuthorized + topUp) + '</td><td>' + fShares(availAfter) + '</td></tr>';
       }
       function recompute() {
         var targetFrac = (parseFloat(elT.value) || 0) / 100;
-        var floor = parseFloat(elF.value) || 0;
         var fracs = [];
         for (var i = 0; i < REC.presets.length; i++) {
           if (Math.abs(REC.presets[i] - targetFrac) > 0.001) fracs.push(REC.presets[i]);
@@ -572,34 +520,29 @@ export default defineEventHandler(async (event) => {
         fracs.push(targetFrac);
         fracs.sort(function (a, b) { return a - b; });
         var rows = '';
-        for (var j = 0; j < fracs.length; j++) rows += rowHtml(fracs[j], floor, Math.abs(fracs[j] - targetFrac) < 1e-9);
+        for (var j = 0; j < fracs.length; j++) rows += rowHtml(fracs[j], Math.abs(fracs[j] - targetFrac) < 1e-9);
         elRows.innerHTML = rows;
 
-        var floorTopUp = floor > 0 ? Math.max(0, floor - REC.afterProposed) : 0;
-        var recTopUp = Math.round(Math.max(floorTopUp, topUpFor(targetFrac)));
-        var availAfter = REC.afterProposed + recTopUp;
-        var status = (floor > 0 && REC.afterProposed < floor) ? 'below'
-          : (floor > 0 && REC.afterProposed < floor * 1.2) ? 'near' : 'ok';
-        var lead = status === 'below' ? 'Below floor — ' : status === 'near' ? 'Approaching floor — ' : 'Healthy — ';
+        var topUp = topUpFor(targetFrac);
+        var availAfter = REC.afterProposed + topUp;
         var body;
-        if (recTopUp > 0) {
-          body = 'recommended top-up ≈ <b>' + fShares(recTopUp) + '</b> options → pool at <b>' + fPct(pctAfter(recTopUp))
-            + '</b> of FDS, leaving ' + fShares(availAfter) + ' available after committed' + (floor > 0 ? ' (floor ' + fShares(floor) + ').' : '.');
+        if (topUp > 0) {
+          body = 'To reach a <b>' + fPct(targetFrac) + '</b> pool, top up ≈ <b>' + fShares(topUp) + '</b> options → '
+            + fShares(REC.poolAuthorized + topUp) + ' (' + fPct(pctAfter(topUp)) + ' of FDS), '
+            + (availAfter >= 0
+              ? 'leaving ' + fShares(availAfter) + ' available after committed grants.'
+              : 'still ' + fShares(Math.abs(availAfter)) + ' short of covering committed grants.');
         } else {
-          body = 'no top-up needed — ' + fShares(REC.afterProposed) + ' available after committed'
-            + (floor > 0 ? ' clears your ' + fShares(floor) + ' floor' : '') + ' and meets the ' + fPct(targetFrac) + ' target.';
+          body = 'No top-up needed — the pool is already <b>' + fPct(pctAfter(0)) + '</b> of FDS, at or above the ' + fPct(targetFrac) + ' target. '
+            + (REC.afterProposed >= 0
+              ? fShares(REC.afterProposed) + ' available after committed grants.'
+              : 'Committed grants exceed the unallocated pool by ' + fShares(-REC.afterProposed) + '.');
         }
-        var tail = '';
-        if (floor > 0 && REC.burnPerYear > 0) {
-          var ytf = (REC.afterProposed - floor) / REC.burnPerYear;
-          if (ytf > 0) tail = ' At ~' + fShares(REC.burnRounded) + '/yr the floor is reached ~' + fMY(REC.todayMs + ytf * YEAR_MS) + '.';
-        }
-        elNote.className = 'pnote ' + (status === 'ok' ? 'ok' : 'warn');
-        elNote.innerHTML = lead + body + tail;
-        try { localStorage.setItem(KEY, JSON.stringify({ target: parseFloat(elT.value) || 0, floor: floor })); } catch (e) {}
+        elNote.className = 'pnote ' + (availAfter >= 0 ? 'ok' : 'warn');
+        elNote.innerHTML = body;
+        try { localStorage.setItem(KEY, JSON.stringify({ target: parseFloat(elT.value) || 0 })); } catch (e) {}
       }
       elT.addEventListener('input', recompute);
-      elF.addEventListener('input', recompute);
       recompute();
     })();
   </script>
