@@ -819,9 +819,8 @@ async function toggleApproval(g: Grant) {
 // section (and the post-FDS math) accordingly.
 const showExportModal = ref(false)
 const exportScopes = [
-  { key: 'approved', label: 'Approved only', desc: 'Grants the board has marked Approved.' },
-  { key: 'proposed', label: 'Approved + proposed', desc: 'Every live proposal (excludes Rejected).' },
-  { key: 'ideas', label: 'Approved + proposed + ideas', desc: 'Also include anonymous pool ideas.' },
+  { key: 'approved', label: 'Approved only', desc: 'Only committed grants the board has marked Approved.' },
+  { key: 'proposed', label: 'Committed + Proposed', desc: 'All live committed grants (excludes Rejected) plus proposed pool reserves.' },
 ] as const
 const approvedCount = computed(() => proposed.value.filter(g => g.approval_status === 'Approved').length)
 const ideasCount = computed(() => ideaRows.value.length)
@@ -1478,8 +1477,7 @@ const fieldLabels: Record<string, string> = {
               <span class="text-[13px] font-medium text-ink-900">{{ s.label }}</span>
               <span class="text-[11px] text-ink-400 num">
                 <template v-if="s.key === 'approved'">{{ approvedCount }} grant{{ approvedCount === 1 ? '' : 's' }}</template>
-                <template v-else-if="s.key === 'proposed'">{{ proposed.length }} grant{{ proposed.length === 1 ? '' : 's' }}</template>
-                <template v-else>{{ proposed.length }} + {{ ideasCount }} idea{{ ideasCount === 1 ? '' : 's' }}</template>
+                <template v-else>{{ proposed.length }} committed + {{ ideasCount }} proposed</template>
               </span>
             </div>
             <div class="text-[11.5px] text-ink-500 mt-0.5">{{ s.desc }}</div>
