@@ -32,6 +32,7 @@ interface Grant {
   award_type: string | null
   vesting_start: string | null
   notes: string | null
+  round: string | null          // batch name (Carta/import "Batch" → grants.round)
   issue_date: string | null
   quantity_issued?: number | null
   quantity_exercised?: number | null
@@ -76,7 +77,13 @@ export default defineEventHandler(async (event) => {
 
   const grants: Grant[] = grantsResp.grants || []
   const outstanding = grants.filter(g => g.status === 'outstanding')
+  // Draft grants (status='proposed') drive the pool's "committed" load. For the
+  // middle-column DISPLAY they split by board approval status — the same split
+  // the Option Grants page and the board-approval xlsx use:
+  //   committed = Approved drafts; proposed = still-pending drafts (Rejected drops).
   const proposed = grants.filter(g => g.status === 'proposed')
+  const committedList = proposed.filter(g => g.approval_status === 'Approved')
+  const proposedList = proposed.filter(g => g.approval_status !== 'Approved' && g.approval_status !== 'Rejected')
   const rounds: RoundCol[] = roundSummary.rounds || []
 
   // ---- Pool headline (canonical) ----
@@ -212,11 +219,11 @@ export default defineEventHandler(async (event) => {
     presets: PRESETS,
   }
 
-  // Committed grants (for board approval) — listed largest first as a compact
-  // Recipient / Shares / % FDS table for the right-hand column. The recipient
-  // cell carries the name + an "award · title · role" sub-line; vesting and
-  // notes live in the board-approval export, not on this summary.
-  const proposedSorted = [...proposed].sort((a, b) => (b.quantity || 0) - (a.quantity || 0))
+  // Committed grants (board-Approved) — a compact Recipient / Shares / % FDS
+  // table, largest first. The recipient cell carries an "award · title · role"
+  // sub-line.
+  const committedSorted = [...committedList].sort((a, b) => (b.quantity || 0) - (a.quantity || 0))
+  const committedTotal = committedSorted.reduce((a, g) => a + (g.quantity || 0), 0)
   function approveRows(list: Grant[]): string {
     return list.map(g => {
       const name = g.recipient_name || g.job_title || 'Unnamed'
@@ -225,28 +232,66 @@ export default defineEventHandler(async (event) => {
       return `<tr><td class="name">${esc(name)}${sub}</td><td class="r sh">${fmtShares(g.quantity)}</td><td class="r pc">${fmtPct(pctOfFds(g.quantity || 0))}</td></tr>`
     }).join('')
   }
-  const proposedHtml = proposedSorted.length === 0
-    ? '<div class="empty">No grants are currently committed.</div>'
+  const committedHtml = committedSorted.length === 0
+    ? '<div class="empty">No committed grants.</div>'
     : `<table class="approve"><colgroup><col class="a-rec"/><col class="a-sh"/><col class="a-pc"/></colgroup>`
       + `<thead><tr><th>Recipient</th><th class="r">Shares</th><th class="r">% FDS</th></tr></thead>`
-      + `<tbody>${approveRows(proposedSorted)}</tbody></table>`
+      + `<tbody>${approveRows(committedSorted)}</tbody></table>`
 
-  // ---- Actionable callout ----
+  // Proposed grants (still pending) — GROUPED BY BATCH (grants.round). Each batch
+  // is a labelled group; within it, every grantee shows their name with the
+  // title · role AND the note on the line beneath. Batches and the grants in
+  // them sort largest-first; un-batched grants fall under "No batch".
+  const proposedTotal = proposedList.reduce((a, g) => a + (g.quantity || 0), 0)
+  function proposedGroupsHtml(list: Grant[]): string {
+    const groups = new Map<string, Grant[]>()
+    for (const g of list) {
+      const key = (g.round && g.round.trim()) || 'No batch'
+      const arr = groups.get(key) || []
+      arr.push(g)
+      groups.set(key, arr)
+    }
+    const ordered = [...groups.entries()]
+      .map(([batch, gs]) => ({ batch, gs: gs.sort((a, b) => (b.quantity || 0) - (a.quantity || 0)), sum: gs.reduce((a, g) => a + (g.quantity || 0), 0) }))
+      .sort((a, b) => b.sum - a.sum)
+    return ordered.map(({ batch, gs, sum }) => {
+      const rows = gs.map(g => {
+        const name = g.recipient_name || g.job_title || 'Unnamed'
+        const meta = [g.job_title, g.recipient_type].filter(Boolean).join(' · ')
+        const note = g.notes ? `<span class="pg-note">${esc(g.notes)}</span>` : ''
+        const sub = (meta || note)
+          ? `<div class="pg-meta">${meta ? `<span class="pg-title">${esc(meta)}</span>` : ''}${note}</div>`
+          : ''
+        return `<div class="pgrant"><div class="pg-id"><div class="pg-name">${esc(name)}</div>${sub}</div>`
+          + `<div class="pg-val"><span class="sh">${fmtShares(g.quantity)}</span><span class="pc">${fmtPct(pctOfFds(g.quantity || 0))}</span></div></div>`
+      }).join('')
+      return `<div class="pgroup"><div class="pgroup-h"><span class="pgroup-name">${esc(batch)}</span><span class="pgroup-sum">${fmtShares(sum)} · ${fmtPct(pctOfFds(sum))}</span></div>${rows}</div>`
+    }).join('')
+  }
+  const proposedHtml = proposedList.length === 0
+    ? '<div class="empty">No proposed grants pending.</div>'
+    : proposedGroupsHtml(proposedList)
+
+  // ---- Actionable health verdict ----
+  // calloutClass drives the colour; healthLabel is the big "look-at-me" word the
+  // health card leads with.
   let calloutClass = 'ok'
+  let healthLabel = 'Healthy'
   let calloutText = ''
   if (totalProposed <= 0) {
-    calloutClass = 'neutral'
+    calloutClass = 'neutral'; healthLabel = 'No commitments'
     calloutText = `No grants are currently committed. ${fmtShares(unallocated)} options (${fmtPct(pctOfPool(unallocated))} of the pool) are available to grant.`
   } else if (afterProposed < 0) {
-    calloutClass = 'warn'
-    calloutText = `Action needed — the ${fmtShares(totalProposed)} options committed exceed the unallocated pool by ${fmtShares(overBy)}. Approving them requires a pool top-up of at least that much.`
+    calloutClass = 'warn'; healthLabel = 'Action needed'
+    calloutText = `The ${fmtShares(totalProposed)} options committed exceed the unallocated pool by ${fmtShares(overBy)}. Approving them requires a pool top-up of at least that much.`
   } else if (afterProposed < poolAuthorized * 0.05) {
-    calloutClass = 'warn'
-    calloutText = `Running low — approving the ${fmtShares(totalProposed)} committed options leaves only ${fmtShares(afterProposed)} (${fmtPct(pctOfPool(afterProposed))} of the pool). Plan a top-up for future hires.`
+    calloutClass = 'warn'; healthLabel = 'Running low'
+    calloutText = `Approving the ${fmtShares(totalProposed)} committed options leaves only ${fmtShares(afterProposed)} (${fmtPct(pctOfPool(afterProposed))} of the pool). Plan a top-up for future hires.`
   } else {
-    calloutText = `Healthy — approving the ${fmtShares(totalProposed)} committed options (${fmtPct(pctOfFds(totalProposed))} of FDS) still leaves ${fmtShares(afterProposed)} (${fmtPct(pctOfPool(afterProposed))} of the pool) for future grants.`
+    healthLabel = 'Healthy'
+    calloutText = `Approving the ${fmtShares(totalProposed)} committed options (${fmtPct(pctOfFds(totalProposed))} of FDS) still leaves ${fmtShares(afterProposed)} (${fmtPct(pctOfPool(afterProposed))} of the pool) for future grants.`
   }
-  if (totalIdeas > 0) calloutText += ` A further ${fmtShares(totalIdeas)} options sit in "proposed" on the pool-impact timeline.`
+  const healthIcon = calloutClass === 'ok' ? '✓' : calloutClass === 'warn' ? '!' : '•'
 
   const generatedOn = today.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
   const roundName = currentRound ? (currentRound.name || currentRound.code || 'current round') : null
@@ -292,9 +337,10 @@ export default defineEventHandler(async (event) => {
   .kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:2px;font-weight:700}
   .kpi-sub{font-size:11px;color:var(--brand);margin-top:2px;font-weight:600}
   .kpi-sub2{font-size:10px;color:var(--faint);margin-top:1px;font-weight:500;font-variant-numeric:tabular-nums}
-  /* Body grid: two columns */
-  .body{display:grid;grid-template-columns:1fr 1.1fr 1.15fr;gap:18px;align-items:start}
-  /* Left column stacks composition + health check; the grants list gets its own column. */
+  /* Body: three EQUAL columns. Left stacks composition + health; the middle
+     column stacks the grants lists (committed and/or proposed); the right column
+     is the pool recommendation. */
+  .body{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;align-items:start}
   .col-stack{display:flex;flex-direction:column;gap:18px;min-width:0}
   .panel h2{margin:0 0 2px;font-size:13.5px;font-weight:800;letter-spacing:-.01em}
   .panel .desc{margin:0 0 8px;font-size:11px;color:var(--muted)}
@@ -353,12 +399,33 @@ export default defineEventHandler(async (event) => {
   .proposed-total{display:flex;align-items:baseline;gap:10px;border-top:2px solid var(--line);padding-top:7px;font-size:12px}
   .proposed-total .tl{font-weight:800;color:var(--ink);margin-right:auto}
   .empty{font-size:12px;color:var(--faint);padding:8px 0;font-style:italic}
-  /* Callout */
-  .callout{font-size:12px;border-radius:10px;padding:8px 13px;line-height:1.3}
+  /* Proposed grants — grouped by batch; each grantee's note sits under the name. */
+  .pgroup{margin-bottom:9px}
+  .pgroup-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:2px 0 3px;padding-bottom:3px;border-bottom:1px solid var(--line)}
+  .pgroup-name{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--brand)}
+  .pgroup-sum{font-size:10px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
+  .pgrant{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px solid #f1f5f9}
+  .pgrant:last-child{border-bottom:none}
+  .pg-id{min-width:0}
+  .pg-name{font-size:11.5px;font-weight:600;color:var(--ink)}
+  .pg-meta{font-size:9px;color:var(--faint);line-height:1.3;margin-top:1px}
+  .pg-title{color:var(--muted)}
+  .pg-note{color:var(--faint)}
+  .pg-note::before{content:" — "}
+  .pg-val{white-space:nowrap;text-align:right;flex:none}
+  .pg-val .sh{font-size:11px}.pg-val .pc{margin-left:7px;font-size:10px}
+  /* Health verdict — leads with a big status word so it reads at a glance. */
+  .callout{font-size:11.5px;border-radius:10px;padding:9px 12px;line-height:1.32}
   .callout.ok{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}
   .callout.warn{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
   .callout.neutral{background:#f8fafc;color:var(--ink-2);border:1px solid var(--line)}
   .callout b{font-weight:800}
+  .health-banner{display:flex;align-items:center;gap:10px;border-radius:10px;padding:9px 13px;margin-bottom:8px}
+  .health-banner.ok{background:#059669;color:#fff}
+  .health-banner.warn{background:#dc2626;color:#fff}
+  .health-banner.neutral{background:#475569;color:#fff}
+  .health-icon{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;background:rgba(255,255,255,.22);font-size:14px;font-weight:800;flex:none}
+  .health-word{font-size:17px;font-weight:800;letter-spacing:-.01em}
   .foot{display:flex;justify-content:space-between;color:var(--faint);font-size:10px;border-top:1px solid var(--line);padding-top:6px;margin-top:0}
   @media (max-width:880px){ .kpis{grid-template-columns:repeat(2,1fr)} .body{grid-template-columns:1fr} }
   @page{ size:landscape; margin:4mm 5mm }
@@ -378,9 +445,10 @@ export default defineEventHandler(async (event) => {
       <span class="opts-lbl">Include</span>
       <label><input type="checkbox" data-block="kpis" checked> Headline KPIs</label>
       <label><input type="checkbox" data-block="composition" checked> Pool composition</label>
-      <label><input type="checkbox" data-block="poolrec" checked> Pool recommendation</label>
       <label><input type="checkbox" data-block="health" checked> Health check</label>
-      <label><input type="checkbox" data-block="proposed" checked> Committed grants</label>
+      <label><input type="checkbox" data-block="committed" checked> Committed grants</label>
+      <label><input type="checkbox" data-block="proposed" checked> Proposed grants</label>
+      <label><input type="checkbox" data-block="poolrec" checked> Pool recommendation</label>
     </div>
     <button class="print-btn" onclick="window.print()">⎙ Print / Save as PDF</button>
   </div>
@@ -411,7 +479,7 @@ export default defineEventHandler(async (event) => {
             <div class="brow head"><span class="lbl">Allocated</span>${shpc(allocated, pctOfPool(allocated))}</div>
             <div class="brow sub"><span class="lbl">Outstanding (held)</span>${shpc(allocatedOutstanding, pctOfPool(allocatedOutstanding))}</div>
             <div class="brow sub"><span class="lbl">Exercised</span>${shpc(allocatedExercised, pctOfPool(allocatedExercised))}</div>
-            <div class="brow head"><span class="lbl">Available (unallocated)</span>${shpc(unallocated, pctOfPool(unallocated))}</div>
+            <div class="brow head"><span class="lbl">Available</span>${shpc(unallocated, pctOfPool(unallocated))}</div>
             <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After committed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
             <div class="brow minor"><span class="lbl">Forfeited / Expired<span class="ret"> · returned to pool</span></span>${shpc(totalForfeitedOrExpired, pctOfPool(totalForfeitedOrExpired))}</div>
           </div>
@@ -419,8 +487,24 @@ export default defineEventHandler(async (event) => {
 
         <div class="panel" data-block="health">
           <h2>Option pool health check</h2>
-          <p class="desc">Whether the committed grants fit the pool, and what's left for future hires.</p>
+          <div class="health-banner ${calloutClass}"><span class="health-icon">${healthIcon}</span><span class="health-word">${healthLabel}</span></div>
           <div class="callout ${calloutClass}">${calloutText}</div>
+        </div>
+      </div>
+
+      <div class="col-stack">
+        <div class="panel" data-block="committed">
+          <h2>Committed grants</h2>
+          <p class="desc">${committedSorted.length} board-approved grant${committedSorted.length === 1 ? '' : 's'} — shares and % of post-round FDS.</p>
+          ${committedHtml}
+          ${committedSorted.length ? `<div class="proposed-total"><span class="tl">Total committed</span>${shpc(committedTotal, pctOfFds(committedTotal))}</div>` : ''}
+        </div>
+
+        <div class="panel" data-block="proposed">
+          <h2>Proposed grants</h2>
+          <p class="desc">${proposedList.length} pending grant${proposedList.length === 1 ? '' : 's'}, grouped by batch — the note sits under each grantee.</p>
+          ${proposedHtml}
+          ${proposedList.length ? `<div class="proposed-total"><span class="tl">Total proposed</span>${shpc(proposedTotal, pctOfFds(proposedTotal))}</div>` : ''}
         </div>
       </div>
 
@@ -439,13 +523,6 @@ export default defineEventHandler(async (event) => {
           <tbody id="rec-rows">${recRowsHtml}</tbody>
         </table>
         <p class="rec-foot">Current pool ${fmtShares(poolAuthorized)} · ${fmtPct(currentPoolPct)} of FDS</p>
-      </div>
-
-      <div class="panel" data-block="proposed">
-        <h2>Committed grants</h2>
-        <p class="desc">All ${proposed.length} committed grant${proposed.length === 1 ? '' : 's'} for board approval — shares and % of post-round FDS.</p>
-        ${proposedHtml}
-        ${proposedSorted.length ? `<div class="proposed-total"><span class="tl">Total committed</span>${shpc(totalProposed, pctOfFds(totalProposed))}</div>` : ''}
       </div>
     </section>
 
