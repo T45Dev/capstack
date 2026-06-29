@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs'
 import { db } from '~~/server/utils/db'
-import { grantIssued } from '~~/shared/capTableModel'
+import { grantIssued, authorizedPool } from '~~/shared/capTableModel'
 
 // Generates a board-approval xlsx that follows the S3VC Option Grants
 // Workbook template (tab 3, "Board Option Grant Approval"). Returned as a
@@ -79,27 +79,21 @@ export default defineEventHandler(async (event) => {
   const scheduleById = new Map<string, any>()
   for (const s of vestingSchedules) scheduleById.set(s.id, s)
 
-  // ---- Pre- and post-round FDS — CANON from the Rounds page ----
-  // The board export must show the SAME fully-diluted totals as the Rounds
-  // table, so we read them straight from round-summary rather than recomputing
-  // from the `assumptions` row (a separate data source that drifted — the
-  // export's FDS no longer matched the Rounds page). round-summary nets
-  // exercised options, honors pinned snapshots, and derives the share price the
-  // board-workbook way; we just consume its per-round cumulative Total FDS:
-  //   postFDS — the current round's cumulative Total FDS (the denominator every
-  //             ownership % column divides by).
-  //   preFDS  — the prior round's cumulative Total FDS (the reference figure).
-  // Falls back to a holdings/assumptions figure only when no rounds exist yet.
-  const holdingsTotal = holdings.reduce((a, h) => a + (h.shares || 0), 0)
-  const outstandingTotal = allGrants.filter(g => g.status === 'outstanding').reduce((a, g) => a + g.quantity, 0)
-  const proposedTotal = proposedGrants.reduce((a, g) => a + g.quantity, 0)
-  const poolAuthorized = pools.reduce((a, p) => a + (p.authorized || 0), 0)
-  const optionsAvailable = Math.max(0, poolAuthorized - outstandingTotal - proposedTotal)
-  const fdsFromCapTable = holdingsTotal + outstandingTotal + optionsAvailable + (assumptions?.pool_top_up_shares || 0)
-
-  const summary = await (event.$fetch as any)(`/api/companies/${id}/round-summary`)
-    .catch(() => null) as { rounds: Array<{ kind: string; total_shares_fds: number }> } | null
-  const sumRounds = summary?.rounds || []
+  // ---- Everything below comes from CANON (the Rounds page), not the legacy
+  //      `assumptions` row or the raw option_pools lump ----
+  // Each data point has ONE source: round-summary for FDS / pool issued / the
+  // round name & PPS, aggregate-round for the option-pool timeline. We feed the
+  // SAME shared helpers the Rounds, Grants, and Pool Impact pages use, so this
+  // export tracks the screen live — edit a round, re-download, the numbers move.
+  // (`assumptions` / holdings survive ONLY as fallbacks for a company that has
+  // no rounds entered yet.)
+  interface SumRound { kind: string; name: string | null; code: string; option_pool_issued: number; total_shares_fds: number }
+  interface AggResp { option_pool_total: number | null; derived_from_history?: boolean }
+  const [summary, aggregate] = await Promise.all([
+    (event.$fetch as any)(`/api/companies/${id}/round-summary`).catch(() => null) as Promise<{ rounds: SumRound[] } | null>,
+    (event.$fetch as any)(`/api/companies/${id}/aggregate-round`).catch(() => null) as Promise<AggResp | null>,
+  ])
+  const sumRounds: SumRound[] = summary?.rounds || []
   // Current round mirrors the Rounds/dilution pages: the open round if flagged,
   // else the latest non-formation round.
   let curIdx = sumRounds.findIndex(r => r.kind === 'open')
@@ -110,6 +104,30 @@ export default defineEventHandler(async (event) => {
   }
   const curRound = curIdx >= 0 ? sumRounds[curIdx]! : null
   const priorRound = curIdx > 0 ? sumRounds[curIdx - 1]! : null
+  const openRound = sumRounds.find(r => r.kind === 'open') || null
+
+  const holdingsTotal = holdings.reduce((a, h) => a + (h.shares || 0), 0)
+  const outstandingTotal = allGrants.filter(g => g.status === 'outstanding').reduce((a, g) => a + g.quantity, 0)
+  const proposedTotal = proposedGrants.reduce((a, g) => a + g.quantity, 0)
+
+  // Authorized pool — the SAME canonical helper the Grants / Pool Impact / board
+  // slide use (timeline total + the open round's own issued, else Σ typed pool,
+  // else the option_pools lump). The raw option_pools sum ignored pool shares
+  // the operator typed onto rounds, so it read stale.
+  const poolAuthorized = authorizedPool({
+    hasTimeline: !!aggregate?.derived_from_history,
+    timelinePoolTotal: aggregate?.option_pool_total || 0,
+    openRoundPoolIssued: openRound?.option_pool_issued || 0,
+    allRoundsPoolIssued: sumRounds.reduce((a, r) => a + (r.option_pool_issued || 0), 0),
+    poolsLump: pools.reduce((a, p) => a + (p.authorized || 0), 0),
+  })
+  const optionsAvailable = Math.max(0, poolAuthorized - outstandingTotal - proposedTotal)
+  const fdsFromCapTable = holdingsTotal + outstandingTotal + optionsAvailable + (assumptions?.pool_top_up_shares || 0)
+
+  // postFDS = the current round's cumulative Total FDS (the denominator every
+  // ownership % divides by); preFDS = the prior round's. round-summary nets
+  // exercised options, honors pinned snapshots, and derives the share price the
+  // board-workbook way — we just consume it. Fallback only when no rounds exist.
   const preFDS = (priorRound?.total_shares_fds && priorRound.total_shares_fds > 0)
     ? priorRound.total_shares_fds
     : (assumptions?.pre_round_fds ?? fdsFromCapTable)
@@ -129,7 +147,11 @@ export default defineEventHandler(async (event) => {
     ).get(id, baselineRef, baselineRef) as { name: string | null; code: string } | undefined
     baselineRoundName = r ? (r.name || r.code) : baselineRef
   }
-  const roundName: string = assumptions?.round_name || baselineRoundName || 'Round'
+  // Round name is the CURRENT (open) round from canon — so renaming or flipping
+  // the open round on the Rounds page flows straight through to the export
+  // header and the "% FD Post-<round>" column. assumptions/baseline are only
+  // fallbacks for a company with no rounds entered yet.
+  const roundName: string = (curRound?.name || curRound?.code) || baselineRoundName || assumptions?.round_name || 'Round'
   // "Series B" -> "B", "Series A-2" -> "A-2", "Bridge" -> "Bridge"
   const roundSuffix = roundName.replace(/^Series\s+/i, '')
   const pctPostHeader = `% FD Securities Post-${roundSuffix}`
