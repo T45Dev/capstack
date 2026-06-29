@@ -32,15 +32,35 @@ export default defineEventHandler(async (event) => {
   if (!company) throw createError({ statusCode: 404, message: 'Company not found' })
 
   const assumptions = db().prepare('SELECT * FROM assumptions WHERE company_id = ?').get(id) as any
-  const proposedWhere = scope === 'approved'
-    ? "g.status = 'proposed' AND g.approval_status = 'Approved'"
-    : "g.status = 'proposed' AND (g.approval_status IS NULL OR g.approval_status != 'Rejected')"
-  const proposedGrants = db().prepare(`
-    SELECT g.*
-    FROM grants g
-    WHERE g.company_id = ? AND ${proposedWhere}
-    ORDER BY g.quantity DESC
-  `).all(id) as any[]
+
+  // ---- Canon sources (one data point, one source) ----
+  // Grants (committed + proposed) and the option pool come from the SAME
+  // /grants endpoint the Option Grants page reads; FDS / round name / pool
+  // timeline come from round-summary + aggregate-round. We never re-query the
+  // grants table directly here: the /grants endpoint lazily expires past-window
+  // terminated grants and returns the reconciled lifecycle view, so reading the
+  // raw table showed STALE grant data (shares still 'outstanding' that the
+  // Grants page had already expired / the operator had since edited).
+  interface SumRound { kind: string; name: string | null; code: string; option_pool_issued: number; total_shares_fds: number }
+  interface AggResp { option_pool_total: number | null; derived_from_history?: boolean }
+  interface GrantsResp { grants: any[]; pools: Array<{ authorized: number }> }
+  const [grantsResp, summary, aggregate] = await Promise.all([
+    (event.$fetch as any)(`/api/companies/${id}/grants`).catch(() => ({ grants: [], pools: [] })) as Promise<GrantsResp>,
+    (event.$fetch as any)(`/api/companies/${id}/round-summary`).catch(() => null) as Promise<{ rounds: SumRound[] } | null>,
+    (event.$fetch as any)(`/api/companies/${id}/aggregate-round`).catch(() => null) as Promise<AggResp | null>,
+  ])
+  const allGrants: any[] = grantsResp.grants || []
+
+  // Committed/proposed grants for sections 1 & 2 — filtered off canon by scope:
+  //   approved → only board-Approved proposals
+  //   proposed → all live proposals (Approved + Pending; Rejected excluded)
+  // Sorted largest-first, matching the old query's ORDER BY quantity DESC.
+  const proposedGrants: any[] = allGrants
+    .filter(g => g.status === 'proposed'
+      && (scope === 'approved'
+        ? g.approval_status === 'Approved'
+        : (g.approval_status == null || g.approval_status !== 'Rejected')))
+    .sort((a, b) => (b.quantity || 0) - (a.quantity || 0))
 
   // Ideas: anonymous future reserves from the pool, surfaced as proposed-grant
   // rows (no strike/stakeholder). Their shares roll into the proposed total and
@@ -71,28 +91,18 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const allGrants = db().prepare(`SELECT * FROM grants WHERE company_id = ?`).all(id) as any[]
+  // Cap-table reference data (separate canon: holdings / share classes). Pools
+  // and grants come from the /grants endpoint above; vesting-schedule defs are
+  // reference rows, not grant data.
   const shareClasses = db().prepare(`SELECT * FROM share_classes WHERE company_id = ?`).all(id) as any[]
   const holdings = db().prepare(`SELECT * FROM holdings WHERE company_id = ?`).all(id) as any[]
-  const pools = db().prepare(`SELECT * FROM option_pools WHERE company_id = ?`).all(id) as any[]
+  const pools = grantsResp.pools || []
   const vestingSchedules = db().prepare(`SELECT id, name, vest_months, cliff_months FROM vesting_schedules WHERE company_id = ?`).all(id) as any[]
   const scheduleById = new Map<string, any>()
   for (const s of vestingSchedules) scheduleById.set(s.id, s)
 
-  // ---- Everything below comes from CANON (the Rounds page), not the legacy
-  //      `assumptions` row or the raw option_pools lump ----
-  // Each data point has ONE source: round-summary for FDS / pool issued / the
-  // round name & PPS, aggregate-round for the option-pool timeline. We feed the
-  // SAME shared helpers the Rounds, Grants, and Pool Impact pages use, so this
-  // export tracks the screen live — edit a round, re-download, the numbers move.
-  // (`assumptions` / holdings survive ONLY as fallbacks for a company that has
-  // no rounds entered yet.)
-  interface SumRound { kind: string; name: string | null; code: string; option_pool_issued: number; total_shares_fds: number }
-  interface AggResp { option_pool_total: number | null; derived_from_history?: boolean }
-  const [summary, aggregate] = await Promise.all([
-    (event.$fetch as any)(`/api/companies/${id}/round-summary`).catch(() => null) as Promise<{ rounds: SumRound[] } | null>,
-    (event.$fetch as any)(`/api/companies/${id}/aggregate-round`).catch(() => null) as Promise<AggResp | null>,
-  ])
+  // ---- FDS / round name / pool from CANON (round-summary + aggregate, fetched
+  //      above), never the legacy `assumptions` row or the raw option_pools lump.
   const sumRounds: SumRound[] = summary?.rounds || []
   // Current round mirrors the Rounds/dilution pages: the open round if flagged,
   // else the latest non-formation round.
