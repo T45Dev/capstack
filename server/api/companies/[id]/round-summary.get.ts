@@ -1,4 +1,5 @@
 import { db } from '~~/server/utils/db'
+import { derivedSharePrice } from '~~/shared/capTableModel'
 
 // Per-round Rounds table — feeds the top card on the Rounds page.
 // One entry per row in the `rounds` table, plus the Open Round when
@@ -19,7 +20,9 @@ interface RoundColumn {
   close_date: string | null
   seniority: number
   share_class_code: string | null
-  share_price: number | null
+  share_price: number | null         // EFFECTIVE per-share price (override ?? derived = pre-money / pre-round FDS)
+  share_price_override: number | null // operator-typed price; null = derive
+  share_price_derived: number | null  // pre-money / pre-round FDS (the board-workbook formula); null when not derivable
   new_money: number
   notes_financing: number         // sum of CN principal+interest with destination = this round's code
   pre_money: number | null
@@ -348,33 +351,46 @@ export default defineEventHandler((event) => {
     if (!r) continue
     const effectiveKind: 'formation' | 'closed' | 'open' = r.kind
 
-    // Preferred issued defaults to new_money / share_price — the dollars
-    // the investors put in, divided by the per-share price. The user can
-    // override per round (preferred_issued_override) for debt-only or
-    // bridge rounds where the formula doesn't apply. NULL override =
-    // use the formula. common and option_pool_issued remain user-typed.
-    const roundPPS = r.share_price && r.share_price > 0 ? r.share_price : 0
     const newMoney = r.new_money || 0
-    // Shares are integers — no partial shares. Floor every derived
-    // share count (Math.floor, not Math.round) so 4.99 stays 4.
-    const preferredIssued = r.preferred_issued_override != null
-      ? Math.floor(Number(r.preferred_issued_override))
-      : (roundPPS > 0 ? Math.floor(newMoney / roundPPS) : Math.floor(Number(r.preferred_issued) || 0))
     const common = Number(r.common) || 0
     const poolIssued = Number(r.option_pool_issued) || 0
 
-    // CNs attributed to this round. preFDS for the cap-based effective
-    // price denominator is the FDS through the *previous* round, which is
-    // the cumulativeFDS we've accumulated so far (this round's own
-    // contributions haven't been added yet). When the round is a later
-    // tranche of a multi-tranche QF (parent_round_code set), the cap
-    // formula uses the PARENT's preFDS — the state immediately prior to
-    // the initial closing of the QF, per the promissory note convention.
+    // FDS as of immediately BEFORE this round = the cumulative we've built so
+    // far (this round's own contributions aren't added yet). It serves double
+    // duty: the cap-based CN-conversion denominator AND the basis the board
+    // workbook uses to derive the round's share price. When the round is a
+    // later tranche of a multi-tranche QF (parent_round_code set), the cap
+    // formula uses the PARENT's preFDS — the state immediately prior to the
+    // initial closing of the QF, per the promissory note convention.
     const codeKey = r.code.toUpperCase()
     const attribs = cnByCode.get(codeKey) || []
     const ownPreFDS = cumulativeFDS
     preFDSByRoundCode.set(codeKey, ownPreFDS)
     const preFDS = qfInitialPreFDS(r, ownPreFDS)
+
+    // Pre-money derives from the prior round's post-money when not explicitly
+    // set; a stored pre_money overrides. Used both as the displayed valuation
+    // and as the numerator of the derived share price below.
+    const preMoney: number | null = (r.pre_money != null && r.pre_money !== 0) ? r.pre_money : prevPostMoney
+
+    // Share price is DERIVED the way the board workbook does it —
+    //   PPS = pre-money ÷ pre-round FDS
+    // — with an operator-typed share_price kept as an explicit OVERRIDE for
+    // debt/bridge rounds where the formula doesn't apply. The endpoint returns
+    // this EFFECTIVE price as canon, so every downstream consumer (board
+    // exports, dilution, fairness) reads one number instead of re-deriving it.
+    const sharePriceOverride = r.share_price && r.share_price > 0 ? Number(r.share_price) : null
+    const sharePriceDerived = derivedSharePrice(preMoney, ownPreFDS)
+    const effectivePPS = sharePriceOverride ?? sharePriceDerived
+
+    // Preferred issued = new money ÷ effective PPS. NOT floored — the workbook
+    // carries fractional shares through the build-up and only rounds for
+    // display, so flooring per round drifted us off the operator's sheet. A
+    // preferred_issued_override pins the count for rounds where the formula
+    // doesn't apply (it, too, is taken as-typed, not floored).
+    const preferredIssued = r.preferred_issued_override != null
+      ? Number(r.preferred_issued_override)
+      : (effectivePPS > 0 ? newMoney / effectivePPS : (Number(r.preferred_issued) || 0))
 
     let cnShares = 0
     const notesAttributed: RoundColumn['notes_attributed'] = []
@@ -383,7 +399,7 @@ export default defineEventHandler((event) => {
       // over the round PPS. Effective conv price applies cap/discount on
       // top — same rule as /convertibles so the CN page's shares column
       // and the cap table's Notes converted row agree exactly.
-      const basis = a.storedConvPrice || roundPPS
+      const basis = a.storedConvPrice || effectivePPS
       let eff = 0
       if (basis > 0) {
         const discountPrice = a.discount > 0 ? basis * (1 - a.discount) : basis
@@ -392,7 +408,8 @@ export default defineEventHandler((event) => {
       } else if (a.cap > 0 && preFDS > 0) {
         eff = a.cap / preFDS
       }
-      const sharesForThisCn = eff > 0 ? Math.floor(a.total / eff) : 0
+      // Fractional shares preserved (see preferredIssued) — display rounds.
+      const sharesForThisCn = eff > 0 ? a.total / eff : 0
       if (sharesForThisCn > 0) cnShares += sharesForThisCn
       notesAttributed.push({
         id: a.id,
@@ -410,13 +427,11 @@ export default defineEventHandler((event) => {
     // conversion-era share bucketing above.
     const notesFinancing = notesFinancingByRoundCode.get(r.code.toUpperCase()) || 0
 
-    // Pre-money derives from the prior round's post-money when not explicitly
-    // set; a stored pre_money overrides. Informational only — FDS uses shares,
-    // not valuation — so deriving it can't move any cap-table math.
-    const preMoney: number | null = (r.pre_money != null && r.pre_money !== 0) ? r.pre_money : prevPostMoney
-    // Post-money = pre-money + new money only. Notes financing is reported
-    // separately below post-money; it doesn't roll into the post-money
-    // valuation per the operator's accounting convention.
+    // Post-money = pre-money + new money (the term-sheet definition). The board
+    // workbook shows an *implied* post for priced rounds (PPS × post-round FDS);
+    // we keep pre+new here because it's what the editable pre→post equation on
+    // the Rounds card renders and what the next round's pre-money derives from.
+    // (preMoney is computed above, before the derived share price.)
     const postMoney: number = (preMoney || 0) + newMoney
     prevPostMoney = postMoney
 
@@ -425,7 +440,7 @@ export default defineEventHandler((event) => {
     // at formation in the normal flow, but historical cap tables can
     // include pre-existing converted-note shares).
     const notesConverted = r.notes_converted_override != null
-      ? Math.floor(Number(r.notes_converted_override))
+      ? Number(r.notes_converted_override)
       : cnShares
 
     // Cumulative FDS sums the user-typed equity contributions for this
@@ -441,7 +456,7 @@ export default defineEventHandler((event) => {
     // each row's cumulative FDS to the trusted Round-history figure.
     const optionsExercised = exercisedByRoundId.get(r.id) || 0
     if (r.total_shares_fds_override != null) {
-      cumulativeFDS = Math.floor(Number(r.total_shares_fds_override))
+      cumulativeFDS = Number(r.total_shares_fds_override)
     } else {
       // Pool contributes NET of exercised — those shares already sit in common.
       cumulativeFDS += common + preferredIssued + poolIssued + notesConverted - optionsExercised
@@ -461,7 +476,9 @@ export default defineEventHandler((event) => {
       close_date: r.close_date,
       seniority: r.seniority,
       share_class_code: r.share_class_code,
-      share_price: r.share_price,
+      share_price: effectivePPS > 0 ? effectivePPS : null,
+      share_price_override: sharePriceOverride,
+      share_price_derived: sharePriceDerived > 0 ? sharePriceDerived : null,
       new_money: newMoney,
       notes_financing: notesFinancing,
       pre_money: preMoney,

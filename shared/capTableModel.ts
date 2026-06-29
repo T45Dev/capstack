@@ -7,15 +7,41 @@
 // `~/utils/capTable`; server code imports `~~/shared/capTableModel` directly.
 
 /**
- * New preferred shares issued in a priced round: new money ÷ share price,
- * floored. Returns 0 when either input is missing or zero.
+ * New preferred shares issued in a priced round: new money ÷ share price.
+ * Returns 0 when either input is missing or zero.
+ *
+ * NB: this deliberately does NOT floor. The board cap-table workbook keeps
+ * fractional shares through the build-up (the cumulative FDS only rounds at
+ * presentation), so we mirror that — flooring per round accumulated a
+ * share-level drift away from the operator's source-of-truth sheet. Display
+ * formatters (fmtShares) round for the eye; the math stays exact.
  */
 export function newSharesIssued(
   newMoney: number | null | undefined,
   sharePrice: number | null | undefined,
 ): number {
   if (!newMoney || !sharePrice) return 0
-  return Math.floor(newMoney / sharePrice)
+  return newMoney / sharePrice
+}
+
+/**
+ * Derived per-share price for a priced round, matching the board workbook:
+ * PPS = pre-money valuation ÷ the fully-diluted shares as of immediately
+ * BEFORE the round (the prior round's cumulative FDS). Returns 0 when either
+ * input is missing or non-positive.
+ *
+ * This is the inverse of the app's legacy "type the price" model: the sheet
+ * treats price as an OUTPUT of valuation and pre-round FDS, and lets the
+ * preferred-share count flow from it. The Rounds page now derives PPS this way
+ * by default; an operator-typed `share_price` still overrides it (debt/bridge
+ * rounds where the formula doesn't apply).
+ */
+export function derivedSharePrice(
+  preMoney: number | null | undefined,
+  preRoundFds: number | null | undefined,
+): number {
+  if (!preMoney || !preRoundFds || preMoney <= 0 || preRoundFds <= 0) return 0
+  return preMoney / preRoundFds
 }
 
 export interface OpenRoundPostFdsParts {

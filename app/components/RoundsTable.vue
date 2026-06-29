@@ -12,7 +12,7 @@
 // the layout.
 import { Plus, Trash2, Save, Undo2, Check, ChevronRight, ChevronDown, CheckCircle2, AlertTriangle } from 'lucide-vue-next'
 import { fmtShares, fmtUSD } from '~/utils/format'
-import { newSharesIssued, openRoundPostFds } from '~/utils/capTable'
+import { newSharesIssued, openRoundPostFds, derivedSharePrice } from '~/utils/capTable'
 
 const props = defineProps<{ companyId: string }>()
 const emit = defineEmits<{ (e: 'refreshed'): void }>()
@@ -23,7 +23,9 @@ interface RoundCol {
   name: string | null
   kind: 'formation' | 'closed' | 'open'
   close_date: string | null
-  share_price: number | null
+  share_price: number | null          // effective PPS (override ?? derived)
+  share_price_override: number | null // operator-typed; null = derive
+  share_price_derived: number | null  // pre-money / pre-round FDS
   new_money: number
   pre_money: number | null
   post_money: number | null
@@ -147,7 +149,9 @@ function syncDraft(r: RoundCol) {
   draft.name = r.name || ''
   draft.close_date = r.close_date
   draft.kind = r.kind
-  draft.share_price = r.share_price
+  // The Price/sh field is the OVERRIDE, not the effective price — so a blank
+  // means "derive from pre-money ÷ pre-round FDS".
+  draft.share_price = r.share_price_override
   draft.new_money = r.new_money
   draft.pre_money = r.pre_money
   draft.option_pool_issued = r.option_pool_issued
@@ -171,7 +175,7 @@ const dirty = computed(() => {
   return !eqS(draft.name || null, r.name)
     || !eqS(draft.close_date, r.close_date)
     || draft.kind !== r.kind
-    || !eqN(draft.share_price, r.share_price)
+    || !eqN(draft.share_price, r.share_price_override)
     || !eqN(draft.new_money, r.new_money)
     || !eqN(draft.pre_money, r.pre_money)
     || !eqN(draft.option_pool_issued, r.option_pool_issued)
@@ -262,15 +266,25 @@ onBeforeUnmount(() => { if (savedTimer) clearTimeout(savedTimer) })
 
 // ── Live preview for the open round's edit form ───────────────────
 const isEditingOpen = computed(() => draft.kind === 'open')
-const previewNewShares = computed(() =>
-  draft.new_money && draft.share_price ? newSharesIssued(draft.new_money, draft.share_price) : null)
 // Pre-money is derivable from the prior round's post-money (the round before
 // this one chronologically). The pre_money field overrides that derivation.
 const prevPostMoney = computed(() => {
   const idx = rounds.value.findIndex(x => x.round_id === expandedId.value)
   return idx > 0 ? (rounds.value[idx - 1]?.post_money ?? null) : null
 })
+// FDS as of immediately before this round = the prior row's cumulative Total
+// FDS — the denominator the board workbook uses to derive the share price.
+const prevFds = computed(() => {
+  const idx = rounds.value.findIndex(x => x.round_id === expandedId.value)
+  return idx > 0 ? (rounds.value[idx - 1]?.total_shares_fds ?? 0) : 0
+})
 const effectivePreMoney = computed(() => draft.pre_money ?? prevPostMoney.value)
+// Share price: derived (pre-money ÷ pre-round FDS) unless the operator typed an
+// override into draft.share_price.
+const derivedPps = computed(() => derivedSharePrice(effectivePreMoney.value, prevFds.value))
+const effectivePps = computed(() => (draft.share_price && draft.share_price > 0) ? draft.share_price : (derivedPps.value || null))
+const previewNewShares = computed(() =>
+  draft.new_money && effectivePps.value ? newSharesIssued(draft.new_money, effectivePps.value) : null)
 const previewPostMoney = computed(() => {
   if (effectivePreMoney.value == null && draft.new_money == null) return null
   return (effectivePreMoney.value || 0) + (draft.new_money || 0)
@@ -281,7 +295,7 @@ const previewPostFds = computed(() => {
   return openRoundPostFds({
     base,
     newMoney: draft.new_money,
-    sharePrice: draft.share_price,
+    sharePrice: effectivePps.value,
     optionPoolIssued: draft.option_pool_issued ?? 0,
     notesConverted: notes,
   })
@@ -292,11 +306,14 @@ const previewOwnership = computed(() =>
 // Add-form: a new round appends after the last one, so its derived pre-money
 // is the last existing round's post-money.
 const newPrevPostMoney = computed(() => rounds.value.length ? (rounds.value[rounds.value.length - 1]?.post_money ?? null) : null)
+const newPrevFds = computed(() => rounds.value.length ? (rounds.value[rounds.value.length - 1]?.total_shares_fds ?? 0) : 0)
 const newDraftPostMoney = computed(() => {
   const pre = newDraft.pre_money ?? newPrevPostMoney.value
   if (pre == null && newDraft.new_money == null) return null
   return (pre || 0) + (newDraft.new_money || 0)
 })
+// Derived share price for the add form's Price/sh placeholder.
+const newDerivedPps = computed(() => derivedSharePrice(newDraft.pre_money ?? newPrevPostMoney.value, newPrevFds.value))
 </script>
 
 <template>
@@ -366,7 +383,10 @@ const newDraftPostMoney = computed(() => {
                 <span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide" :class="kindMeta[r.kind].cls">{{ kindMeta[r.kind].label }}</span>
               </td>
               <td class="px-3 py-2 text-right text-ink-700">{{ r.close_date || '—' }}</td>
-              <td class="px-3 py-2 text-right text-ink-700">{{ fmtPrice(r.share_price) }}</td>
+              <td class="px-3 py-2 text-right text-ink-700">
+                {{ fmtPrice(r.share_price) }}
+                <span v-if="r.share_price_override != null" class="text-amber-600" title="Manual price override">*</span>
+              </td>
               <td class="px-3 py-2 text-right text-ink-700">{{ r.new_money ? fmtUSD(r.new_money) : '—' }}</td>
               <td class="px-3 py-2 text-right text-ink-700">{{ r.post_money != null ? fmtUSD(r.post_money) : '—' }}</td>
               <td class="px-3 py-2 text-right text-ink-700">{{ r.option_pool_issued ? fmtShares(r.option_pool_issued) : '—' }}</td>
@@ -434,8 +454,8 @@ const newDraftPostMoney = computed(() => {
                       <span class="text-[10px] uppercase tracking-wider text-ink-500">Post-money</span>
                       <div class="w-full px-2 py-1 text-sm text-ink-600 italic border border-dashed border-ink-200 rounded-md bg-ink-50/50 num truncate">{{ previewPostMoney != null ? fmtUSD(previewPostMoney) : '—' }}</div>
                       <div class="w-full border-t border-ink-400 mt-1.5 mb-0.5"></div>
-                      <span class="text-[10px] uppercase tracking-wider text-amber-600 whitespace-nowrap">Price / sh</span>
-                      <NumberInput v-model="draft.share_price" prefix="$" :digits="5" placeholder="—" />
+                      <span class="text-[10px] uppercase tracking-wider text-ink-500 whitespace-nowrap">Price / sh <span class="text-amber-500" title="Derived = pre-money ÷ pre-round FDS — override by typing">*</span></span>
+                      <NumberInput v-model="draft.share_price" prefix="$" :digits="5" :placeholder="derivedPps > 0 ? fmtPrice(derivedPps) : '—'" />
                     </div>
                     <div class="flex flex-col gap-1 shrink-0"><span class="text-[10px] uppercase tracking-wider">&nbsp;</span><span class="flex items-center h-[30px] text-ink-400">=</span></div>
                     <div class="flex flex-col gap-1 shrink-0 w-24">
@@ -460,8 +480,9 @@ const newDraftPostMoney = computed(() => {
                   </div>
 
                   <!-- Revert hints for any overridden derived field -->
-                  <div v-if="draft.pre_money != null || draft.preferred_issued_override != null || draft.notes_converted_override != null || draft.total_shares_fds_override != null" class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-ink-400">
+                  <div v-if="draft.pre_money != null || draft.share_price != null || draft.preferred_issued_override != null || draft.notes_converted_override != null || draft.total_shares_fds_override != null" class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-ink-400">
                     <span v-if="draft.pre_money != null">Pre-money set · <button type="button" class="text-brand-edge hover:underline" @click="draft.pre_money = null">derive from prior round</button></span>
+                    <span v-if="draft.share_price != null">Price / sh manual · <button type="button" class="text-brand-edge hover:underline" @click="draft.share_price = null">derive from pre-money ÷ pre-round FDS</button></span>
                     <span v-if="draft.preferred_issued_override != null">Preferred FDS manual · <button type="button" class="text-brand-edge hover:underline" @click="draft.preferred_issued_override = null">derive from new money</button></span>
                     <span v-if="draft.notes_converted_override != null">Notes conv. manual · <button type="button" class="text-brand-edge hover:underline" @click="draft.notes_converted_override = null">revert to auto</button></span>
                     <span v-if="draft.total_shares_fds_override != null">Total FDS pinned · <button type="button" class="text-brand-edge hover:underline" @click="draft.total_shares_fds_override = null">derive instead</button></span>
@@ -523,8 +544,8 @@ const newDraftPostMoney = computed(() => {
                     <span class="text-[10px] uppercase tracking-wider text-ink-500">Post-money</span>
                     <div class="w-28 px-2 py-1 text-sm text-ink-600 italic border border-dashed border-ink-200 rounded-md bg-ink-50/50 num">{{ newDraftPostMoney != null ? fmtUSD(newDraftPostMoney) : '—' }}</div>
                     <div class="w-28 border-t border-ink-400 mt-1.5 mb-0.5"></div>
-                    <span class="text-[10px] uppercase tracking-wider text-amber-600">Price / sh</span>
-                    <NumberInput v-model="newDraft.share_price" prefix="$" :digits="5" placeholder="—" class="w-28" />
+                    <span class="text-[10px] uppercase tracking-wider text-ink-500">Price / sh <span class="text-amber-500" title="Derived = pre-money ÷ pre-round FDS — override by typing">*</span></span>
+                    <NumberInput v-model="newDraft.share_price" prefix="$" :digits="5" :placeholder="newDerivedPps > 0 ? fmtPrice(newDerivedPps) : '—'" class="w-28" />
                   </div>
                   <div class="flex flex-col gap-1"><span class="text-[10px] uppercase tracking-wider">&nbsp;</span><span class="flex items-center h-[30px] text-ink-400">·</span></div>
                   <div class="flex flex-col gap-1">

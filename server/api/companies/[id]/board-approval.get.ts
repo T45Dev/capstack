@@ -1,6 +1,5 @@
 import ExcelJS from 'exceljs'
 import { db } from '~~/server/utils/db'
-import { computeRound, type ConvertibleNote } from '~~/server/utils/calc'
 import { grantIssued } from '~~/shared/capTableModel'
 
 // Generates a board-approval xlsx that follows the S3VC Option Grants
@@ -75,46 +74,48 @@ export default defineEventHandler(async (event) => {
   const allGrants = db().prepare(`SELECT * FROM grants WHERE company_id = ?`).all(id) as any[]
   const shareClasses = db().prepare(`SELECT * FROM share_classes WHERE company_id = ?`).all(id) as any[]
   const holdings = db().prepare(`SELECT * FROM holdings WHERE company_id = ?`).all(id) as any[]
-  const convertibles = db().prepare(`SELECT * FROM convertibles WHERE company_id = ? AND status = 'outstanding'`).all(id) as any[]
   const pools = db().prepare(`SELECT * FROM option_pools WHERE company_id = ?`).all(id) as any[]
   const vestingSchedules = db().prepare(`SELECT id, name, vest_months, cliff_months FROM vesting_schedules WHERE company_id = ?`).all(id) as any[]
   const scheduleById = new Map<string, any>()
   for (const s of vestingSchedules) scheduleById.set(s.id, s)
 
-  // ---- Compute pre- and post-round FDS ----
-  // Two bases are used:
-  //   preFDS  — the pre-round fully diluted securities (operator-typed
-  //             pre_round_fds, falling back to a cap-table derivation). Shown
-  //             as the "Total Fully Diluted Securities" reference figure.
-  //   postFDS — the post-round FDS (pre-round base + new money shares +
-  //             converted notes). Every ownership % column denominates
-  //             against this.
+  // ---- Pre- and post-round FDS — CANON from the Rounds page ----
+  // The board export must show the SAME fully-diluted totals as the Rounds
+  // table, so we read them straight from round-summary rather than recomputing
+  // from the `assumptions` row (a separate data source that drifted — the
+  // export's FDS no longer matched the Rounds page). round-summary nets
+  // exercised options, honors pinned snapshots, and derives the share price the
+  // board-workbook way; we just consume its per-round cumulative Total FDS:
+  //   postFDS — the current round's cumulative Total FDS (the denominator every
+  //             ownership % column divides by).
+  //   preFDS  — the prior round's cumulative Total FDS (the reference figure).
+  // Falls back to a holdings/assumptions figure only when no rounds exist yet.
   const holdingsTotal = holdings.reduce((a, h) => a + (h.shares || 0), 0)
   const outstandingTotal = allGrants.filter(g => g.status === 'outstanding').reduce((a, g) => a + g.quantity, 0)
   const proposedTotal = proposedGrants.reduce((a, g) => a + g.quantity, 0)
   const poolAuthorized = pools.reduce((a, p) => a + (p.authorized || 0), 0)
   const optionsAvailable = Math.max(0, poolAuthorized - outstandingTotal - proposedTotal)
   const fdsFromCapTable = holdingsTotal + outstandingTotal + optionsAvailable + (assumptions?.pool_top_up_shares || 0)
-  const preFDS = assumptions?.pre_round_fds ?? fdsFromCapTable
 
-  const cnNotes: ConvertibleNote[] = convertibles.map(c => ({
-    id: c.id,
-    stakeholderName: c.stakeholder_name,
-    principal: c.principal || 0,
-    interestAccrued: c.interest_accrued || 0,
-    conversionDiscount: c.conversion_discount || 0,
-    valuationCap: c.valuation_cap,
-    convertsAtRound: c.converts_at_round !== 0,
-  }))
-  const round = computeRound({
-    preRoundFDS: preFDS,
-    preMoney: assumptions?.pre_money ?? 0,
-    newMoney: assumptions?.new_money ?? 0,
-    convertibles: cnNotes,
-    cnBasis: assumptions?.cn_conversion_basis ?? 'best',
-  })
-  // If no round is modelled, post-FDS falls back to pre-FDS so the % column still resolves.
-  const postFDS = round.postRoundFDS > 0 ? round.postRoundFDS : preFDS
+  const summary = await (event.$fetch as any)(`/api/companies/${id}/round-summary`)
+    .catch(() => null) as { rounds: Array<{ kind: string; total_shares_fds: number }> } | null
+  const sumRounds = summary?.rounds || []
+  // Current round mirrors the Rounds/dilution pages: the open round if flagged,
+  // else the latest non-formation round.
+  let curIdx = sumRounds.findIndex(r => r.kind === 'open')
+  if (curIdx < 0) {
+    for (let i = sumRounds.length - 1; i >= 0; i--) {
+      if (sumRounds[i]!.kind !== 'formation') { curIdx = i; break }
+    }
+  }
+  const curRound = curIdx >= 0 ? sumRounds[curIdx]! : null
+  const priorRound = curIdx > 0 ? sumRounds[curIdx - 1]! : null
+  const preFDS = (priorRound?.total_shares_fds && priorRound.total_shares_fds > 0)
+    ? priorRound.total_shares_fds
+    : (assumptions?.pre_round_fds ?? fdsFromCapTable)
+  const postFDS = (curRound?.total_shares_fds && curRound.total_shares_fds > 0)
+    ? curRound.total_shares_fds
+    : preFDS
 
   // company.starting_round is the canonical round CODE (the pre-baseline
   // picker stores codes so renames of the display name don't break the
