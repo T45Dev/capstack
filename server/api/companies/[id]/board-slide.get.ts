@@ -185,18 +185,21 @@ export default defineEventHandler(async (event) => {
   const PRESETS = [0.10, 0.125, 0.15, 0.20]
   const topUpFor = (targetFrac: number) =>
     Math.round(poolTopUpForTarget({ poolAuthorized, fds: postFDS, targetPctOfFds: targetFrac }))
-  function recRowHtml(targetFrac: number, custom: boolean): string {
+  // The "Avail. after" cell carries a live ✓/✗ vs the floor, so the table
+  // reacts to the floor input (and explains why the note may recommend more).
+  function recRowHtml(targetFrac: number, floor: number, custom: boolean): string {
     const topUp = topUpFor(targetFrac)
     const availAfter = afterProposed + topUp
+    const flag = floor > 0 ? (availAfter >= floor ? '<span class="ok-dot">✓</span>' : '<span class="bad-dot">✗</span>') : ''
     const cls = `${custom ? 'rec-custom' : ''}${topUp <= 0 ? ' rec-met' : ''}`.trim()
     return `<tr class="${cls}"><td>${fmtPct(targetFrac)}</td><td>${topUp > 0 ? fmtShares(topUp) : '—'}</td>`
-      + `<td>${fmtShares(poolAuthorized + topUp)}</td><td>${fmtShares(availAfter)}</td></tr>`
+      + `<td>${fmtShares(poolAuthorized + topUp)}</td><td>${fmtShares(availAfter)}${flag}</td></tr>`
   }
   const recRowFracs = Array.from(new Set([
     ...PRESETS.filter(p => Math.abs(p - defaultTargetPct) > 0.001),
     defaultTargetPct,
   ])).sort((a, b) => a - b)
-  const recRowsHtml = recRowFracs.map(f => recRowHtml(f, Math.abs(f - defaultTargetPct) < 1e-9)).join('')
+  const recRowsHtml = recRowFracs.map(f => recRowHtml(f, defaultFloor, Math.abs(f - defaultTargetPct) < 1e-9)).join('')
 
   // Headline note: the recommended top-up — the LARGER of what the target asks
   // and what the floor needs — and what's left after proposed grants.
@@ -373,6 +376,8 @@ export default defineEventHandler(async (event) => {
   .rec-table tr.rec-met td{color:var(--faint)}
   .rec-table tr.rec-met td:first-child{color:var(--muted)}
   .rec-table tr.rec-custom td{background:#eef2ff;font-weight:800;color:var(--brand)}
+  .ok-dot{color:#059669;font-weight:800;margin-left:5px}
+  .bad-dot{color:#dc2626;font-weight:800;margin-left:5px}
   .rec-foot{margin:6px 0 0;font-size:10px;color:var(--faint);font-variant-numeric:tabular-nums}
   /* Recommendation note (shared with the runway-style callout chrome) */
   .pnote{margin:7px 0 0;font-size:11px;line-height:1.32;padding:6px 9px;border-radius:8px;border-left:3px solid}
@@ -568,15 +573,17 @@ export default defineEventHandler(async (event) => {
         // Fixed denominator: the top-up adds to the pool, FDS stays post-round.
         return REC.postFDS > 0 ? (REC.poolAuthorized + topUp) / REC.postFDS : 0;
       }
-      function rowHtml(targetFrac, custom) {
+      function rowHtml(targetFrac, floor, custom) {
         var topUp = topUpFor(targetFrac);
         var availAfter = REC.afterProposed + topUp;
+        var flag = floor > 0 ? (availAfter >= floor ? '<span class="ok-dot">✓</span>' : '<span class="bad-dot">✗</span>') : '';
         var cls = ((custom ? 'rec-custom' : '') + (topUp <= 0 ? ' rec-met' : '')).trim();
         return '<tr class="' + cls + '"><td>' + fPct(targetFrac) + '</td><td>' + (topUp > 0 ? fShares(topUp) : '—')
-          + '</td><td>' + fShares(REC.poolAuthorized + topUp) + '</td><td>' + fShares(availAfter) + '</td></tr>';
+          + '</td><td>' + fShares(REC.poolAuthorized + topUp) + '</td><td>' + fShares(availAfter) + flag + '</td></tr>';
       }
       function recompute() {
         var targetFrac = (parseFloat(elT.value) || 0) / 100;
+        var floor = elF ? (parseFloat(elF.value) || 0) : 0;
         var fracs = [];
         for (var i = 0; i < REC.presets.length; i++) {
           if (Math.abs(REC.presets[i] - targetFrac) > 0.001) fracs.push(REC.presets[i]);
@@ -584,11 +591,10 @@ export default defineEventHandler(async (event) => {
         fracs.push(targetFrac);
         fracs.sort(function (a, b) { return a - b; });
         var rows = '';
-        for (var j = 0; j < fracs.length; j++) rows += rowHtml(fracs[j], Math.abs(fracs[j] - targetFrac) < 1e-9);
+        for (var j = 0; j < fracs.length; j++) rows += rowHtml(fracs[j], floor, Math.abs(fracs[j] - targetFrac) < 1e-9);
         elRows.innerHTML = rows;
 
         // Recommended top-up = larger of what the target asks and the floor needs.
-        var floor = elF ? (parseFloat(elF.value) || 0) : 0;
         var targetTopUp = topUpFor(targetFrac);
         var floorTopUp = floor > 0 ? Math.max(0, Math.round(floor - REC.afterProposed)) : 0;
         var recTopUp = Math.max(targetTopUp, floorTopUp);
