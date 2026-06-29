@@ -219,29 +219,27 @@ export default defineEventHandler(async (event) => {
     presets: PRESETS,
   }
 
-  // Committed grants (board-Approved) — a compact Recipient / Shares / % FDS
-  // table, largest first. The recipient cell carries an "award · title · role"
-  // sub-line.
+  // One shared grant-row renderer so Committed and Proposed look identical:
+  // the grantee's name, an "award · title · role" line beneath it, the note on
+  // its own full-width line under that (free to run the width of the row, beneath
+  // the share count), and the shares + % FDS on the right.
+  function grantRow(g: Grant): string {
+    const name = g.recipient_name || g.job_title || 'Unnamed'
+    const meta = [g.award_type, g.recipient_name ? g.job_title : null, g.recipient_type].filter(Boolean).join(' · ')
+    return `<div class="pgrant">`
+      + `<div class="pg-top"><div class="pg-id"><div class="pg-name">${esc(name)}</div>${meta ? `<div class="pg-title">${esc(meta)}</div>` : ''}</div>`
+      + `<div class="pg-val"><span class="sh">${fmtShares(g.quantity)}</span><span class="pc">${fmtPct(pctOfFds(g.quantity || 0))}</span></div></div>`
+      + `${g.notes ? `<div class="pg-note">${esc(g.notes)}</div>` : ''}</div>`
+  }
+
+  // Committed grants (board-Approved) — a flat list, largest first.
   const committedSorted = [...committedList].sort((a, b) => (b.quantity || 0) - (a.quantity || 0))
   const committedTotal = committedSorted.reduce((a, g) => a + (g.quantity || 0), 0)
-  function approveRows(list: Grant[]): string {
-    return list.map(g => {
-      const name = g.recipient_name || g.job_title || 'Unnamed'
-      const subBits = [g.award_type, g.recipient_name ? g.job_title : null, g.recipient_type].filter(Boolean)
-      const sub = subBits.length ? `<span class="rsub">${esc(subBits.join(' · '))}</span>` : ''
-      return `<tr><td class="name">${esc(name)}${sub}</td><td class="r sh">${fmtShares(g.quantity)}</td><td class="r pc">${fmtPct(pctOfFds(g.quantity || 0))}</td></tr>`
-    }).join('')
-  }
-  const committedHtml = committedSorted.length === 0
-    ? '<div class="empty">No committed grants.</div>'
-    : `<table class="approve"><colgroup><col class="a-rec"/><col class="a-sh"/><col class="a-pc"/></colgroup>`
-      + `<thead><tr><th>Recipient</th><th class="r">Shares</th><th class="r">% FDS</th></tr></thead>`
-      + `<tbody>${approveRows(committedSorted)}</tbody></table>`
+  const committedHtml = committedSorted.map(grantRow).join('')
 
-  // Proposed grants (still pending) — GROUPED BY BATCH (grants.round). Each batch
-  // is a labelled group; within it, every grantee shows their name with the
-  // title · role AND the note on the line beneath. Batches and the grants in
-  // them sort largest-first; un-batched grants fall under "No batch".
+  // Proposed grants (still pending) — GROUPED BY BATCH (grants.round), same row
+  // style as Committed. Batches and the grants in them sort largest-first;
+  // un-batched grants fall under "No batch".
   const proposedTotal = proposedList.reduce((a, g) => a + (g.quantity || 0), 0)
   function proposedGroupsHtml(list: Grant[]): string {
     const groups = new Map<string, Grant[]>()
@@ -254,22 +252,12 @@ export default defineEventHandler(async (event) => {
     const ordered = [...groups.entries()]
       .map(([batch, gs]) => ({ batch, gs: gs.sort((a, b) => (b.quantity || 0) - (a.quantity || 0)), sum: gs.reduce((a, g) => a + (g.quantity || 0), 0) }))
       .sort((a, b) => b.sum - a.sum)
-    return ordered.map(({ batch, gs, sum }) => {
-      const rows = gs.map(g => {
-        const name = g.recipient_name || g.job_title || 'Unnamed'
-        const meta = [g.job_title, g.recipient_type].filter(Boolean).join(' · ')
-        const note = g.notes ? `<span class="pg-note">${esc(g.notes)}</span>` : ''
-        const sub = (meta || note)
-          ? `<div class="pg-meta">${meta ? `<span class="pg-title">${esc(meta)}</span>` : ''}${note}</div>`
-          : ''
-        return `<div class="pgrant"><div class="pg-id"><div class="pg-name">${esc(name)}</div>${sub}</div>`
-          + `<div class="pg-val"><span class="sh">${fmtShares(g.quantity)}</span><span class="pc">${fmtPct(pctOfFds(g.quantity || 0))}</span></div></div>`
-      }).join('')
-      return `<div class="pgroup"><div class="pgroup-h"><span class="pgroup-name">${esc(batch)}</span><span class="pgroup-sum">${fmtShares(sum)} · ${fmtPct(pctOfFds(sum))}</span></div>${rows}</div>`
-    }).join('')
+    return ordered.map(({ batch, gs, sum }) =>
+      `<div class="pgroup"><div class="pgroup-h"><span class="pgroup-name">${esc(batch)}</span><span class="pgroup-sum">${fmtShares(sum)} · ${fmtPct(pctOfFds(sum))}</span></div>${gs.map(grantRow).join('')}</div>`,
+    ).join('')
   }
   const proposedHtml = proposedList.length === 0
-    ? '<div class="empty">No proposed grants pending.</div>'
+    ? '<div class="empty">No proposed grants.</div>'
     : proposedGroupsHtml(proposedList)
 
   // ---- Actionable health verdict ----
@@ -381,37 +369,23 @@ export default defineEventHandler(async (event) => {
   .pnote.ok{background:#ecfdf5;color:#065f46;border-color:#34d399}
   .pnote.warn{background:#fef2f2;color:#991b1b;border-color:#f87171}
   .pnote.neutral{background:#f8fafc;color:var(--ink-2);border-color:#cbd5e1}
-  /* Committed-grants approval list — compact, single column. */
-  table{width:100%;border-collapse:collapse;font-size:11.5px}
-  table.approve{table-layout:fixed;font-size:10px;line-height:1.3}
-  .approve .a-rec{width:54%}
-  .approve .a-sh{width:28%}
-  .approve .a-pc{width:18%}
-  .approve td,.approve th{padding:3px 6px}
-  th{text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;padding:4px 9px;border-bottom:1px solid var(--line)}
-  td{padding:4px 9px;border-bottom:1px solid #f1f5f9;color:var(--ink-2);font-variant-numeric:tabular-nums}
-  td.r,th.r{text-align:right}
-  td.sh{font-weight:700;color:var(--ink)}
-  td.pc{font-weight:400;color:var(--muted)}
-  tr:last-child td{border-bottom:none}
-  tbody .name{font-weight:600;color:var(--ink);overflow-wrap:anywhere}
-  .rsub{display:block;font-size:8px;color:var(--faint);font-weight:400;margin-top:0}
-  .proposed-total{display:flex;align-items:baseline;gap:10px;border-top:2px solid var(--line);padding-top:7px;font-size:12px}
-  .proposed-total .tl{font-weight:800;color:var(--ink);margin-right:auto}
   .empty{font-size:12px;color:var(--faint);padding:8px 0;font-style:italic}
-  /* Proposed grants — grouped by batch; each grantee's note sits under the name. */
+  .proposed-total{display:flex;align-items:baseline;gap:10px;border-top:2px solid var(--line);padding-top:7px;margin-top:7px;font-size:12px}
+  .proposed-total .tl{font-weight:800;color:var(--ink);margin-right:auto}
+  /* Grant rows — ONE style shared by Committed and Proposed for consistency.
+     Name, an "award · title · role" line, then the note on its own full-width
+     line (free to run beneath the share count); shares + % FDS on the right. */
   .pgroup{margin-bottom:9px}
   .pgroup-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:2px 0 3px;padding-bottom:3px;border-bottom:1px solid var(--line)}
   .pgroup-name{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--brand)}
   .pgroup-sum{font-size:10px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
-  .pgrant{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px solid #f1f5f9}
+  .pgrant{padding:4px 0;border-bottom:1px solid #f1f5f9}
   .pgrant:last-child{border-bottom:none}
+  .pg-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
   .pg-id{min-width:0}
   .pg-name{font-size:11.5px;font-weight:600;color:var(--ink)}
-  .pg-meta{font-size:9px;color:var(--faint);line-height:1.3;margin-top:1px}
-  .pg-title{color:var(--muted)}
-  .pg-note{color:var(--faint)}
-  .pg-note::before{content:" — "}
+  .pg-title{font-size:9px;color:var(--muted);margin-top:1px}
+  .pg-note{font-size:9px;color:var(--faint);line-height:1.3;margin-top:3px}
   .pg-val{white-space:nowrap;text-align:right;flex:none}
   .pg-val .sh{font-size:11px}.pg-val .pc{margin-left:7px;font-size:10px}
   /* Health verdict — leads with a big status word so it reads at a glance. */
@@ -446,7 +420,7 @@ export default defineEventHandler(async (event) => {
       <label><input type="checkbox" data-block="kpis" checked> Headline KPIs</label>
       <label><input type="checkbox" data-block="composition" checked> Pool composition</label>
       <label><input type="checkbox" data-block="health" checked> Health check</label>
-      <label><input type="checkbox" data-block="committed" checked> Committed grants</label>
+      ${committedSorted.length ? '<label><input type="checkbox" data-block="committed" checked> Committed grants</label>' : ''}
       <label><input type="checkbox" data-block="proposed" checked> Proposed grants</label>
       <label><input type="checkbox" data-block="poolrec" checked> Pool recommendation</label>
     </div>
@@ -456,18 +430,17 @@ export default defineEventHandler(async (event) => {
   <div class="slide">
     <header class="head">
       <div>
-        <span class="badge">CONFIDENTIAL · BOARD</span>
         <h1>${esc(company.name)} — Option Pool</h1>
         <p class="sub">Board review${roundName ? ` · modelling ${esc(roundName)}` : ''}</p>
       </div>
     </header>
 
     <section class="kpis" data-block="kpis">
-      ${kpi(fmtShares(poolAuthorized), 'Total option pool', `${fmtPct(pctOfFds(poolAuthorized))} of FDS`, `FDS basis ${fmtShares(postFDS)}`)}
+      ${kpi(fmtShares(poolAuthorized), 'Total option pool', `${fmtPct(pctOfFds(poolAuthorized))} of FDS (${fmtShares(postFDS)})`)}
       ${kpi(fmtShares(allocated), 'Allocated', `${fmtPct(pctOfPool(allocated))} of pool`)}
       ${kpi(fmtShares(unallocated), 'Unallocated', `${fmtPct(pctOfPool(unallocated))} of pool`)}
-      ${kpi(fmtShares(totalProposed), 'Committed', `${fmtPct(pctOfFds(totalProposed))} of FDS · ${proposed.length} draft${proposed.length === 1 ? '' : 's'}`)}
-      ${kpi(fmtShares(afterProposed), 'Projected available', afterProposed >= 0 ? `${fmtPct(pctOfPool(afterProposed))} of pool · after committed` : `over-allocated by ${fmtShares(overBy)}`)}
+      ${kpi(fmtShares(totalProposed), committedSorted.length ? 'Committed + proposed' : 'Proposed grants', `${fmtPct(pctOfFds(totalProposed))} of FDS · ${proposed.length} proposed grant${proposed.length === 1 ? '' : 's'}`)}
+      ${kpi(fmtShares(afterProposed), 'Projected available', afterProposed >= 0 ? `${fmtPct(pctOfPool(afterProposed))} of pool after proposed grants` : `over-allocated by ${fmtShares(overBy)}`)}
     </section>
 
     <section class="body">
@@ -493,16 +466,16 @@ export default defineEventHandler(async (event) => {
       </div>
 
       <div class="col-stack">
-        <div class="panel" data-block="committed">
+        ${committedSorted.length ? `<div class="panel" data-block="committed">
           <h2>Committed grants</h2>
           <p class="desc">${committedSorted.length} board-approved grant${committedSorted.length === 1 ? '' : 's'} — shares and % of post-round FDS.</p>
           ${committedHtml}
-          ${committedSorted.length ? `<div class="proposed-total"><span class="tl">Total committed</span>${shpc(committedTotal, pctOfFds(committedTotal))}</div>` : ''}
-        </div>
+          <div class="proposed-total"><span class="tl">Total committed</span>${shpc(committedTotal, pctOfFds(committedTotal))}</div>
+        </div>` : ''}
 
         <div class="panel" data-block="proposed">
           <h2>Proposed grants</h2>
-          <p class="desc">${proposedList.length} pending grant${proposedList.length === 1 ? '' : 's'}, grouped by batch — the note sits under each grantee.</p>
+          <p class="desc">${proposedList.length} proposed grant${proposedList.length === 1 ? '' : 's'}, grouped by batch — the note sits under each grantee.</p>
           ${proposedHtml}
           ${proposedList.length ? `<div class="proposed-total"><span class="tl">Total proposed</span>${shpc(proposedTotal, pctOfFds(proposedTotal))}</div>` : ''}
         </div>
