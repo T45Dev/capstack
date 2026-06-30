@@ -77,13 +77,28 @@ export default defineEventHandler(async (event) => {
 
   const grants: Grant[] = grantsResp.grants || []
   const outstanding = grants.filter(g => g.status === 'outstanding')
-  // Draft grants (status='proposed') drive the pool's "committed" load. For the
-  // middle-column DISPLAY they split by board approval status — the same split
-  // the Option Grants page and the board-approval xlsx use:
-  //   committed = Approved drafts; proposed = still-pending drafts (Rejected drops).
-  const proposed = grants.filter(g => g.status === 'proposed')
-  const committedList = proposed.filter(g => g.approval_status === 'Approved')
-  const proposedList = proposed.filter(g => g.approval_status !== 'Approved' && g.approval_status !== 'Rejected')
+  // Grant vocabulary matches the board-approval xlsx: a grant is either
+  //   • Committed — a real proposal to a named grantee (status='proposed',
+  //     Rejected excluded). Approval status no longer splits the display.
+  //   • Proposed  — an anonymous pool reserve (formerly "Ideas"), surfaced from
+  //     pool_events with no strike/stakeholder.
+  // Both load the pool and both reduce the projected-available figure.
+  const committedList = grants.filter(g => g.status === 'proposed' && g.approval_status !== 'Rejected')
+  const proposedReserves: Grant[] = (poolEventsRaw || [])
+    .filter((e: any) => e.type === 'grant' || e.type === 'reserve')
+    .map((e: any): Grant => ({
+      recipient_name: e.name || 'Proposed reserve',
+      recipient_type: e.recipient_type || null,
+      quantity: e.shares || 0,
+      status: 'proposed',
+      approval_status: null,
+      job_title: null,
+      award_type: e.kind || null,
+      vesting_start: null,
+      notes: e.notes || null,
+      round: null,
+      issue_date: null,
+    }))
   const rounds: RoundCol[] = roundSummary.rounds || []
 
   // ---- Pool headline (canonical) ----
@@ -104,23 +119,25 @@ export default defineEventHandler(async (event) => {
   // (converted to common). We run the figures through the SHARED poolEquation()
   // so Available (= Authorized − Outstanding − Exercised) and Future-available
   // (= Available − Proposed) are computed by the same helper the CEO report and
-  // Pool Impact page use — the slide can't drift. ideas are excluded from the
-  // headline pool math (shown as a footnote in the callout), mirroring ceo-report.
+  // Pool Impact page use — the slide can't drift. Committed grants AND proposed
+  // reserves both deduct from the pool, so includeIdeas is true: Future-available
+  // = Available − Committed − Proposed.
   const allocatedOutstanding = outstanding.reduce((a, g) => a + grantOutstanding(g), 0)
   const allocatedExercised = outstanding.reduce((a, g) => a + (g.quantity_exercised || 0), 0)
   const totalForfeitedOrExpired = outstanding.reduce((a, g) => a + (g.quantity_forfeited || 0) + (g.quantity_expired || 0), 0)
-  const totalProposed = proposed.reduce((a, g) => a + (g.quantity || 0), 0)
-  const totalIdeas = (poolEventsRaw || [])
-    .filter((e: any) => e.type === 'grant' || e.type === 'reserve')
-    .reduce((a: number, e: any) => a + (e.shares || 0), 0)
+  const committedTotal = committedList.reduce((a, g) => a + (g.quantity || 0), 0)
+  const reservesTotal = proposedReserves.reduce((a, g) => a + (g.quantity || 0), 0)
+  // Combined commitment load (committed grants + proposed reserves) — the figure
+  // the "Committed + proposed" KPI and the health callout speak to.
+  const totalProposed = committedTotal + reservesTotal
   const pool = poolEquation({
     authorized: poolAuthorized,
     outstanding: allocatedOutstanding,
     exercised: allocatedExercised,
     forfeitedOrExpired: totalForfeitedOrExpired,
-    proposed: totalProposed,
-    ideas: totalIdeas,
-    includeIdeas: false,
+    proposed: committedTotal,
+    ideas: reservesTotal,
+    includeIdeas: true,
   })
   // Authorized is NET of exercised (exercised moved to common — FDS, not the
   // pool). The pool then splits cleanly into Outstanding (held) + Available.
@@ -247,16 +264,10 @@ export default defineEventHandler(async (event) => {
       + `${g.notes ? `<div class="pg-note">${esc(g.notes)}</div>` : ''}</div>`
   }
 
-  // Committed grants (board-Approved) — a flat list, largest first.
+  // Committed grants (real proposals to named grantees) — GROUPED BY BATCH
+  // (grants.round), largest first; un-batched grants fall under "No batch".
   const committedSorted = [...committedList].sort((a, b) => (b.quantity || 0) - (a.quantity || 0))
-  const committedTotal = committedSorted.reduce((a, g) => a + (g.quantity || 0), 0)
-  const committedHtml = committedSorted.map(grantRow).join('')
-
-  // Proposed grants (still pending) — GROUPED BY BATCH (grants.round), same row
-  // style as Committed. Batches and the grants in them sort largest-first;
-  // un-batched grants fall under "No batch".
-  const proposedTotal = proposedList.reduce((a, g) => a + (g.quantity || 0), 0)
-  function proposedGroupsHtml(list: Grant[]): string {
+  function groupByBatchHtml(list: Grant[]): string {
     const groups = new Map<string, Grant[]>()
     for (const g of list) {
       const key = (g.round && g.round.trim()) || 'No batch'
@@ -271,9 +282,15 @@ export default defineEventHandler(async (event) => {
       `<div class="pgroup"><div class="pgroup-h"><span class="pgroup-name">${esc(batch)}</span><span class="pgroup-sum">${fmtShares(sum)} · ${fmtPct(pctOfFds(sum))}</span></div>${gs.map(grantRow).join('')}</div>`,
     ).join('')
   }
-  const proposedHtml = proposedList.length === 0
-    ? '<div class="empty">No proposed grants.</div>'
-    : proposedGroupsHtml(proposedList)
+  const committedHtml = committedSorted.length ? groupByBatchHtml(committedSorted) : ''
+
+  // Proposed grants (anonymous pool reserves, formerly "Ideas") — a flat list,
+  // largest first, same row style as Committed.
+  const proposedSorted = [...proposedReserves].sort((a, b) => (b.quantity || 0) - (a.quantity || 0))
+  const proposedTotal = reservesTotal
+  const proposedHtml = proposedSorted.length === 0
+    ? '<div class="empty">No proposed reserves.</div>'
+    : proposedSorted.map(grantRow).join('')
 
   // ---- Actionable health verdict ----
   // calloutClass drives the colour; healthLabel is the big "look-at-me" word the
@@ -283,16 +300,16 @@ export default defineEventHandler(async (event) => {
   let calloutText = ''
   if (totalProposed <= 0) {
     calloutClass = 'neutral'; healthLabel = 'No commitments'
-    calloutText = `No grants are currently committed. ${fmtShares(unallocated)} options (${fmtPct(pctOfPool(unallocated))} of the pool) are available to grant.`
+    calloutText = `No grants are committed or proposed. ${fmtShares(unallocated)} options (${fmtPct(pctOfPool(unallocated))} of the pool) are available to grant.`
   } else if (afterProposed < 0) {
     calloutClass = 'warn'; healthLabel = 'Action needed'
-    calloutText = `The ${fmtShares(totalProposed)} options committed exceed the unallocated pool by ${fmtShares(overBy)}. Approving them requires a pool top-up of at least that much.`
+    calloutText = `The ${fmtShares(totalProposed)} options committed + proposed exceed the unallocated pool by ${fmtShares(overBy)}. Approving them requires a pool top-up of at least that much.`
   } else if (afterProposed < poolAuthorizedNet * 0.05) {
     calloutClass = 'warn'; healthLabel = 'Running low'
-    calloutText = `Approving the ${fmtShares(totalProposed)} committed options leaves only ${fmtShares(afterProposed)} (${fmtPct(pctOfPool(afterProposed))} of the pool). Plan a top-up for future hires.`
+    calloutText = `Approving the ${fmtShares(totalProposed)} committed + proposed options leaves only ${fmtShares(afterProposed)} (${fmtPct(pctOfPool(afterProposed))} of the pool). Plan a top-up for future hires.`
   } else {
     healthLabel = 'Healthy'
-    calloutText = `Approving the ${fmtShares(totalProposed)} committed options (${fmtPct(pctOfFds(totalProposed))} of FDS) still leaves ${fmtShares(afterProposed)} (${fmtPct(pctOfPool(afterProposed))} of the pool) for future grants.`
+    calloutText = `Approving the ${fmtShares(totalProposed)} committed + proposed options (${fmtPct(pctOfFds(totalProposed))} of FDS) still leaves ${fmtShares(afterProposed)} (${fmtPct(pctOfPool(afterProposed))} of the pool) for future grants.`
   }
   const healthIcon = calloutClass === 'ok' ? '✓' : calloutClass === 'warn' ? '!' : '•'
 
@@ -472,7 +489,7 @@ export default defineEventHandler(async (event) => {
     <section class="kpis" data-block="kpis">
       ${kpi(fmtShares(poolAuthorizedNet), 'Total option pool', `${fmtPct(pctOfFds(poolAuthorizedNet))} of FDS (${fmtShares(postFDS)})`)}
       ${kpi(fmtShares(allocated), 'Allocated', `${fmtPct(pctOfPool(allocated))} of pool`)}
-      ${kpi(fmtShares(totalProposed), committedSorted.length ? 'Committed + proposed' : 'Proposed grants', `${fmtPct(pctOfFds(totalProposed))} of FDS · ${proposed.length} proposed grant${proposed.length === 1 ? '' : 's'}`)}
+      ${kpi(fmtShares(totalProposed), committedSorted.length ? 'Committed + proposed' : 'Proposed grants', `${fmtPct(pctOfFds(totalProposed))} of FDS · ${committedSorted.length} committed + ${proposedSorted.length} proposed`)}
       ${kpi(fmtShares(afterProposed), 'Projected available', afterProposed >= 0 ? `${fmtPct(pctOfPool(afterProposed))} of pool after proposed` : `over-allocated by ${fmtShares(overBy)}`)}
     </section>
 
@@ -486,7 +503,7 @@ export default defineEventHandler(async (event) => {
           <div class="breakdown">
             <div class="brow head"><span class="lbl">Outstanding (held)</span>${shpc(allocatedOutstanding, pctOfPool(allocatedOutstanding))}</div>
             <div class="brow head"><span class="lbl">Available</span>${shpc(unallocated, pctOfPool(unallocated))}</div>
-            <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After committed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
+            <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After committed + proposed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
             <div class="brow minor"><span class="lbl">Exercised<span class="ret"> · → common (FDS)</span></span>${shpc(allocatedExercised, pctOfFds(allocatedExercised))}</div>
             <div class="brow minor"><span class="lbl">Forfeited / Expired<span class="ret"> · returned to pool</span></span>${shpc(totalForfeitedOrExpired, pctOfPool(totalForfeitedOrExpired))}</div>
           </div>
@@ -500,15 +517,15 @@ export default defineEventHandler(async (event) => {
       <div class="col-stack col-grants">
         ${committedSorted.length ? `<div class="panel" id="p-committed">
           <h2>Committed grants</h2>
-          <p class="desc">${committedSorted.length} board-approved grant${committedSorted.length === 1 ? '' : 's'} — shares and % of post-round FDS.</p>
+          <p class="desc">${committedSorted.length} committed grant${committedSorted.length === 1 ? '' : 's'} to named grantees, grouped by batch — shares and % of post-round FDS.</p>
           ${committedHtml}
           <div class="proposed-total"><span class="tl">Total committed</span>${shpc(committedTotal, pctOfFds(committedTotal))}</div>
         </div>` : ''}
         <div class="panel" id="p-proposed">
           <h2>Proposed grants</h2>
-          <p class="desc">${proposedList.length} proposed grant${proposedList.length === 1 ? '' : 's'}, grouped by batch — the note sits under each grantee.</p>
+          <p class="desc">${proposedSorted.length} proposed pool reserve${proposedSorted.length === 1 ? '' : 's'} — shares and % of post-round FDS.</p>
           ${proposedHtml}
-          ${proposedList.length ? `<div class="proposed-total"><span class="tl">Total proposed</span>${shpc(proposedTotal, pctOfFds(proposedTotal))}</div>` : ''}
+          ${proposedSorted.length ? `<div class="proposed-total"><span class="tl">Total proposed</span>${shpc(proposedTotal, pctOfFds(proposedTotal))}</div>` : ''}
         </div>
       </div>
 
@@ -542,7 +559,7 @@ export default defineEventHandler(async (event) => {
         <div class="breakdown">
           <div class="brow head"><span class="lbl">Outstanding (held)</span>${shpc(allocatedOutstanding, pctOfPool(allocatedOutstanding))}</div>
           <div class="brow head"><span class="lbl">Available</span>${shpc(unallocated, pctOfPool(unallocated))}</div>
-          <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After committed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
+          <div class="brow sub"><span class="lbl">${afterProposed >= 0 ? 'After committed + proposed' : 'Over-allocated by'}</span>${shpc(afterProposed >= 0 ? afterProposed : overBy, pctOfPool(afterProposed >= 0 ? afterProposed : overBy))}</div>
         </div>
       </div>
       <div class="panel" id="p-rec-summary">
