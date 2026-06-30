@@ -414,7 +414,15 @@ export default defineEventHandler(async (event) => {
   /* Grant rows — ONE style shared by Committed and Proposed for consistency.
      Name, an "award · title · role" line, then the note on its own full-width
      line (free to run beneath the share count); shares + % FDS on the right. */
-  .pgroup{margin-bottom:9px}
+  /* When a grants panel is taller than one slide, the layout engine adds
+     .grants-2col to the grants column and the entry list (.pbody) flows into
+     two balanced columns. break-inside:avoid keeps a batch group or a single
+     grant row from splitting across the column gap; the panel header/desc and
+     the total stay full-width above/below. */
+  .grants-2col .pbody{column-count:2;column-gap:16px}
+  .pbody{break-inside:auto}
+  .pgroup{margin-bottom:9px;break-inside:avoid}
+  .pgrant{break-inside:avoid}
   .pgroup-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:2px 0 3px;padding-bottom:3px;border-bottom:1px solid var(--line)}
   .pgroup-name{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--brand)}
   .pgroup-sum{font-size:10px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -518,13 +526,13 @@ export default defineEventHandler(async (event) => {
         ${committedSorted.length ? `<div class="panel" id="p-committed">
           <h2>Committed grants</h2>
           <p class="desc">${committedSorted.length} committed grant${committedSorted.length === 1 ? '' : 's'} to named grantees, grouped by batch — shares and % of post-round FDS.</p>
-          ${committedHtml}
+          <div class="pbody">${committedHtml}</div>
           <div class="proposed-total"><span class="tl">Total committed</span>${shpc(committedTotal, pctOfFds(committedTotal))}</div>
         </div>` : ''}
         <div class="panel" id="p-proposed">
           <h2>Proposed grants</h2>
           <p class="desc">${proposedSorted.length} proposed pool reserve${proposedSorted.length === 1 ? '' : 's'} — shares and % of post-round FDS.</p>
-          ${proposedHtml}
+          <div class="pbody">${proposedHtml}</div>
           ${proposedSorted.length ? `<div class="proposed-total"><span class="tl">Total proposed</span>${shpc(proposedTotal, pctOfFds(proposedTotal))}</div>` : ''}
         </div>
       </div>
@@ -602,6 +610,19 @@ export default defineEventHandler(async (event) => {
       } catch (e) {}
 
       function col() { var d = document.createElement('div'); d.className = 'col-stack'; return d; }
+      // If the grants column is taller than a single 16:9 slide can hold, flow
+      // each panel's entry list into two columns (≈ halves the height). Measured
+      // after the panels are in the DOM; re-evaluated on every layout() change.
+      function fitGrants(grantsCol) {
+        if (!grantsCol) return;
+        grantsCol.classList.remove('grants-2col');
+        var slide = document.querySelector('.slide');
+        if (!slide) return;
+        var slideH = slide.clientWidth * 9 / 16;   // a PowerPoint-widescreen slide height
+        var rel = grantsCol.getBoundingClientRect().top - slide.getBoundingClientRect().top;
+        var avail = slideH - rel - 16;              // room left below the grants column's top
+        if (avail > 80 && grantsCol.scrollHeight > avail) grantsCol.classList.add('grants-2col');
+      }
       function persist() {
         try {
           localStorage.setItem(LKEY, JSON.stringify({
@@ -652,6 +673,7 @@ export default defineEventHandler(async (event) => {
           }
         }
         wireRec();
+        fitGrants(grants);
         persist();
       }
 
@@ -718,6 +740,10 @@ export default defineEventHandler(async (event) => {
 
       applyKpis();
       layout();
+      // Re-measure once more after fonts settle, and on resize, so the two-column
+      // grants decision tracks the real rendered height.
+      if (window.requestAnimationFrame) requestAnimationFrame(layout);
+      window.addEventListener('resize', layout);
     })();
   </script>
 </body>
