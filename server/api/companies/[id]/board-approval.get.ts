@@ -101,6 +101,7 @@ export default defineEventHandler(async (event) => {
   // reference rows, not grant data.
   const shareClasses = db().prepare(`SELECT * FROM share_classes WHERE company_id = ?`).all(id) as any[]
   const holdings = db().prepare(`SELECT * FROM holdings WHERE company_id = ?`).all(id) as any[]
+  const stakeholders = db().prepare(`SELECT id, name FROM stakeholders WHERE company_id = ?`).all(id) as any[]
   const pools = grantsResp.pools || []
   const vestingSchedules = db().prepare(`SELECT id, name, vest_months, cliff_months FROM vesting_schedules WHERE company_id = ?`).all(id) as any[]
   const scheduleById = new Map<string, any>()
@@ -196,23 +197,40 @@ export default defineEventHandler(async (event) => {
   const shareClassKind = new Map<string, string>()
   for (const sc of shareClasses) shareClassKind.set(sc.id, (sc.kind || '').toLowerCase())
 
-  const positionByStakeholder = new Map<string, { common: number; preferred: number; warrants: number }>()
+  // Existing positions are joined to new grantees by stakeholder_id, but a
+  // proposed grant only carries a stakeholder_id when its recipient name EXACTLY
+  // matched a stakeholder row at creation — otherwise it's null and the grantee's
+  // existing common/preferred/options were silently dropped (the reported bug).
+  // So we ALSO key every lookup by a normalized name and fall back to it.
+  const norm = (s: string | null | undefined) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ')
+  const stakeholderNameById = new Map<string, string>()
+  for (const s of stakeholders) stakeholderNameById.set(s.id, s.name)
+
+  type Pos = { common: number; preferred: number; warrants: number }
+  const addPos = (m: Map<string, Pos>, key: string, kind: string, shares: number) => {
+    const row = m.get(key) || { common: 0, preferred: 0, warrants: 0 }
+    if (kind === 'common') row.common += shares
+    else if (kind === 'warrant') row.warrants += shares
+    else row.preferred += shares
+    m.set(key, row)
+  }
+  const positionByStakeholder = new Map<string, Pos>()
+  const positionByName = new Map<string, Pos>()
   for (const h of holdings) {
     const kind = shareClassKind.get(h.share_class_id) || ''
-    const row = positionByStakeholder.get(h.stakeholder_id) || { common: 0, preferred: 0, warrants: 0 }
-    if (kind === 'common') row.common += h.shares
-    else if (kind === 'warrant') row.warrants += h.shares
-    else row.preferred += h.shares
-    positionByStakeholder.set(h.stakeholder_id, row)
+    if (h.stakeholder_id) addPos(positionByStakeholder, h.stakeholder_id, kind, h.shares)
+    const nm = norm(stakeholderNameById.get(h.stakeholder_id))
+    if (nm) addPos(positionByName, nm, kind, h.shares)
   }
   const outstandingOptionsByStakeholder = new Map<string, number>()
+  const outstandingOptionsByName = new Map<string, number>()
   for (const g of allGrants) {
-    if (g.status === 'outstanding' && g.stakeholder_id) {
-      outstandingOptionsByStakeholder.set(
-        g.stakeholder_id,
-        (outstandingOptionsByStakeholder.get(g.stakeholder_id) || 0) + g.quantity,
-      )
+    if (g.status !== 'outstanding') continue
+    if (g.stakeholder_id) {
+      outstandingOptionsByStakeholder.set(g.stakeholder_id, (outstandingOptionsByStakeholder.get(g.stakeholder_id) || 0) + g.quantity)
     }
+    const nm = norm(g.recipient_name || g.linked_stakeholder)
+    if (nm) outstandingOptionsByName.set(nm, (outstandingOptionsByName.get(nm) || 0) + g.quantity)
   }
 
   // ---- Build workbook ----
@@ -453,9 +471,13 @@ export default defineEventHandler(async (event) => {
   r++
 
   // Build rows first so we can sort by Total Securities descending.
+  // Resolve existing equity by stakeholder_id, falling back to a normalized
+  // name match when the proposed grant isn't linked (or links to a different
+  // stakeholder row than the one that holds the equity).
   const sec2Rows = proposedGrants.map(g => {
-    const existing = g.stakeholder_id ? positionByStakeholder.get(g.stakeholder_id) : null
-    const existingOptions = (g.stakeholder_id ? outstandingOptionsByStakeholder.get(g.stakeholder_id) : 0) || 0
+    const nm = norm(g.recipient_name)
+    const existing = (g.stakeholder_id && positionByStakeholder.get(g.stakeholder_id)) || positionByName.get(nm) || null
+    const existingOptions = (g.stakeholder_id && outstandingOptionsByStakeholder.get(g.stakeholder_id)) || outstandingOptionsByName.get(nm) || 0
     const common = existing?.common || 0
     const preferred = existing?.preferred || 0
     const total = g.quantity + existingOptions + common + preferred
